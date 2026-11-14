@@ -1,8 +1,12 @@
-"""冒烟测试：验证向量库可用、检索能命中对应水果段落，可选验证完整问答。
+"""冒烟测试：知识库、混合检索与引用，可选验证完整问答与拒答。
 
 默认只测检索层（快）；加 --e2e 会加载重排模型并调用 LLM（慢）。
 运行前需先执行：python scripts/ingest.py
+
+注意：函数名刻意不以 test_ 开头，避免被 pytest 误收集（本文件需要本地模型与已有知识库）。
 """
+
+from __future__ import annotations
 
 import sys
 from pathlib import Path
@@ -12,16 +16,12 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from langchain_ollama import OllamaEmbeddings
-from langchain_qdrant import QdrantVectorStore
-from qdrant_client import QdrantClient
 
 import chat_cli
-from config.settings import (
-    COLLECTION_NAME,
-    EMB_MODEL,
-    STORAGE_DIR,
-    TOP_K_RECALL,
-)
+from private_rag.config import COLLECTION_NAME, EMB_MODEL, LEXICAL_INDEX_PATH, STORAGE_DIR
+from private_rag.retrieval.hybrid import HybridRetriever
+from private_rag.retrieval.lexical import LexicalIndex
+from private_rag.store import close_client, count_points, open_client
 
 # 库内问题 -> 期望命中的关键词
 RETRIEVAL_CASES = [
@@ -32,64 +32,72 @@ RETRIEVAL_CASES = [
 
 
 def check_store() -> None:
-    """集合存在且有数据，否则给出可操作的提示。"""
-    client = QdrantClient(path=str(STORAGE_DIR))
+    """集合存在且有数据，BM25 索引也已生成。"""
+    client = open_client(STORAGE_DIR)
     try:
         assert client.collection_exists(COLLECTION_NAME), (
             f"集合 {COLLECTION_NAME} 不存在，请先运行：python scripts/ingest.py"
         )
-        count = client.count(COLLECTION_NAME).count
+        count = count_points(client)
         assert count > 0, "向量库为空，请先运行：python scripts/ingest.py"
         print(f"✅ 向量库可用，共 {count} 个向量")
     finally:
-        client.close()
+        close_client(client)
+
+    lexical = LexicalIndex.load(LEXICAL_INDEX_PATH)
+    assert lexical is not None, "BM25 索引不存在，请重新运行：python scripts/ingest.py"
+    assert len(lexical) > 0
+    print(f"✅ BM25 索引可用，共 {len(lexical)} 条")
 
 
-def open_retriever():
-    store = QdrantVectorStore.from_existing_collection(
-        embedding=OllamaEmbeddings(model=EMB_MODEL),
-        path=str(STORAGE_DIR),
-        collection_name=COLLECTION_NAME,
+def _build_retriever(client) -> HybridRetriever:
+    return HybridRetriever(
+        client,
+        OllamaEmbeddings(model=EMB_MODEL),
+        LexicalIndex.load(LEXICAL_INDEX_PATH),
     )
-    return store, store.as_retriever(search_kwargs={"k": TOP_K_RECALL})
 
 
-def test_retrieval() -> None:
-    store, retriever = open_retriever()
+def check_retrieval() -> None:
+    client = open_client(STORAGE_DIR)
     try:
+        retriever = _build_retriever(client)
         for question, keyword in RETRIEVAL_CASES:
-            docs = retriever.invoke(question)
-            assert docs, f"问题没有召回任何片段：{question}"
-            assert any(keyword in doc.page_content for doc in docs[:3]), (
+            chunks = retriever.retrieve(question)
+            assert chunks, f"问题没有召回任何片段：{question}"
+            assert any(keyword in chunk.text for chunk in chunks[:3]), (
                 f"问题「{question}」的 top3 片段中没有「{keyword}」"
             )
-            print(f"✅ 检索命中：{question} -> {keyword}")
+            print(f"✅ 混合检索命中：{question} -> {keyword}")
     finally:
-        store.client.close()
+        close_client(client)
 
 
-def test_e2e() -> None:
-    store, retriever = open_retriever()
+def check_e2e() -> None:
+    client = open_client(STORAGE_DIR)
     try:
-        reranker = chat_cli.build_reranker()
+        retriever = _build_retriever(client)
+        reranker = chat_cli.load_reranker()
 
-        answer, _ = chat_cli.answer("香蕉要放冰箱吗？", retriever, reranker)
+        answer, citations = chat_cli.answer_question("香蕉要放冰箱吗？", retriever, reranker)
         assert ("不适合" in answer) or ("不能" in answer), f"库内问题回答异常：{answer}"
-        print("✅ 端到端：库内问题回答正确")
+        assert citations, "库内问题没有生成引用"
+        assert all(citation.source_uri for citation in citations), "引用缺少来源 URI"
+        print("✅ 端到端：库内问题回答正确，引用完整")
 
-        answer, _ = chat_cli.answer("苹果手机多少钱？", retriever, reranker)
+        answer, _ = chat_cli.answer_question("苹果手机多少钱？", retriever, reranker)
         assert "没有相关信息" in answer, f"库外问题没有正确拒答：{answer}"
         print("✅ 端到端：库外问题正确拒答")
     finally:
-        store.client.close()
+        close_client(client)
 
 
 def main() -> int:
     try:
         check_store()
-        test_retrieval()
+        check_retrieval()
         if "--e2e" in sys.argv[1:]:
-            test_e2e()
+            check_e2e()
     except AssertionError as exc:
         print(f"❌ {exc}")
         return 1
