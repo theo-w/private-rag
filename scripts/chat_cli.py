@@ -13,23 +13,12 @@ from typing import Optional, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from langchain_ollama import OllamaEmbeddings
-
-from private_rag.config import (
-    COLLECTION_NAME,
-    EMB_MODEL,
-    LEXICAL_INDEX_PATH,
-    TOP_K_RERANK,
-)
-from private_rag.generation import generate_answer
+from private_rag.config import TOP_K_RERANK
 from private_rag.models import Citation
-from private_rag.retrieval.hybrid import HybridRetriever
-from private_rag.retrieval.lexical import LexicalIndex
-from private_rag.retrieval.rerank import Reranker, load_reranker
-from private_rag.store import close_client, open_client
+from private_rag.qa import RagEngine, RetrievalOptions, build_engine
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="本地知识库问答（混合检索 + 引用溯源）")
     parser.add_argument("question", nargs="*", help="问题；省略则进入交互模式")
     parser.add_argument("--source-type", choices=["file", "web", "sql"], help="只检索某一类来源")
@@ -40,39 +29,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def build_retriever(client, args: argparse.Namespace) -> tuple[HybridRetriever, Optional[Reranker]]:
-    if not client.collection_exists(COLLECTION_NAME):
-        raise SystemExit("❌ 知识库为空，请先运行：python scripts/ingest.py")
-
-    lexical = None
-    if not args.dense_only:
-        lexical = LexicalIndex.load(LEXICAL_INDEX_PATH)
-        if lexical is None:
-            print("⚠️ 未找到 BM25 索引，已降级为纯向量检索；运行 ingest 可重建")
-
-    retriever = HybridRetriever(
-        client,
-        OllamaEmbeddings(model=EMB_MODEL),
-        lexical,
+def build_options(args: argparse.Namespace) -> RetrievalOptions:
+    return RetrievalOptions(
         source_type=args.source_type,
         tags=args.tag,
+        top_k=args.top_k,
+        use_lexical=not args.dense_only,
+        use_rerank=not args.no_rerank,
     )
-    reranker = None if args.no_rerank else load_reranker()
-    return retriever, reranker
-
-
-def answer_question(
-    question: str,
-    retriever: HybridRetriever,
-    reranker: Optional[Reranker],
-    top_k: int = TOP_K_RERANK,
-) -> tuple[str, list[Citation]]:
-    chunks = retriever.retrieve(question)
-    if reranker is not None:
-        chunks = reranker.rerank(question, chunks, top_k=top_k)
-    else:
-        chunks = chunks[:top_k]
-    return generate_answer(question, chunks)
 
 
 def print_result(answer: str, citations: Sequence[Citation]) -> None:
@@ -92,25 +56,47 @@ def print_result(answer: str, citations: Sequence[Citation]) -> None:
         print(f"    {citation.snippet}")
 
 
-def main(argv: list[str] | None = None) -> int:
+def _check_ready(engine: RagEngine) -> bool:
+    readiness = engine.readiness()
+    if not readiness.ready:
+        print("❌ 知识库未就绪：" + "；".join(readiness.reasons))
+        print("   请先运行：python scripts/ingest.py")
+        return False
+    for warning in readiness.warnings:
+        print(f"⚠️ {warning}")
+    return True
+
+
+def _print_filters(args: argparse.Namespace) -> str:
+    filters = []
+    if args.source_type:
+        filters.append(f"source_type={args.source_type}")
+    if args.tag:
+        filters.append(f"tags={','.join(args.tag)}")
+    return f"（过滤：{'；'.join(filters)}）" if filters else ""
+
+
+def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
-    client = open_client()
+    options = build_options(args)
+
     try:
-        retriever, reranker = build_retriever(client, args)
+        engine = build_engine(use_rerank=options.use_rerank)
+    except Exception as exc:
+        print(f"❌ 初始化问答引擎失败：{exc}")
+        return 1
+
+    try:
+        if not _check_ready(engine):
+            return 1
 
         question = " ".join(args.question).strip()
         if question:
-            answer, citations = answer_question(question, retriever, reranker, args.top_k)
-            print_result(answer, citations)
+            result = engine.answer(question, options=options)
+            print_result(result.answer, result.citations)
             return 0
 
-        filters = []
-        if args.source_type:
-            filters.append(f"source_type={args.source_type}")
-        if args.tag:
-            filters.append(f"tags={','.join(args.tag)}")
-        suffix = f"（过滤：{'；'.join(filters)}）" if filters else ""
-        print(f"\n🤖 RAG 就绪{suffix}，输入 exit 退出")
+        print(f"\n🤖 RAG 就绪{_print_filters(args)}，输入 exit 退出")
         while True:
             try:
                 user_q = input("\n❓ 提问：").strip()
@@ -122,11 +108,11 @@ def main(argv: list[str] | None = None) -> int:
             if user_q.lower() == "exit":
                 print("👋 退出")
                 break
-            answer, citations = answer_question(user_q, retriever, reranker, args.top_k)
-            print_result(answer, citations)
+            result = engine.answer(user_q, options=options)
+            print_result(result.answer, result.citations)
         return 0
     finally:
-        close_client(client)
+        engine.close()
 
 
 if __name__ == "__main__":
