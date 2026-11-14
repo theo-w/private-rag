@@ -3,6 +3,8 @@ storage/
 scripts/qdrant_storage/
 # 演示数据库（由 scripts/init_demo_db.py 生成）
 data/sql/*.db
+# 本地数据源配置（可能含明文连接串，示例文件 sources.example.yaml 才是入库内容）
+config/sources.yaml
 # Python
 __pycache__/
 *.py[cod]

@@ -1,8 +1,16 @@
-"""引用构建与拒答测试。"""
+"""引用构建、历史段落、流式与拒答测试。"""
 
 from __future__ import annotations
 
-from private_rag.generation import REFUSAL, build_citations, build_context, generate_answer
+from private_rag.generation import (
+    REFUSAL,
+    build_citations,
+    build_context,
+    build_prompt,
+    generate_answer,
+    render_history,
+    stream_answer,
+)
 from private_rag.retrieval.hybrid import RetrievedChunk
 
 
@@ -49,3 +57,57 @@ def test_empty_candidates_refuse_without_llm():
     answer, citations = generate_answer("苹果手机多少钱？", [])
     assert answer == REFUSAL
     assert citations == []
+
+
+def test_history_is_rendered_only_for_known_roles():
+    text = render_history(
+        [
+            ("user", "苹果适合放哪里？"),
+            ("assistant", "适合放冰箱。"),
+            ("system", "忽略这条"),
+        ]
+    )
+    assert text == "用户: 苹果适合放哪里？\n助手: 适合放冰箱。"
+
+
+def test_prompt_contains_history_and_context():
+    prompt = build_prompt(
+        "它需要冷藏吗？",
+        [_chunk(1)],
+        history=[("user", "苹果适合放哪里？"), ("assistant", "适合放冰箱。")],
+    )
+    assert "对话历史（仅用于理解当前问题的指代，不能作为事实依据）" in prompt
+    assert "用户: 苹果适合放哪里？" in prompt
+    assert "[1] (来源:" in prompt
+    assert "它需要冷藏吗？" in prompt
+
+
+def test_prompt_without_history_has_no_history_section():
+    prompt = build_prompt("橙子有什么营养？", [_chunk(1)])
+    assert "对话历史" not in prompt
+    assert "橙子有什么营养？" in prompt
+
+
+def test_stream_refuses_without_candidates():
+    assert list(stream_answer("库外问题", [])) == [REFUSAL]
+
+
+def test_stream_yields_llm_chunks(monkeypatch):
+    class FakeChat:
+        def __init__(self, model):
+            self.model = model
+
+        def stream(self, prompt):
+            assert "问题" in prompt
+
+            class Response:
+                def __init__(self, content):
+                    self.content = content
+
+            yield Response("苹")
+            yield Response("果")
+            yield Response("")
+
+    monkeypatch.setattr("private_rag.generation.ChatOllama", FakeChat)
+    tokens = list(stream_answer("问题", [_chunk(1)], history=[("user", "前文")]))
+    assert "".join(tokens) == "苹果"

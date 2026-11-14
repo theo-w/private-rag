@@ -6,13 +6,13 @@
 |---|---|---|---|---|
 | v1 | `main`（历史脚本在 `legacy/`） | FAISS 基础 RAG：单文件、向量召回、LLM 问答 | ✅ 已完成，仅作演进参考 | 能对一个 txt 文件完成切分、检索、问答 |
 | v2 | `v2-qdrant-rerank-citation` | Qdrant 持久化、bge-reranker、混合检索（BM25 + 向量 + RRF）、标签/来源过滤、多源接入（文件/网页/SQL）、页码与引用溯源、增量与 prune | ✅ 本分支完成 | 三源可入库；重复入库跳过；更新只替换对应 doc_id；引用含类型/标题/URL 或页码；过滤生效；pytest 通过 |
-| v3 | `v3-fastapi-session` | FastAPI 服务化、多轮会话（session + 历史裁剪）、流式输出、统一错误处理 | ⏳ 下一阶段 | API 可并发处理多会话；历史不串号；有接口级测试与启动说明 |
-| v4 | `v4-ragas-eval` | Ragas 自动评估：30–50 条标注问答、faithfulness / answer relevancy / context precision / recall、调参对比报告 | 计划中 | 固化评估集与脚本；给出 v2→v4 的量化对比（至少 2 组参数/策略） |
+| v3 | `v3-fastapi-session` | FastAPI 服务化、多轮会话（session + 历史裁剪）、流式输出、统一错误处理 | ✅ 本分支完成 | API 可并发处理多会话；历史不串号；有接口级测试与启动说明 |
+| v4 | `v4-ragas-eval` | Ragas 自动评估：30–50 条标注问答、faithfulness / answer relevancy / context precision / recall、调参对比报告 | ⏳ 下一阶段 | 固化评估集与脚本；给出 v2→v4 的量化对比（至少 2 组参数/策略） |
 | v5 | `v5-parent-rag-query-rewrite` | Parent-Document RAG（子块召回、父块送上下文）、查询改写（多查询 / HyDE）、去重与上下文预算 | 计划中 | 复杂/口语化问题命中率提升；有前后对比与失败案例分析 |
 | v6 | `v6-ocr-parser` | 扫描件 OCR、表格解析、版面处理，接入现有连接器与元数据 | 计划中 | 扫描 PDF 与表格可检索；页码/表格名进入引用 |
 | v7 | `v7-agentic-rag` | Agentic RAG：意图路由、SQL/工具调用、检索-行动循环、可观测 trace | 计划中 | 业务问题能自动选择知识库或工具；trace 可回放每条决策 |
 
-## v2 详细验收（当前）
+## v2 详细验收（已完成）
 
 - [x] `sources.yaml` 支持 file / web / sql，`${ENV_VAR}` 插值，凭证不落库
 - [x] 文件按内容 hash 幂等，PDF 按页生成稳定 `doc_id`
@@ -24,6 +24,18 @@
 - [x] `--source-type` / `--tag` 过滤；BM25 索引缺失自动降级
 - [x] 回答带 `[n]` 编号引用，CLI 输出来源类型、标题、URI、页码/表名
 - [x] pytest 单测（不依赖 Ollama）+ 冒烟脚本（可选 e2e）
+
+## v3 详细验收（本分支）
+
+- [x] `RagEngine` 收敛检索/精排/生成，CLI 与 API 共用同一条链路
+- [x] FastAPI 应用工厂、lifespan 延迟加载、请求 ID 与统一错误结构
+- [x] 内存多会话：TTL、容量上限、消息上限、逐会话锁、历史按轮次/字符预算裁剪
+- [x] 同步 `/api/v1/chat` 与 SSE `/api/v1/chat/stream`；`session → citations → token → done/error`
+- [x] 只有完整生成成功才写入会话；客户端断开不留下半截历史
+- [x] `/health` 与 `/ready`；BM25/reranker 缺失时降级并给出 warning
+- [x] 未知会话 404、参数校验 422、知识库未就绪/容量 503、内部异常 500，均带 `request_id`
+- [x] API 级测试：同步/流式/错误/多会话隔离/并发；不依赖 Ollama 与真实 Qdrant
+- [x] README 启动与 curl 说明，明确单 worker、内存会话与本地无鉴权的边界
 
 ## 分支与提交约定
 

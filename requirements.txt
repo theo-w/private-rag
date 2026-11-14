@@ -21,6 +21,10 @@ PyYAML==6.0.3
 pydantic==2.13.5
 requests==2.32.5
 
+# v3 HTTP 服务（单 worker）
+fastapi==0.128.8
+uvicorn[standard]==0.39.0
+
 # 可选数据库驱动（按需安装，不默认引入）：
 # pymysql==1.1.2
 # psycopg2-binary==2.9.11

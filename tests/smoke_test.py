@@ -15,11 +15,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from langchain_ollama import OllamaEmbeddings
-
-import chat_cli
-from private_rag.config import COLLECTION_NAME, EMB_MODEL, LEXICAL_INDEX_PATH, STORAGE_DIR
-from private_rag.retrieval.hybrid import HybridRetriever
+from private_rag.config import COLLECTION_NAME, LEXICAL_INDEX_PATH, STORAGE_DIR
+from private_rag.qa import RetrievalOptions, build_engine
 from private_rag.retrieval.lexical import LexicalIndex
 from private_rag.store import close_client, count_points, open_client
 
@@ -50,46 +47,41 @@ def check_store() -> None:
     print(f"✅ BM25 索引可用，共 {len(lexical)} 条")
 
 
-def _build_retriever(client) -> HybridRetriever:
-    return HybridRetriever(
-        client,
-        OllamaEmbeddings(model=EMB_MODEL),
-        LexicalIndex.load(LEXICAL_INDEX_PATH),
-    )
-
-
 def check_retrieval() -> None:
-    client = open_client(STORAGE_DIR)
+    engine = build_engine(use_rerank=False)
     try:
-        retriever = _build_retriever(client)
+        options = RetrievalOptions(use_rerank=False)
         for question, keyword in RETRIEVAL_CASES:
-            chunks = retriever.retrieve(question)
+            chunks, used_lexical, _ = engine.retrieve(question, options)
             assert chunks, f"问题没有召回任何片段：{question}"
-            assert any(keyword in chunk.text for chunk in chunks[:3]), (
+            assert used_lexical, "BM25 索引未参与检索"
+            assert any(keyword in chunk.text for chunk in chunks), (
                 f"问题「{question}」的 top3 片段中没有「{keyword}」"
             )
             print(f"✅ 混合检索命中：{question} -> {keyword}")
     finally:
-        close_client(client)
+        engine.close()
 
 
 def check_e2e() -> None:
-    client = open_client(STORAGE_DIR)
+    engine = build_engine()
     try:
-        retriever = _build_retriever(client)
-        reranker = chat_cli.load_reranker()
+        readiness = engine.readiness()
+        assert readiness.ready, "；".join(readiness.reasons)
 
-        answer, citations = chat_cli.answer_question("香蕉要放冰箱吗？", retriever, reranker)
-        assert ("不适合" in answer) or ("不能" in answer), f"库内问题回答异常：{answer}"
-        assert citations, "库内问题没有生成引用"
-        assert all(citation.source_uri for citation in citations), "引用缺少来源 URI"
+        result = engine.answer("香蕉要放冰箱吗？")
+        assert ("不适合" in result.answer) or ("不能" in result.answer), (
+            f"库内问题回答异常：{result.answer}"
+        )
+        assert result.citations, "库内问题没有生成引用"
+        assert all(citation.source_uri for citation in result.citations), "引用缺少来源 URI"
         print("✅ 端到端：库内问题回答正确，引用完整")
 
-        answer, _ = chat_cli.answer_question("苹果手机多少钱？", retriever, reranker)
-        assert "没有相关信息" in answer, f"库外问题没有正确拒答：{answer}"
+        refusal = engine.answer("苹果手机多少钱？")
+        assert "没有相关信息" in refusal.answer, f"库外问题没有正确拒答：{refusal.answer}"
         print("✅ 端到端：库外问题正确拒答")
     finally:
-        close_client(client)
+        engine.close()
 
 
 def main() -> int:

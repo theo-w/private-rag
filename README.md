@@ -9,11 +9,14 @@ data/docs (txt/md/pdf) ─┐
 网页 URL ───────────────┼─→ connectors → SourceDocument → 切分 ─→ Qdrant（向量）
 SQL 数据库 ─────────────┘                                      └─→ storage/lexical/bm25.pkl
 
-问题 ─→ dense top20 ─┐
-       BM25 top20 ───┴─→ RRF 融合 top10 ─→ bge-reranker top3 ─→ Ollama 生成 [n] 引用
+问题 ─→ RagEngine ─→ dense top20 ─┐
+                     BM25 top20 ───┴─→ RRF 融合 top10 ─→ bge-reranker top3 ─→ Ollama 生成 [n] 引用
+                                   ↑
+                     CLI（chat_cli.py）/ HTTP API（serve.py，同步 + SSE 流式）
 ```
 
-- 入库与问答彻底分离：`ingest.py` 是唯一写入入口，`chat_cli.py` 只读。
+- 入库与问答彻底分离：`ingest.py` 是唯一写入入口，`chat_cli.py` 与 `serve.py` 只读。
+- CLI 与 HTTP API 共用 `private_rag/qa.py` 的 `RagEngine`，检索、精排、生成与引用链路完全一致。
 - 每个 chunk 都带 `doc_id / source_type / source_uri / title / page / table / tags / content_hash`，可直接生成引用。
 - 阶段路线与验收标准见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
@@ -74,6 +77,128 @@ python scripts/chat_cli.py "苹果适合冷藏吗？" --no-rerank         # 跳�
 ```bash
 python scripts/chat_cli.py --source-type sql
 ```
+
+## HTTP API（v3）
+
+启动服务（另开终端）：
+
+```bash
+python scripts/serve.py                  # 默认 127.0.0.1:8000
+python scripts/serve.py --port 8766 --no-rerank
+python scripts/serve.py --reload         # 开发模式，代码变更自动重启
+```
+
+- Swagger 文档：<http://127.0.0.1:8000/docs>
+- `GET /health`：存活检查；`GET /ready`：检查 Qdrant 集合、BM25 与 reranker，未就绪返回 503。
+- 默认只监听本机、无鉴权，请勿直接暴露公网。
+- `--no-rerank` 等价于 `RAG_DISABLE_RERANK=1`；readiness 会显示“重排模型未加载”，问答仍按融合结果降级运行。
+
+### 端点
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/health` | 存活检查，200 |
+| GET | `/ready` | 知识库/BM25/reranker 就绪状态，不就绪返回 503 |
+| POST | `/api/v1/sessions` | 创建会话，201；可选 `{"title": "..."}` |
+| GET | `/api/v1/sessions/{id}` | 会话详情与历史消息 |
+| DELETE | `/api/v1/sessions/{id}` | 删除会话，204 |
+| POST | `/api/v1/chat` | 同步问答，JSON |
+| POST | `/api/v1/chat/stream` | SSE 流式问答 |
+
+### 多轮会话与 curl 示例
+
+```bash
+# 创建会话（也可以省略 session_id，由 /chat 自动创建）
+SID=$(curl -s -X POST http://127.0.0.1:8000/api/v1/sessions \
+  -H 'Content-Type: application/json' -d '{"title":"演示"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_id"])')
+
+# 第一轮：橙子的营养
+curl -s -X POST http://127.0.0.1:8000/api/v1/chat \
+  -H 'Content-Type: application/json' \
+  -d "{\"session_id\":\"$SID\",\"question\":\"橙子有什么营养？\"}"
+
+# 第二轮：带上第一轮历史，理解“它”指橙子
+curl -s -X POST http://127.0.0.1:8000/api/v1/chat \
+  -H 'Content-Type: application/json' \
+  -d "{\"session_id\":\"$SID\",\"question\":\"它适合冷藏吗？\"}"
+
+# 查看历史 / 删除会话
+curl -s http://127.0.0.1:8000/api/v1/sessions/$SID
+curl -s -o /dev/null -w '%{http_code}\n' -X DELETE http://127.0.0.1:8000/api/v1/sessions/$SID
+```
+
+请求体字段：
+
+- `question`：1–2000 字符，必填。
+- `session_id`：可选；省略时自动创建新会话，响应回传 `session_id`；未知/过期 ID 返回 404。
+- `top_k`：1–10，默认 3，表示最终送入 LLM 的片段数。
+- `source_type`：`file` / `web` / `sql`；`tags`：最多 10 个，命中任意一个即可。
+- `use_lexical` / `use_rerank`：是否启用 BM25 与 reranker，默认均为 `true`。
+
+同步响应包含 `session_id / answer / citations / meta / request_id`；`meta` 中有 `retrieved / used_lexical / used_rerank / history_turns / elapsed_ms`。
+
+### SSE 流式输出
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/api/v1/chat/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"香蕉要放冰箱吗？"}'
+```
+
+事件顺序为 `session → citations → token... → done`，异常时为 `error`：
+
+```
+event: session    data: {"session_id":"sess_...","request_id":"..."}
+event: citations  data: {"citations":[...],"retrieved":3}
+event: token      data: {"text":"香蕉"}
+event: done       data: {"session_id":"...","answer":"...","citations":[...],"meta":{...},"request_id":"..."}
+event: error      data: {"code":"generation_failed","message":"...","request_id":"..."}
+```
+
+- 流式响应头带 `Cache-Control: no-cache` 与 `X-Accel-Buffering: no`，便于经过反向代理时不被缓冲。
+- 只有完整生成成功后才会把本轮问答写入会话；客户端中途断开不会留下半截历史。
+- 响应头一旦发出，后续错误只能以 SSE `error` 事件返回，HTTP 状态码无法再修改；参数校验、未知会话、知识库未就绪等“发头前”错误仍是普通 JSON。
+
+### 统一错误格式
+
+```json
+{
+  "error": {
+    "code": "session_not_found",
+    "message": "会话不存在或已过期",
+    "details": null,
+    "request_id": "..."
+  }
+}
+```
+
+- `422 invalid_request`：参数校验失败，`details` 给出字段位置与原因，不回显问题正文。
+- `404 session_not_found` / `404 not_found`：会话或路由不存在。
+- `503 knowledge_base_not_ready` / `503 session_capacity_reached`：知识库未就绪或会话容量耗尽。
+- `500 internal_error`：服务内部异常，堆栈只写日志，不回传客户端。
+- 所有响应都带 `X-Request-ID`；客户端可传入合法 ID（字母、数字、`.`、`_`、`:`、`-`，≤128 字符），否则自动生成。
+
+### 会话与并发模型
+
+- 会话保存在进程内存：默认 TTL 30 分钟、最多 500 个会话、每个会话最多 60 条消息；服务重启即清空。
+- 送入 LLM 的历史默认只取最近 6 轮，并按 3000 字符预算从新到旧裁剪，避免 prompt 无限增长。
+- 同一会话的并发请求用会话锁串行，不同会话可并行；Qdrant 本地 client 与 reranker 由引擎锁保护，生成阶段不锁。
+- 路由使用同步函数，由 FastAPI 放入线程池执行；SSE 使用同步生成器，不阻塞事件循环。
+- Qdrant 本地磁盘模式同一路径只允许一个进程，因此 `serve.py` 固定单 worker。需要多 worker/横向扩展时，请切换 Qdrant server 模式，并把内存会话替换为 Redis/SQLite 等外部存储，同时补充鉴权与限流。
+
+会话与服务参数可用环境变量覆盖：
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `RAG_SESSION_TTL_SECONDS` | 1800 | 会话空闲过期时间 |
+| `RAG_MAX_SESSIONS` | 500 | 进程内最大会话数 |
+| `RAG_MAX_SESSION_MESSAGES` | 60 | 每个会话保留的消息条数（问答成对） |
+| `RAG_MAX_STORED_MESSAGE_CHARS` | 4000 | 单条消息落库截断长度 |
+| `RAG_MAX_HISTORY_TURNS` | 6 | 送入 prompt 的最大历史轮次 |
+| `RAG_MAX_HISTORY_CHARS` | 3000 | 历史总字符预算 |
+| `RAG_MAX_HISTORY_MESSAGE_CHARS` | 800 | 历史中单条消息截断长度 |
+| `RAG_DISABLE_RERANK` | 未设置 | 设为 `1/true/yes/on` 时跳过 reranker |
 
 ## 多源配置
 
@@ -159,7 +284,7 @@ python scripts/ingest.py --recreate                               # 清空集合
 python -m pytest tests -q
 ```
 
-覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、入库幂等/更新/prune、引用构建与拒答。
+覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。
 
 冒烟测试需要已入库并启动 Ollama：
 
@@ -185,11 +310,19 @@ private_rag/
 │   ├── lexical.py        jieba + rank_bm25，落盘/加载/过滤
 │   ├── hybrid.py         dense + BM25 + RRF
 │   └── rerank.py         bge-reranker 精排
-└── generation.py         编号上下文、[n] 引用 prompt 与回答
+├── api/
+│   ├── app.py            FastAPI 工厂、lifespan、请求 ID 中间件
+│   ├── routes.py         health/ready/sessions/chat/stream 路由
+│   ├── schemas.py        Pydantic 请求/响应模型
+│   └── errors.py         统一错误响应与异常处理器
+├── qa.py                 共享问答引擎（CLI/API 同一条链路）
+├── sessions.py           内存多轮会话、TTL/容量/历史裁剪
+└── generation.py         编号上下文、历史、[n] 引用与流式生成
 config/settings.py        兼容入口（re-export private_rag.config）
 config/sources.example.yaml / sources.demo.yaml
 scripts/ingest.py         多源入库 CLI
 scripts/chat_cli.py       混合检索问答 CLI
+scripts/serve.py          HTTP 服务入口（单 worker）
 scripts/init_demo_db.py   生成演示 SQLite 库
 tests/                    pytest 单测 + smoke_test.py
 docs/ROADMAP.md           v1–v7 路线与验收标准
@@ -204,6 +337,7 @@ legacy/                   v1 FAISS 单脚本版，仅作演进参考
 - **为什么 rerank**：召回阶段追求覆盖（top20），cross-encoder 再按问题-片段相关性精排，减少无关上下文对生成的影响。
 - **为什么引用到页码/行**：文件按页、SQL 按行、网页按 URL 生成稳定 `doc_id`，既能增量更新，也能让引用可回溯。
 - **为什么凭证不落元数据**：SQL `source_uri` 只使用 `label#pk`，DSN 只保留驱动/主机/库名；配置支持环境变量插值。
+- **为什么 API 单 worker + 同步路由**：Qdrant 本地磁盘模式只允许一个进程；同步路由由 FastAPI 放入线程池，避免 CPU 密集的检索/精排/生成阻塞事件循环。扩展到多 worker 需要 Qdrant server 模式与外部会话存储。
 - **可对比的实验开关**：`--dense-only`、`--no-rerank`、`--source-type`、`--tag` 可用于记录“改造前/后”的检索与回答差异；v4 会用 Ragas 把差异量化。
 
 ## v1 与当前版本的关系
