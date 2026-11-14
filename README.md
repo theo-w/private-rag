@@ -19,6 +19,7 @@ SQL 数据库 ─────────────┘                        
 - CLI 与 HTTP API 共用 `private_rag/qa.py` 的 `RagEngine`，检索、精排、生成与引用链路完全一致。
 - 每个 chunk 都带 `doc_id / source_type / source_uri / title / page / table / tags / content_hash`，可直接生成引用。
 - 阶段路线与验收标准见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+- 想先从零理解“建库 → 检索 → 生成”的完整流程，可读 [docs/beginner-guide.md](docs/beginner-guide.md)（小白版流程导读 + 示意代码）。
 
 ## 环境要求
 
