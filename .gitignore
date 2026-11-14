@@ -1,6 +1,8 @@
 # 本地向量库（可随时由 ingest.py 重建）
 storage/
 scripts/qdrant_storage/
+# 演示数据库（由 scripts/init_demo_db.py 生成）
+data/sql/*.db
 # Python
 __pycache__/
 *.py[cod]

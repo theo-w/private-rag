@@ -1,0 +1,16 @@
+# 开箱即用的演示配置：先运行 python scripts/init_demo_db.py 生成 SQLite 库。
+# 网页示例见 config/sources.example.yaml（需要一个可访问的 URL）。
+sources:
+  - type: file
+    path: data/docs
+    tags: [local, demo]
+
+  - type: sql
+    dsn: sqlite:///data/sql/demo.db
+    query: SELECT id, name, category, description, price, updated_at FROM products ORDER BY id
+    id_column: id
+    title_column: name
+    content_columns: [name, category, description, price]
+    updated_at_column: updated_at
+    label: demo.products
+    tags: [business, demo]
