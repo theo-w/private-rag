@@ -7,10 +7,12 @@ import re
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from private_rag.api.errors import (
@@ -28,6 +30,7 @@ from private_rag.sessions import SessionStore
 logger = logging.getLogger(__name__)
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_DEMO_PAGE = Path(__file__).resolve().parent / "static" / "demo.html"
 
 
 @asynccontextmanager
@@ -110,9 +113,15 @@ def create_app(
             "version": APP_VERSION,
             "api_prefix": API_PREFIX,
             "docs": "/docs",
+            "demo": "/demo",
             "health": "/health",
             "ready": "/ready",
         }
+
+    @app.get("/demo", include_in_schema=False)
+    def demo_page() -> FileResponse:
+        # 单文件演示页：与 API 同源，直接调用真实接口，不引入前端构建步骤
+        return FileResponse(_DEMO_PAGE, media_type="text/html")
 
     app.include_router(ops_router)
     app.include_router(router)

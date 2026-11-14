@@ -1,0 +1,1757 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="private-rag 本地知识库问答演示：混合检索、精排、引用、多轮会话与 SSE 流式输出。">
+  <title>private-rag · 本地知识库演示</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23202522'/%3E%3Ctext x='32' y='44' font-family='Georgia,serif' font-size='34' fill='%23f4efe5' text-anchor='middle'%3ER%3C/text%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #efe8db;
+      --panel: #fbf7ef;
+      --panel-strong: #fffdf8;
+      --ink: #202522;
+      --ink-soft: #3d4540;
+      --muted: #6d746e;
+      --line: #d9d0bf;
+      --line-strong: #c4b8a2;
+      --accent: #a4551a;
+      --accent-strong: #7f3f10;
+      --accent-soft: #f3dfc4;
+      --green: #2f6f50;
+      --green-soft: #e2efdf;
+      --amber: #9a6a17;
+      --amber-soft: #f6ecd2;
+      --red: #9d3b30;
+      --red-soft: #f8e2de;
+      --radius-lg: 18px;
+      --radius-md: 12px;
+      --radius-sm: 8px;
+      --shadow: 0 14px 40px rgba(55, 43, 25, 0.09);
+      --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      --font-display: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+      --font-mono: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(1100px 520px at 6% -8%, rgba(196, 138, 72, 0.18), transparent 58%),
+        radial-gradient(900px 460px at 100% 0%, rgba(86, 116, 94, 0.10), transparent 55%),
+        var(--bg);
+      font-family: var(--font-ui);
+      font-size: 15px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .app-shell {
+      width: min(1320px, 100%);
+      margin: 0 auto;
+      padding: 24px clamp(14px, 3vw, 40px) 46px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 4px 2px 20px;
+      flex-wrap: wrap;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 46px;
+      height: 46px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      border-radius: 13px;
+      background: var(--ink);
+      color: #f7f0e3;
+      font-family: var(--font-display);
+      font-size: 25px;
+      box-shadow: 0 8px 18px rgba(32, 37, 34, 0.18);
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: clamp(22px, 2.4vw, 29px);
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      line-height: 1.15;
+    }
+
+    .brand p {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.1em;
+    }
+
+    .status-cluster {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+      padding: 6px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel-strong);
+      font-size: 12px;
+      color: var(--ink-soft);
+      box-shadow: 0 4px 12px rgba(55, 43, 25, 0.05);
+    }
+
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex: 0 0 auto;
+      transition: background 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .status-pill[data-state="ready"] .status-dot {
+      background: var(--green);
+      box-shadow: 0 0 0 4px var(--green-soft);
+    }
+
+    .status-pill[data-state="warning"] .status-dot {
+      background: var(--amber);
+      box-shadow: 0 0 0 4px var(--amber-soft);
+    }
+
+    .status-pill[data-state="offline"] .status-dot {
+      background: var(--red);
+      box-shadow: 0 0 0 4px var(--red-soft);
+    }
+
+    .version {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.55fr) minmax(340px, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .chat-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-height: 660px;
+    }
+
+    .side-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .panel-head h2 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 19px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+
+    .panel-head p,
+    .muted {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .mono { font-family: var(--font-mono); }
+
+    .mode-switch {
+      display: inline-flex;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f2ebdf;
+      flex: 0 0 auto;
+    }
+
+    .mode-button {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.16s ease, color 0.16s ease;
+    }
+
+    .mode-button[aria-pressed="true"] {
+      background: var(--ink);
+      color: #f8f2e7;
+    }
+
+    .mode-button:disabled { cursor: not-allowed; opacity: 0.55; }
+
+    .messages {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      flex: 1;
+      min-height: 300px;
+      height: clamp(310px, 47vh, 510px);
+      overflow-y: auto;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background:
+        linear-gradient(rgba(255, 253, 248, 0.84), rgba(255, 253, 248, 0.84)),
+        repeating-linear-gradient(0deg, transparent, transparent 27px, rgba(160, 140, 105, 0.12) 28px);
+      scroll-behavior: smooth;
+    }
+
+    .empty-state {
+      margin: auto;
+      max-width: 440px;
+      padding: 24px 16px;
+      text-align: center;
+    }
+
+    .empty-state p {
+      margin: 0 0 7px;
+      font-family: var(--font-display);
+      font-size: 21px;
+      color: var(--ink);
+    }
+
+    .empty-state span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .message {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      max-width: 88%;
+      animation: rise 0.16s ease-out both;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message.user { align-self: flex-end; align-items: flex-end; }
+    .message.assistant { align-self: flex-start; align-items: flex-start; }
+
+    .message-role {
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      padding: 0 4px;
+    }
+
+    .bubble {
+      padding: 11px 15px;
+      border-radius: 14px;
+      font-size: 14px;
+      line-height: 1.72;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .message.user .bubble {
+      background: var(--ink);
+      color: #f9f4e9;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.assistant .bubble {
+      background: var(--panel-strong);
+      border: 1px solid var(--line);
+      border-bottom-left-radius: 4px;
+      color: var(--ink-soft);
+    }
+
+    .bubble.is-placeholder { color: var(--muted); font-style: italic; }
+
+    .bubble.is-streaming::after {
+      content: "▌";
+      margin-left: 1px;
+      color: var(--accent);
+      animation: blink 0.9s steps(2, start) infinite;
+    }
+
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .message-meta {
+      min-height: 14px;
+      padding: 0 4px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 10px;
+    }
+
+    .examples {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f7f1e6;
+      color: var(--ink-soft);
+      padding: 5px 10px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+    }
+
+    .chip:hover { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); }
+    .chip:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    .composer {
+      border: 1px solid var(--line-strong);
+      border-radius: 14px;
+      background: var(--panel-strong);
+      padding: 10px 12px 9px;
+      transition: border-color 0.16s ease, box-shadow 0.16s ease;
+    }
+
+    .composer:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(164, 85, 26, 0.12);
+    }
+
+    .composer textarea {
+      display: block;
+      width: 100%;
+      min-height: 62px;
+      max-height: 150px;
+      resize: vertical;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--ink);
+      font: inherit;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .composer textarea::placeholder { color: #9a9f98; }
+
+    .composer-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding-top: 6px;
+    }
+
+    .composer-actions > div { display: flex; gap: 8px; align-items: center; }
+
+    .char-count { margin: 0; font-family: var(--font-mono); font-size: 11px; }
+    .char-count.over { color: var(--red); }
+
+    .primary,
+    .ghost-button,
+    .danger-ghost,
+    .icon-button,
+    .stop-button {
+      border-radius: 999px;
+      font: inherit;
+      font-size: 12px;
+      line-height: 1;
+      padding: 9px 14px;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+    }
+
+    .primary {
+      border: 1px solid var(--accent-strong);
+      background: var(--accent);
+      color: #fffaf1;
+      box-shadow: 0 5px 14px rgba(164, 85, 26, 0.22);
+    }
+
+    .primary:hover:not(:disabled) { background: var(--accent-strong); }
+
+    .ghost-button {
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+      color: var(--ink-soft);
+    }
+
+    .ghost-button:hover:not(:disabled) { border-color: var(--line-strong); background: #f5eee2; }
+
+    .danger-ghost {
+      border: 1px solid #dfb9b1;
+      background: transparent;
+      color: var(--red);
+    }
+
+    .danger-ghost:hover:not(:disabled) { background: var(--red-soft); }
+
+    .icon-button {
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      padding: 6px 9px;
+    }
+
+    .icon-button:hover:not(:disabled) { border-color: var(--line); background: #f4ede1; color: var(--ink); }
+
+    .stop-button {
+      border: 1px solid #dfb9b1;
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    button:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    a:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .controls { display: flex; flex-direction: column; gap: 15px; }
+    .controls .panel-head { align-items: baseline; }
+
+    .field { display: flex; flex-direction: column; gap: 6px; }
+
+    .field-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--ink-soft);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .field-label output {
+      color: var(--accent-strong);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .field input[type="text"],
+    .field select {
+      width: 100%;
+      min-height: 38px;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--panel-strong);
+      color: var(--ink);
+      font: inherit;
+      font-size: 13px;
+    }
+
+    .field input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .hint {
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+
+    .toggles { display: flex; flex-direction: column; gap: 0; border-top: 1px dashed var(--line); }
+
+    .toggle {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 11px 0 3px;
+      cursor: pointer;
+    }
+
+    .toggle input {
+      appearance: none;
+      width: 36px;
+      height: 21px;
+      flex: 0 0 auto;
+      margin: 2px 0 0;
+      border-radius: 999px;
+      background: #d9cfbd;
+      position: relative;
+      cursor: pointer;
+      transition: background 0.18s ease;
+    }
+
+    .toggle input::before {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      background: #fffdf8;
+      box-shadow: 0 1px 3px rgba(32, 37, 34, 0.25);
+      transition: transform 0.18s ease;
+    }
+
+    .toggle input:checked { background: var(--green); }
+    .toggle input:checked::before { transform: translateX(15px); }
+
+    .toggle-text { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--ink-soft); }
+    .toggle-text small { color: var(--muted); font-size: 11px; }
+
+    .session-id-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #session-id {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 8px 10px;
+      border: 1px dashed var(--line-strong);
+      border-radius: var(--radius-sm);
+      background: #f7f1e6;
+      color: var(--ink-soft);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .button-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .meta-grid.empty {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .meta-item {
+      min-width: 0;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: #f6f0e4;
+    }
+
+    .meta-label {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: 0.04em;
+    }
+
+    .meta-value {
+      display: block;
+      margin-top: 2px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink-soft);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .meta-value.on { color: var(--green); }
+    .meta-value.off { color: var(--muted); }
+
+    .citations { display: flex; flex-direction: column; gap: 9px; margin-top: 12px; }
+
+    .citation {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: #f9f4ea;
+    }
+
+    .citation-head {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .citation-index {
+      display: grid;
+      place-items: center;
+      width: 23px;
+      height: 23px;
+      flex: 0 0 auto;
+      border-radius: 6px;
+      background: var(--ink);
+      color: #f9f4e9;
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .citation-title {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-soft);
+    }
+
+    .type-badge {
+      flex: 0 0 auto;
+      padding: 2px 6px;
+      border-radius: 999px;
+      font-size: 10px;
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+
+    .type-badge[data-type="web"] { background: var(--green-soft); color: var(--green); }
+    .type-badge[data-type="sql"] { background: #e3e8ea; color: #40575f; }
+
+    .citation-score {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+
+    .citation-uri {
+      margin: 0;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+
+    .citation-uri a { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; }
+
+    .citation-location { display: flex; flex-wrap: wrap; gap: 5px; }
+
+    .mini-tag {
+      padding: 1px 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: var(--panel-strong);
+      font-size: 10px;
+    }
+
+    .citation-snippet {
+      margin: 0;
+      color: #4e554f;
+      font-size: 12px;
+      line-height: 1.55;
+      display: -webkit-box;
+      -webkit-line-clamp: 4;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .error-panel {
+      border-color: #dfb9b1;
+      background: #fdf3f0;
+      box-shadow: 0 12px 30px rgba(157, 59, 48, 0.08);
+    }
+
+    .error-code {
+      display: inline-block;
+      margin-right: 7px;
+      padding: 1px 6px;
+      border-radius: 5px;
+      background: var(--red);
+      color: #fff7f4;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      vertical-align: 1px;
+    }
+
+    #error-message { margin: 9px 0 0; font-size: 13px; color: var(--red); }
+    #error-details { margin: 7px 0 0; padding: 8px 10px; border-radius: var(--radius-sm); background: rgba(157, 59, 48, 0.06); color: #6b4039; font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    #error-request-id { margin: 9px 0 0; font-size: 10px; overflow-wrap: anywhere; }
+
+    .checks { display: flex; flex-direction: column; gap: 6px; margin-top: 11px; }
+
+    .check {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--ink-soft);
+    }
+
+    .check-dot {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      margin-top: 5px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+
+    .check[data-tone="ok"] .check-dot { background: var(--green); }
+    .check[data-tone="warn"] .check-dot { background: var(--amber); }
+    .check[data-tone="bad"] .check-dot { background: var(--red); }
+
+    .check-detail { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+
+    .notices { display: flex; flex-direction: column; gap: 5px; margin: 10px 0 0; padding: 0; list-style: none; }
+
+    .notice {
+      padding: 7px 9px;
+      border-radius: var(--radius-sm);
+      background: var(--amber-soft);
+      color: #6d4d12;
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+
+    .notice.bad { background: var(--red-soft); color: #71342c; }
+
+    .footer {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 18px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 3px 0;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .footer a { color: var(--accent-strong); text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+
+    @media (max-width: 960px) {
+      .layout { grid-template-columns: 1fr; }
+      .chat-panel { min-height: 0; }
+      .messages { height: clamp(280px, 42vh, 430px); }
+      .side-panel { display: grid; grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 560px) {
+      .app-shell { padding: 16px 12px 32px; }
+      .brand-mark { width: 40px; height: 40px; font-size: 22px; }
+      .panel { padding: 14px; border-radius: 14px; }
+      .message { max-width: 94%; }
+      .field-row { grid-template-columns: 1fr; }
+      .composer-actions { align-items: flex-end; }
+      .examples { font-size: 11px; }
+      .footer { align-items: flex-start; flex-direction: column; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">R</span>
+        <div>
+          <h1>private-rag</h1>
+          <p>本地知识库 · 可检索 · 可溯源</p>
+        </div>
+      </div>
+      <div class="status-cluster">
+        <span id="app-version" class="version">v—</span>
+        <div id="service-status" class="status-pill" data-state="loading" role="status" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="status-text">正在检查服务…</span>
+        </div>
+        <button id="refresh-status" class="ghost-button" type="button">刷新状态</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel chat-panel" aria-labelledby="chat-title">
+        <div class="panel-head">
+          <div>
+            <h2 id="chat-title">对话</h2>
+            <p>先检索你的资料，再让本地模型带引用作答。</p>
+          </div>
+          <div class="mode-switch" role="group" aria-label="回答方式">
+            <button class="mode-button" type="button" data-mode="stream" aria-pressed="true">流式</button>
+            <button class="mode-button" type="button" data-mode="sync" aria-pressed="false">同步</button>
+          </div>
+        </div>
+
+        <div id="messages" class="messages" aria-live="polite">
+          <div class="empty-state">
+            <p>问点什么吧。</p>
+            <span>答案只会来自你已入库的文件、网页或数据库，并附上资料来源。</span>
+          </div>
+        </div>
+
+        <div id="examples" class="examples" aria-label="示例问题">
+          <span>试试：</span>
+          <button class="chip" type="button" data-question="香蕉要放冰箱吗？">香蕉要放冰箱吗？</button>
+          <button class="chip" type="button" data-question="橙子有什么营养？">橙子有什么营养？</button>
+          <button class="chip" type="button" data-question="苹果适合冷藏吗？">苹果适合冷藏吗？</button>
+        </div>
+
+        <form id="chat-form" class="composer">
+          <label for="question" class="visually-hidden" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">问题</label>
+          <textarea id="question" maxlength="2000" rows="2" placeholder="问一个你资料里能回答的问题……"></textarea>
+          <div class="composer-actions">
+            <span id="char-count" class="char-count">0 / 2000</span>
+            <div>
+              <button id="stop-button" class="stop-button" type="button" hidden>停止</button>
+              <button id="send-button" class="primary" type="submit">发送</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <aside class="side-panel" aria-label="参数与结果">
+        <section class="panel controls" aria-labelledby="params-title">
+          <div class="panel-head">
+            <h2 id="params-title">检索参数</h2>
+            <p>每次提问生效</p>
+          </div>
+
+          <label class="field" for="top-k">
+            <span class="field-label">top_k <output id="top-k-value" for="top-k">3</output></span>
+            <input id="top-k" type="range" min="1" max="10" step="1" value="3">
+            <span class="hint">最终送入模型的片段数，越大上下文越多，也越容易带入噪声。</span>
+          </label>
+
+          <label class="field" for="source-type">
+            <span class="field-label">来源类型</span>
+            <select id="source-type">
+              <option value="">全部来源</option>
+              <option value="file">文件</option>
+              <option value="web">网页</option>
+              <option value="sql">数据库</option>
+            </select>
+            <span class="hint">只检索指定来源，便于观察过滤对召回的影响。</span>
+          </label>
+
+          <label class="field" for="tags">
+            <span class="field-label">标签</span>
+            <input id="tags" type="text" autocomplete="off" placeholder="如 local, demo（逗号或空格分隔）">
+            <span class="hint">最多 10 个，单个不超过 50 字符；命中任意一个即可。</span>
+          </label>
+
+          <div class="toggles">
+            <label class="toggle" for="use-lexical">
+              <input id="use-lexical" type="checkbox" checked>
+              <span class="toggle-text">BM25 关键词召回 <small>与向量召回一起做 RRF 融合；关掉后只走向量。</small></span>
+            </label>
+            <label class="toggle" for="use-rerank">
+              <input id="use-rerank" type="checkbox" checked>
+              <span class="toggle-text">reranker 精排 <small>逐条精读候选，决定最终送入模型的片段。</small></span>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="session-title">
+          <div class="panel-head">
+            <h2 id="session-title">会话</h2>
+            <p id="session-state">未开始</p>
+          </div>
+          <div class="session-id-row">
+            <code id="session-id" title="当前会话 ID">—</code>
+            <button id="copy-session" class="icon-button" type="button" disabled>复制</button>
+          </div>
+          <div class="button-row">
+            <button id="new-session" class="ghost-button" type="button">新会话</button>
+            <button id="load-session" class="ghost-button" type="button" disabled>刷新历史</button>
+            <button id="delete-session" class="danger-ghost" type="button" disabled>删除</button>
+          </div>
+          <p class="hint">会话保存在服务内存，闲置 30 分钟或服务重启即清空；同一会话的请求会排队。</p>
+        </section>
+
+        <section class="panel" aria-labelledby="meta-title">
+          <div class="panel-head">
+            <h2 id="meta-title">本轮信息</h2>
+            <p id="request-id" class="mono" title="请求 ID">—</p>
+          </div>
+          <div id="meta-grid" class="meta-grid empty">还没有提问。</div>
+        </section>
+
+        <section class="panel" aria-labelledby="citations-title">
+          <div class="panel-head">
+            <h2 id="citations-title">引用</h2>
+            <p id="citation-count">0 条</p>
+          </div>
+          <div id="citations" class="citations">
+            <p class="muted">本轮回答的资料来源会显示在这里。</p>
+          </div>
+        </section>
+
+        <section id="error-panel" class="panel error-panel" role="alert" hidden>
+          <div class="panel-head">
+            <h2>错误</h2>
+            <button id="dismiss-error" class="icon-button" type="button">关闭</button>
+          </div>
+          <p id="error-message"></p>
+          <pre id="error-details" hidden></pre>
+          <p id="error-request-id" class="mono muted"></p>
+        </section>
+
+        <section class="panel" aria-labelledby="status-title">
+          <div class="panel-head">
+            <h2 id="status-title">知识库状态</h2>
+            <p>来自 /ready</p>
+          </div>
+          <div id="ready-checks" class="checks"></div>
+          <div id="ready-notices" class="notices"></div>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <span>private-rag · 本地离线 · 引用来自入库元数据</span>
+      <span>
+        <a href="/docs" target="_blank" rel="noopener">Swagger</a>
+        <span aria-hidden="true"> · </span>
+        <a href="/ready" target="_blank" rel="noopener">/ready</a>
+        <span aria-hidden="true"> · </span>
+        <span>API /api/v1</span>
+      </span>
+    </footer>
+  </div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const MAX_QUESTION = 2000;
+      const MAX_TAGS = 10;
+      const MAX_TAG_CHARS = 50;
+
+      const state = {
+        sessionId: null,
+        busy: false,
+        mode: "stream",
+        controller: null,
+        ready: null,
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const el = {
+        serviceStatus: $("service-status"),
+        statusText: $("status-text"),
+        appVersion: $("app-version"),
+        refreshStatus: $("refresh-status"),
+        messages: $("messages"),
+        chatForm: $("chat-form"),
+        question: $("question"),
+        charCount: $("char-count"),
+        sendButton: $("send-button"),
+        stopButton: $("stop-button"),
+        examples: $("examples"),
+        modeButtons: Array.from(document.querySelectorAll(".mode-button")),
+        topK: $("top-k"),
+        topKValue: $("top-k-value"),
+        sourceType: $("source-type"),
+        tags: $("tags"),
+        useLexical: $("use-lexical"),
+        useRerank: $("use-rerank"),
+        sessionId: $("session-id"),
+        sessionState: $("session-state"),
+        copySession: $("copy-session"),
+        newSession: $("new-session"),
+        loadSession: $("load-session"),
+        deleteSession: $("delete-session"),
+        metaGrid: $("meta-grid"),
+        requestId: $("request-id"),
+        citations: $("citations"),
+        citationCount: $("citation-count"),
+        readyChecks: $("ready-checks"),
+        readyNotices: $("ready-notices"),
+        errorPanel: $("error-panel"),
+        errorMessage: $("error-message"),
+        errorDetails: $("error-details"),
+        errorRequestId: $("error-request-id"),
+        dismissError: $("dismiss-error"),
+      };
+
+      function setStatus(kind, text) {
+        el.serviceStatus.dataset.state = kind;
+        el.statusText.textContent = text;
+      }
+
+      function setVersion(version) {
+        el.appVersion.textContent = version ? `v${version}` : "v—";
+      }
+
+      function addCheck(label, tone, detail) {
+        const row = document.createElement("div");
+        row.className = "check";
+        row.dataset.tone = tone;
+        const dot = document.createElement("span");
+        dot.className = "check-dot";
+        dot.setAttribute("aria-hidden", "true");
+        const name = document.createElement("span");
+        name.textContent = label;
+        const detailEl = document.createElement("span");
+        detailEl.className = "check-detail";
+        detailEl.textContent = detail || "";
+        row.append(dot, name, detailEl);
+        el.readyChecks.append(row);
+      }
+
+      function addNotice(text, bad = false) {
+        const item = document.createElement("p");
+        item.className = bad ? "notice bad" : "notice";
+        item.textContent = text;
+        el.readyNotices.append(item);
+      }
+
+      function renderReady(body) {
+        const checks = body.checks || {};
+        const vectors = Number(checks.vectors || 0);
+        state.ready = body.ready === true;
+        setStatus(state.ready ? "ready" : "warning", state.ready ? `就绪 · ${vectors} 个向量` : "知识库未就绪");
+
+        el.readyChecks.replaceChildren();
+        el.readyNotices.replaceChildren();
+        addCheck("向量集合", checks.collection ? "ok" : "bad", checks.collection ? "存在" : "不存在");
+        addCheck("向量数量", vectors > 0 ? "ok" : "bad", String(vectors));
+        addCheck("BM25 关键词索引", checks.lexical ? "ok" : "warn", checks.lexical ? "可用" : "缺失，将退化为纯向量");
+        addCheck("reranker 精排", checks.reranker ? "ok" : "warn", checks.reranker ? "可用" : "未加载，将使用融合结果");
+
+        for (const reason of body.reasons || []) addNotice(reason, true);
+        for (const warning of body.warnings || []) addNotice(warning, false);
+        if (!state.ready) {
+          const hint = document.createElement("p");
+          hint.className = "hint";
+          hint.textContent = "先在终端运行：python scripts/ingest.py，再刷新状态。";
+          el.readyNotices.append(hint);
+        }
+        updateControls();
+      }
+
+      function renderReadyFailure(error) {
+        state.ready = false;
+        el.readyChecks.replaceChildren();
+        el.readyNotices.replaceChildren();
+        addCheck("服务连接", "bad", "无法读取 /ready");
+        addNotice(error && error.message ? error.message : "无法读取就绪状态。", true);
+        updateControls();
+      }
+
+      async function refreshStatus() {
+        el.refreshStatus.disabled = true;
+        setStatus("loading", "正在检查服务…");
+        try {
+          const healthResponse = await fetch("/health", { headers: { Accept: "application/json" } });
+          if (!healthResponse.ok) throw new Error(`/health 返回 HTTP ${healthResponse.status}`);
+          const health = await healthResponse.json();
+          setVersion(health.version);
+
+          const readyResponse = await fetch("/ready", { headers: { Accept: "application/json" } });
+          let ready;
+          try {
+            ready = await readyResponse.json();
+          } catch (error) {
+            throw new Error("无法解析 /ready 响应");
+          }
+          renderReady(ready);
+        } catch (error) {
+          setStatus("offline", "状态检查失败");
+          setVersion("");
+          renderReadyFailure(error);
+        } finally {
+          el.refreshStatus.disabled = false;
+        }
+      }
+
+      function updateControls() {
+        const busy = state.busy;
+        el.sendButton.disabled = busy || state.ready !== true;
+        el.sendButton.textContent = busy ? (state.mode === "stream" ? "流式中…" : "生成中…") : "发送";
+        el.sendButton.title = state.ready === false ? "知识库未就绪，请先运行 ingest" : "";
+        el.stopButton.hidden = !(busy && state.mode === "stream");
+        el.question.disabled = busy;
+        el.topK.disabled = busy;
+        el.sourceType.disabled = busy;
+        el.tags.disabled = busy;
+        el.useLexical.disabled = busy;
+        el.useRerank.disabled = busy;
+        for (const button of el.modeButtons) button.disabled = busy;
+        for (const chip of el.examples.querySelectorAll(".chip")) chip.disabled = busy;
+        el.newSession.disabled = busy;
+        el.loadSession.disabled = busy || !state.sessionId;
+        el.deleteSession.disabled = busy || !state.sessionId;
+        el.copySession.disabled = !state.sessionId;
+      }
+
+      function updateCharCount() {
+        const length = el.question.value.length;
+        el.charCount.textContent = `${length} / ${MAX_QUESTION}`;
+        el.charCount.classList.toggle("over", length > MAX_QUESTION);
+      }
+
+      function setMode(mode) {
+        if (state.busy) return;
+        state.mode = mode === "sync" ? "sync" : "stream";
+        for (const button of el.modeButtons) {
+          button.setAttribute("aria-pressed", String(button.dataset.mode === state.mode));
+        }
+        updateControls();
+      }
+
+      function scrollMessages() {
+        el.messages.scrollTop = el.messages.scrollHeight;
+      }
+
+      function createEmptyState() {
+        const wrapper = document.createElement("div");
+        wrapper.className = "empty-state";
+        const title = document.createElement("p");
+        title.textContent = "问点什么吧。";
+        const subtitle = document.createElement("span");
+        subtitle.textContent = "答案只会来自你已入库的文件、网页或数据库，并附上资料来源。";
+        wrapper.append(title, subtitle);
+        return wrapper;
+      }
+
+      function showEmptyState() {
+        el.messages.replaceChildren(createEmptyState());
+      }
+
+      function appendMessage(role, text, options = {}) {
+        const wrapper = document.createElement("article");
+        wrapper.className = `message ${role}`;
+        const roleLabel = document.createElement("div");
+        roleLabel.className = "message-role";
+        roleLabel.textContent = role === "user" ? "你" : "助手";
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+        if (options.streaming) bubble.classList.add("is-streaming");
+        if (options.placeholder) bubble.classList.add("is-placeholder");
+        bubble.textContent = text;
+        const footer = document.createElement("div");
+        footer.className = "message-meta";
+        footer.textContent = options.meta || "";
+        wrapper.append(roleLabel, bubble, footer);
+        el.messages.append(wrapper);
+        scrollMessages();
+        return { wrapper, bubble, footer };
+      }
+
+      function setSession(sessionId) {
+        state.sessionId = sessionId || null;
+        el.sessionId.textContent = state.sessionId || "—";
+        el.sessionId.title = state.sessionId || "当前会话 ID";
+        el.sessionState.textContent = state.sessionId ? "进行中" : "未开始";
+        updateControls();
+      }
+
+      function clearResult() {
+        el.citations.replaceChildren();
+        const empty = document.createElement("p");
+        empty.className = "muted";
+        empty.textContent = "本轮回答的资料来源会显示在这里。";
+        el.citations.append(empty);
+        el.citationCount.textContent = "0 条";
+        el.metaGrid.className = "meta-grid empty";
+        el.metaGrid.textContent = "还没有提问。";
+        el.requestId.textContent = "—";
+        el.requestId.title = "请求 ID";
+      }
+
+      function renderMeta(meta, requestId) {
+        if (!meta) return;
+        el.requestId.textContent = requestId || "—";
+        el.requestId.title = requestId ? `request_id: ${requestId}` : "请求 ID";
+        const rows = [
+          ["候选片段", String(meta.retrieved ?? "—")],
+          ["历史轮次", String(meta.history_turns ?? "—")],
+          ["BM25", meta.used_lexical ? "开" : "关", meta.used_lexical ? "on" : "off"],
+          ["reranker", meta.used_rerank ? "开" : "关", meta.used_rerank ? "on" : "off"],
+          ["耗时", meta.elapsed_ms != null ? `${meta.elapsed_ms} ms` : "—"],
+        ];
+        el.metaGrid.className = "meta-grid";
+        el.metaGrid.replaceChildren();
+        for (const [label, value, tone] of rows) {
+          const item = document.createElement("div");
+          item.className = "meta-item";
+          const labelEl = document.createElement("span");
+          labelEl.className = "meta-label";
+          labelEl.textContent = label;
+          const valueEl = document.createElement("span");
+          valueEl.className = `meta-value${tone ? ` ${tone}` : ""}`;
+          valueEl.textContent = value;
+          item.append(labelEl, valueEl);
+          el.metaGrid.append(item);
+        }
+      }
+
+      function sourceTypeLabel(type) {
+        if (type === "file") return "文件";
+        if (type === "web") return "网页";
+        if (type === "sql") return "数据库";
+        return type || "未知";
+      }
+
+      function renderCitations(citations) {
+        const list = Array.isArray(citations) ? citations : [];
+        el.citationCount.textContent = `${list.length} 条`;
+        el.citations.replaceChildren();
+        if (!list.length) {
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "本轮没有引用，可能是资料里没有相关内容。";
+          el.citations.append(empty);
+          return;
+        }
+
+        for (const citation of list) {
+          const card = document.createElement("article");
+          card.className = "citation";
+
+          const head = document.createElement("div");
+          head.className = "citation-head";
+          const index = document.createElement("span");
+          index.className = "citation-index";
+          index.textContent = String(citation.index ?? "?");
+          const title = document.createElement("span");
+          title.className = "citation-title";
+          title.textContent = citation.title || "未知来源";
+          title.title = title.textContent;
+          const badge = document.createElement("span");
+          badge.className = "type-badge";
+          badge.dataset.type = citation.source_type || "unknown";
+          badge.textContent = sourceTypeLabel(citation.source_type);
+          const score = document.createElement("span");
+          score.className = "citation-score";
+          if (typeof citation.score === "number") score.textContent = citation.score.toFixed(3);
+          head.append(index, title, badge, score);
+
+          const uri = document.createElement("p");
+          uri.className = "citation-uri";
+          const sourceUri = citation.source_uri || "";
+          if (/^https?:\/\//i.test(sourceUri)) {
+            const link = document.createElement("a");
+            link.href = sourceUri;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = sourceUri;
+            uri.append(link);
+          } else {
+            uri.textContent = sourceUri || "（无来源地址）";
+          }
+
+          const location = document.createElement("div");
+          location.className = "citation-location";
+          if (citation.page != null) {
+            const page = document.createElement("span");
+            page.className = "mini-tag";
+            page.textContent = `第 ${citation.page} 页`;
+            location.append(page);
+          }
+          if (citation.table) {
+            const table = document.createElement("span");
+            table.className = "mini-tag";
+            table.textContent = `表 ${citation.table}`;
+            location.append(table);
+          }
+
+          const snippet = document.createElement("p");
+          snippet.className = "citation-snippet";
+          snippet.textContent = citation.snippet || "";
+
+          card.append(head, uri);
+          if (location.childElementCount) card.append(location);
+          card.append(snippet);
+          el.citations.append(card);
+        }
+      }
+
+      function renderHistory(data) {
+        const messages = Array.isArray(data.messages) ? data.messages : [];
+        el.messages.replaceChildren();
+        if (!messages.length) {
+          showEmptyState();
+        } else {
+          for (const message of messages) {
+            const citationNote = message.role === "assistant" && message.citations && message.citations.length
+              ? `${message.citations.length} 条引用`
+              : "";
+            appendMessage(message.role, message.content || "", { meta: citationNote });
+          }
+        }
+        const count = data.message_count ?? messages.length;
+        el.sessionState.textContent = `${count} 条消息`;
+      }
+
+      function apiError(status, payload, requestId) {
+        const error = new Error(
+          (payload && payload.error && payload.error.message) || `请求失败（HTTP ${status}）`
+        );
+        error.status = status;
+        error.payload = payload;
+        error.requestId = requestId || "";
+        return error;
+      }
+
+      async function throwResponseError(response) {
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch (error) {
+          payload = null;
+        }
+        throw apiError(response.status, payload, response.headers.get("X-Request-ID") || "");
+      }
+
+      async function requestJSON(path, options) {
+        let response;
+        try {
+          response = await fetch(path, options);
+        } catch (error) {
+          if (error.name === "AbortError") throw error;
+          throw new Error("无法连接本地服务，请确认 serve.py 正在运行。");
+        }
+        if (!response.ok) await throwResponseError(response);
+        if (response.status === 204) return null;
+        return response.json();
+      }
+
+      function parseTags(raw) {
+        const parts = raw.split(/[,，、\s]+/).map((part) => part.trim()).filter(Boolean);
+        const unique = Array.from(new Set(parts));
+        if (unique.length > MAX_TAGS) throw new Error(`标签最多 ${MAX_TAGS} 个`);
+        const tooLong = unique.find((tag) => tag.length > MAX_TAG_CHARS);
+        if (tooLong) throw new Error(`单个标签最多 ${MAX_TAG_CHARS} 个字符：${tooLong}`);
+        return unique;
+      }
+
+      function buildChatBody(question) {
+        const body = {
+          question,
+          top_k: Number(el.topK.value),
+          use_lexical: el.useLexical.checked,
+          use_rerank: el.useRerank.checked,
+        };
+        if (el.sourceType.value) body.source_type = el.sourceType.value;
+        const tags = parseTags(el.tags.value);
+        if (tags.length) body.tags = tags;
+        if (state.sessionId) body.session_id = state.sessionId;
+        return body;
+      }
+
+      function showError(error) {
+        let payload = error && error.payload && error.payload.error ? error.payload.error : null;
+        let message = (payload && payload.message) || (error && error.message) || "请求失败";
+        if (error instanceof TypeError) message = "无法连接本地服务，请确认 serve.py 正在运行。";
+        const code = (payload && payload.code) || (error && error.status ? `http_${error.status}` : "client_error");
+        const requestId = (payload && payload.request_id) || (error && error.requestId) || "";
+
+        el.errorPanel.hidden = false;
+        el.errorMessage.replaceChildren();
+        const codeEl = document.createElement("span");
+        codeEl.className = "error-code";
+        codeEl.textContent = code;
+        const text = document.createElement("span");
+        text.textContent = message;
+        el.errorMessage.append(codeEl, text);
+
+        const details = payload && payload.details;
+        if (details) {
+          el.errorDetails.hidden = false;
+          if (Array.isArray(details)) {
+            el.errorDetails.textContent = details.map((item) => {
+              if (item && typeof item === "object") {
+                return `${item.field || "参数"}: ${item.message || ""}`;
+              }
+              return String(item);
+            }).join("\n");
+          } else {
+            el.errorDetails.textContent = typeof details === "string" ? details : JSON.stringify(details, null, 2);
+          }
+        } else {
+          el.errorDetails.hidden = true;
+          el.errorDetails.textContent = "";
+        }
+        el.errorRequestId.textContent = requestId ? `request_id: ${requestId}` : "";
+        el.errorPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+
+      function hideError() {
+        el.errorPanel.hidden = true;
+      }
+
+      function parseSSE(frame) {
+        let event = "message";
+        const dataLines = [];
+        for (const line of frame.split("\n")) {
+          if (line.startsWith("event:")) {
+            event = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            dataLines.push(line.slice(5).replace(/^ /, ""));
+          }
+        }
+        if (!dataLines.length) return null;
+        const raw = dataLines.join("\n");
+        try {
+          return { event, data: JSON.parse(raw) };
+        } catch (error) {
+          return null;
+        }
+      }
+
+      async function loadSessionHistory(options = {}) {
+        if (!state.sessionId) {
+          if (!options.silent) showError(new Error("还没有会话，请先发送一个问题或点“新会话”。"));
+          return;
+        }
+        try {
+          const data = await requestJSON(`/api/v1/sessions/${encodeURIComponent(state.sessionId)}`);
+          renderHistory(data);
+        } catch (error) {
+          if (error.status === 404) {
+            setSession(null);
+            showEmptyState();
+          }
+          if (!options.silent) showError(error);
+        }
+      }
+
+      async function createSession() {
+        if (state.busy) return;
+        try {
+          const data = await requestJSON("/api/v1/sessions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+          });
+          setSession(data.session_id);
+          showEmptyState();
+          clearResult();
+          hideError();
+        } catch (error) {
+          showError(error);
+        }
+      }
+
+      async function deleteSession() {
+        if (state.busy || !state.sessionId) return;
+        if (!window.confirm("删除当前会话及其全部历史？")) return;
+        try {
+          await requestJSON(`/api/v1/sessions/${encodeURIComponent(state.sessionId)}`, { method: "DELETE" });
+          setSession(null);
+          showEmptyState();
+          clearResult();
+          hideError();
+        } catch (error) {
+          if (error.status === 404) {
+            setSession(null);
+            showEmptyState();
+            clearResult();
+          }
+          showError(error);
+        }
+      }
+
+      function flashCopy(text) {
+        el.copySession.textContent = text;
+        window.setTimeout(() => { el.copySession.textContent = "复制"; }, 1400);
+      }
+
+      async function copySession() {
+        if (!state.sessionId) return;
+        try {
+          await navigator.clipboard.writeText(state.sessionId);
+          flashCopy("已复制");
+        } catch (error) {
+          const input = document.createElement("textarea");
+          input.value = state.sessionId;
+          input.style.position = "fixed";
+          input.style.opacity = "0";
+          document.body.append(input);
+          input.select();
+          try {
+            document.execCommand("copy");
+            flashCopy("已复制");
+          } catch (copyError) {
+            flashCopy("复制失败");
+          } finally {
+            input.remove();
+          }
+        }
+      }
+
+      async function runSync(body) {
+        const pending = appendMessage("assistant", "正在检索并生成…", { streaming: true, placeholder: true });
+        try {
+          const data = await requestJSON("/api/v1/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (data.session_id) setSession(data.session_id);
+          pending.bubble.classList.remove("is-streaming", "is-placeholder");
+          pending.bubble.textContent = data.answer || "";
+          pending.footer.textContent = "同步回答";
+          renderCitations(data.citations || []);
+          renderMeta(data.meta, data.request_id);
+          await loadSessionHistory({ silent: true });
+        } catch (error) {
+          pending.bubble.classList.remove("is-streaming", "is-placeholder");
+          pending.bubble.textContent = "生成失败。";
+          pending.footer.textContent = "本轮未写入会话";
+          showError(error);
+        }
+      }
+
+      async function runStream(body) {
+        const pending = appendMessage("assistant", "正在检索资料…", { streaming: true, placeholder: true });
+        const controller = new AbortController();
+        state.controller = controller;
+        let answer = "";
+        let receivedToken = false;
+        let completed = false;
+
+        try {
+          const response = await fetch("/api/v1/chat/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+          if (!response.ok) await throwResponseError(response);
+          if (!response.body) throw new Error("当前浏览器不支持流式响应，请切换同步模式。");
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (!completed) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            buffer = buffer.replace(/\r\n/g, "\n");
+
+            let boundary;
+            while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+              const frame = buffer.slice(0, boundary).trim();
+              buffer = buffer.slice(boundary + 2);
+              if (!frame) continue;
+
+              const parsed = parseSSE(frame);
+              if (!parsed) continue;
+              const { event, data } = parsed;
+
+              if (event === "session") {
+                if (data.session_id) setSession(data.session_id);
+              } else if (event === "citations") {
+                renderCitations(data.citations || []);
+              } else if (event === "token") {
+                if (!receivedToken) {
+                  receivedToken = true;
+                  pending.bubble.classList.remove("is-placeholder");
+                  pending.bubble.textContent = "";
+                }
+                answer += data.text || "";
+                pending.bubble.textContent = answer;
+                scrollMessages();
+              } else if (event === "done") {
+                completed = true;
+                answer = data.answer || answer;
+                if (data.session_id) setSession(data.session_id);
+                pending.bubble.classList.remove("is-streaming", "is-placeholder");
+                pending.bubble.textContent = answer;
+                pending.footer.textContent = "流式回答";
+                renderCitations(data.citations || []);
+                renderMeta(data.meta, data.request_id);
+              } else if (event === "error") {
+                throw apiError(200, { error: data }, data.request_id);
+              }
+            }
+          }
+
+          if (!completed) {
+            pending.bubble.classList.remove("is-streaming", "is-placeholder");
+            if (!answer) pending.bubble.textContent = "连接已结束。";
+            pending.footer.textContent = "连接已结束";
+          } else {
+            await loadSessionHistory({ silent: true });
+          }
+        } catch (error) {
+          pending.bubble.classList.remove("is-streaming", "is-placeholder");
+          if (error.name === "AbortError") {
+            if (!answer) pending.bubble.textContent = "已停止。";
+            pending.footer.textContent = "已停止 · 本轮不会写入会话";
+          } else {
+            if (!answer) pending.bubble.textContent = "生成失败。";
+            pending.footer.textContent = "生成中断";
+            showError(error);
+          }
+        } finally {
+          state.controller = null;
+        }
+      }
+
+      async function sendQuestion(event) {
+        if (event) event.preventDefault();
+        if (state.busy) return;
+
+        if (state.ready !== true) {
+          showError(new Error("知识库未就绪，请先运行 ingest 并刷新状态。"));
+          return;
+        }
+
+        const question = el.question.value.trim();
+        if (!question) {
+          showError(new Error("请输入问题。"));
+          el.question.focus();
+          return;
+        }
+        if (question.length > MAX_QUESTION) {
+          showError(new Error(`问题最多 ${MAX_QUESTION} 个字符。`));
+          return;
+        }
+
+        let body;
+        try {
+          body = buildChatBody(question);
+        } catch (error) {
+          showError(error);
+          return;
+        }
+
+        hideError();
+        clearResult();
+        appendMessage("user", question, { meta: "本轮提问" });
+        el.question.value = "";
+        updateCharCount();
+        state.busy = true;
+        updateControls();
+
+        try {
+          if (state.mode === "stream") {
+            await runStream(body);
+          } else {
+            await runSync(body);
+          }
+        } finally {
+          state.busy = false;
+          state.controller = null;
+          updateControls();
+        }
+      }
+
+      el.chatForm.addEventListener("submit", sendQuestion);
+
+      el.question.addEventListener("input", updateCharCount);
+      el.question.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+          event.preventDefault();
+          el.chatForm.requestSubmit();
+        }
+      });
+
+      el.examples.addEventListener("click", (event) => {
+        const chip = event.target.closest(".chip");
+        if (!chip || state.busy) return;
+        el.question.value = chip.dataset.question || "";
+        updateCharCount();
+        el.question.focus();
+      });
+
+      for (const button of el.modeButtons) {
+        button.addEventListener("click", () => setMode(button.dataset.mode));
+      }
+
+      el.topK.addEventListener("input", () => { el.topKValue.value = el.topK.value; });
+      el.refreshStatus.addEventListener("click", refreshStatus);
+      el.newSession.addEventListener("click", createSession);
+      el.loadSession.addEventListener("click", () => loadSessionHistory());
+      el.deleteSession.addEventListener("click", deleteSession);
+      el.copySession.addEventListener("click", copySession);
+      el.stopButton.addEventListener("click", () => {
+        if (state.controller) state.controller.abort();
+      });
+      el.dismissError.addEventListener("click", hideError);
+      window.addEventListener("beforeunload", () => {
+        if (state.controller) state.controller.abort();
+      });
+
+      setSession(null);
+      clearResult();
+      updateCharCount();
+      updateControls();
+      refreshStatus();
+    })();
+  </script>
+</body>
+</html>
