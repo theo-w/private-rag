@@ -212,6 +212,73 @@ event: error      data: {"code":"generation_failed","message":"...","request_id"
 | `RAG_MAX_HISTORY_MESSAGE_CHARS` | 800 | 历史中单条消息截断长度 |
 | `RAG_DISABLE_RERANK` | 未设置 | 设为 `1/true/yes/on` 时跳过 reranker |
 
+## v4 自动评估（Ragas）
+
+v4 用固定评估集把“检索策略有没有用”量化。评估知识库只使用项目自身文档（`README.md`、`docs/ROADMAP.md`、`docs/beginner-guide.md`），与 `data/docs` 演示库完全隔离：
+
+| 评估资源 | 路径 |
+|---|---|
+| Qdrant 集合 | `rag_eval_kb` |
+| Qdrant 存储 | `storage/eval/qdrant_storage` |
+| BM25 索引 | `storage/eval/lexical/bm25.pkl` |
+| Ragas 判分缓存 | `storage/eval_cache` |
+
+这些路径通过 `RAG_COLLECTION_NAME`、`RAG_STORAGE_DIR`、`RAG_LEXICAL_INDEX_PATH` 环境变量覆盖，由 `private_rag/eval_env.py` 在导入配置前设置，因此**不会与正在运行的演示服务争抢 Qdrant 本地锁**。
+
+评估集固定 40 条：36 条可回答 + 4 条应拒答，覆盖架构、入库、检索、API、边界与拒答 6 类；标注与字段说明见 [eval/README.md](eval/README.md)。
+
+三组策略：
+
+| 配置 | BM25 | reranker | 用途 |
+|---|---|---|---|
+| `dense` | 否 | 否 | 纯向量召回基线 |
+| `hybrid` | 是 | 否 | 观察混合召回 + RRF 的增益 |
+| `full` | 是 | 是 | 当前 v2/v3 默认链路，作为 **v2 基线** |
+
+四个 Ragas 指标：`faithfulness`、`answer_relevancy`、`context_precision`、`context_recall`；同时计算不依赖 judge 的确定性指标（evidence hit/recall、context precision、MRR、source hit、拒答准确率、回答率、引用率/有效性、延迟）。报告会给出各配置与 `full` 的差值和覆盖率，NaN 不会被替换成 0。
+
+安装评估依赖（不改变主依赖版本）：
+
+```bash
+pip install -r requirements-eval.txt
+```
+
+构建评估库并校验数据集：
+
+```bash
+python3 scripts/prepare_eval_kb.py --recreate
+python3 scripts/evaluate.py --validate-only
+```
+
+先跑冒烟，确认本地 judge 的 JSON 输出可解析：
+
+```bash
+python3 scripts/evaluate.py --configs full --limit 3 --ragas-configs full --ragas-limit 2 \
+  --output /tmp/v4_smoke.md --json-output /tmp/v4_smoke.json
+```
+
+全量评估（确定性指标覆盖三组，Ragas 默认 `dense,full`）：
+
+```bash
+python3 scripts/evaluate.py --configs dense,hybrid,full --ragas-configs dense,full \
+  --output eval/reports/v4_report.md --json-output eval/reports/v4_report.json
+```
+
+如果本机已安装官方 7B（`ollama pull qwen2.5:7b-instruct`），可换成更快的 judge；请使用独立缓存目录，避免复用 27B 的判分缓存：
+
+```bash
+python3 scripts/evaluate.py --configs dense,hybrid,full --ragas-configs dense,full \
+  --judge-model qwen2.5:7b-instruct --cache-dir storage/eval_cache_qwen25_7b \
+  --output eval/reports/v4_report.md --json-output eval/reports/v4_report.json
+```
+
+- `--skip-ragas` 只跑确定性指标；`--ragas-limit` 可先跑子集，报告会明确标注覆盖数。
+- 生成与 judge 默认都是 `qwen3.8:27b-mlx`，存在自评偏差，分数只适合同模型下的相对比较。`--judge-model` 可换成本机已安装的其他模型；例如官方 `qwen2.5:7b-instruct`（GGUF，约 4.7GB）判分更快，但判分能力弱于 27B，**不同 judge 的分数不能直接混比**。
+- Ragas judge 默认单 worker，并限制 `num_predict=4096`、关闭流式：本机 MLX runner 不限输出长度时会持续生成，导致连接断开或 JSON 截断。`OLLAMA_NUM_PARALLEL=1` 下调高 `--max-workers` 只会排队，不能真正加速。
+- 27B judge 单条样本的四项指标实测约 6–7 分钟；36 条可回答样本 × 2 组配置的全量 Ragas 预计数小时，建议放后台执行。换成 7B judge 会明显加快，但仍应先跑冒烟确认四项指标都有数值。时间不够时可先用 `--ragas-limit 8` 跑子集并在报告中标注样本数，不要把子集结果写成全量结论。缓存位于 `storage/eval_cache`，重复运行会明显加快；**换 judge 后不要复用旧缓存**，可加 `--no-cache` 或删除缓存目录。
+- **评估语料就是仓库文档**：改完 README/docs 或标注集后，必须重新执行 `prepare_eval_kb.py --recreate` 再跑报告，否则结果与仓库内容不一致。
+- 报告与数据集会提交到仓库，评估库、BM25 与缓存不会（`storage/` 已 gitignore）。
+
 ## 多源配置
 
 复制示例并按需修改：
@@ -296,7 +363,7 @@ python scripts/ingest.py --recreate                               # 清空集合
 python -m pytest tests -q
 ```
 
-覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。
+覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。
 
 冒烟测试需要已入库并启动 Ollama：
 
@@ -330,17 +397,24 @@ private_rag/
 │   └── static/demo.html  单文件 Web 演示页（/demo）
 ├── qa.py                 共享问答引擎（CLI/API 同一条链路）
 ├── sessions.py           内存多轮会话、TTL/容量/历史裁剪
-└── generation.py         编号上下文、历史、[n] 引用与流式生成
+├── generation.py         编号上下文、历史、[n] 引用与流式生成
+├── evaluation.py         v4 数据集校验、策略对比、Ragas 与报告渲染
+└── eval_env.py           v4 评估库路径隔离（导入配置前生效）
 config/settings.py        兼容入口（re-export private_rag.config）
-config/sources.example.yaml / sources.demo.yaml
+config/sources.example.yaml / sources.demo.yaml / sources.eval.yaml
 scripts/ingest.py         多源入库 CLI
 scripts/chat_cli.py       混合检索问答 CLI
 scripts/serve.py          HTTP 服务入口（单 worker）
 scripts/init_demo_db.py   生成演示 SQLite 库
+scripts/prepare_eval_kb.py 构建 v4 评估专用知识库
+scripts/evaluate.py       v4 策略评估与报告 CLI
+eval/project_rag_qa.jsonl 40 条固定标注问答
+eval/reports/             v4 Markdown / JSON 报告
 tests/                    pytest 单测 + smoke_test.py
 docs/ROADMAP.md           v1–v7 路线与验收标准
 data/docs/                本地文档
 storage/                  向量库与 BM25 索引（已 gitignore，可由 ingest 重建）
+requirements-eval.txt     v4 可选依赖（Ragas）
 legacy/                   v1 FAISS 单脚本版，仅作演进参考
 ```
 
@@ -351,7 +425,7 @@ legacy/                   v1 FAISS 单脚本版，仅作演进参考
 - **为什么引用到页码/行**：文件按页、SQL 按行、网页按 URL 生成稳定 `doc_id`，既能增量更新，也能让引用可回溯。
 - **为什么凭证不落元数据**：SQL `source_uri` 只使用 `label#pk`，DSN 只保留驱动/主机/库名；配置支持环境变量插值。
 - **为什么 API 单 worker + 同步路由**：Qdrant 本地磁盘模式只允许一个进程；同步路由由 FastAPI 放入线程池，避免 CPU 密集的检索/精排/生成阻塞事件循环。扩展到多 worker 需要 Qdrant server 模式与外部会话存储。
-- **可对比的实验开关**：`--dense-only`、`--no-rerank`、`--source-type`、`--tag` 可用于记录“改造前/后”的检索与回答差异；v4 会用 Ragas 把差异量化。
+- **可对比的实验开关**：`--dense-only`、`--no-rerank`、`--source-type`、`--tag` 可用于记录“改造前/后”的检索与回答差异；v4 用 Ragas 把差异量化。
 
 ## v1 与当前版本的关系
 

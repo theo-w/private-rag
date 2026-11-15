@@ -1,0 +1,9 @@
+# v4 评估专用知识库：只使用项目自身的公开文档，保证可复现
+sources:
+  - type: file
+    path: README.md
+    tags: [eval]
+  - type: file
+    path: docs
+    include: ["*.md"]
+    tags: [eval]

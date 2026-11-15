@@ -171,6 +171,39 @@ class ReadyOut(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class EvalMetricOut(BaseModel):
+    value: Optional[float] = None
+    coverage: Optional[float] = None
+    valid: Optional[int] = None
+
+
+class EvalConfigOut(BaseModel):
+    name: str
+    label: str
+    use_lexical: bool
+    use_rerank: bool
+    # 键为 evidence_hit@3 / mrr@3 等确定性指标名
+    metrics: dict[str, Optional[float]] = Field(default_factory=dict)
+    ragas: Optional[dict[str, EvalMetricOut]] = None
+    ragas_total: Optional[int] = None
+
+
+class EvalSummaryOut(BaseModel):
+    available: bool
+    reason: Optional[str] = None
+    generated_at: Optional[str] = None
+    dataset_name: Optional[str] = None
+    dataset_total: Optional[int] = None
+    samples_answerable: Optional[int] = None
+    samples_refusal: Optional[int] = None
+    llm_model: Optional[str] = None
+    judge_model: Optional[str] = None
+    embed_model: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    git_commit: Optional[str] = None
+    configs: list[EvalConfigOut] = Field(default_factory=list)
+
+
 class ErrorInfo(BaseModel):
     code: str
     message: str

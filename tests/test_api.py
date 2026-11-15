@@ -128,7 +128,7 @@ def parse_sse(text: str) -> list[tuple[str, dict]]:
 def test_health_root_and_request_id(api):
     response = api.client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": "0.3.0"}
+    assert response.json() == {"status": "ok", "version": "0.4.0"}
     assert response.headers["X-Request-ID"]
 
     root = api.client.get("/", headers={"X-Request-ID": "trace-abc.123"})
@@ -144,8 +144,10 @@ def test_demo_page_and_root_link(api):
     response = api.client.get("/demo")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "no-store, max-age=0"
     assert 'id="chat-form"' in response.text
     assert 'id="top-k"' in response.text
+    assert 'id="eval-panel"' in response.text
 
     root = api.client.get("/")
     assert root.json()["demo"] == "/demo"
