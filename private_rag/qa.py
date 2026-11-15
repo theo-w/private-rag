@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterator, Optional, Sequence
 
@@ -14,6 +14,7 @@ from qdrant_client import QdrantClient
 
 from private_rag.config import (
     COLLECTION_NAME,
+    CONTEXT_MAX_CHARS,
     EMB_MODEL,
     LEXICAL_INDEX_PATH,
     LLM_MODEL,
@@ -22,8 +23,14 @@ from private_rag.config import (
 )
 from private_rag.generation import build_citations, generate_answer, stream_answer
 from private_rag.models import Citation
-from private_rag.retrieval.hybrid import HybridRetriever, RetrievedChunk
+from private_rag.query_rewrite import rewrite_queries
+from private_rag.retrieval.hybrid import (
+    HybridRetriever,
+    RetrievedChunk,
+    fuse_query_results,
+)
 from private_rag.retrieval.lexical import LexicalIndex
+from private_rag.retrieval.parent import context_chars as count_context_chars, expand_parents
 from private_rag.retrieval.rerank import Reranker, load_reranker
 from private_rag.store import close_client, count_points, open_client
 
@@ -37,6 +44,24 @@ class RetrievalOptions:
     top_k: int = TOP_K_RERANK
     use_lexical: bool = True
     use_rerank: bool = True
+    use_parent: bool = True
+    query_rewrite: str = "off"
+
+
+@dataclass
+class RetrievalTrace:
+    """一次检索的完整诊断信息，API meta 与评估报告共用。"""
+
+    chunks: list[RetrievedChunk]
+    used_lexical: bool
+    used_rerank: bool
+    used_parent: bool
+    queries: list[str]
+    query_rewrite: str
+    query_count: int
+    context_chars: int
+    rewrite_fallback: bool = False
+    rewrite_reason: str = ""
 
 
 @dataclass
@@ -46,6 +71,10 @@ class QaResult:
     retrieved: int
     used_lexical: bool
     used_rerank: bool
+    used_parent: bool = False
+    query_rewrite: str = "off"
+    query_count: int = 1
+    context_chars: int = 0
 
 
 @dataclass
@@ -58,6 +87,10 @@ class QaEvent:
     retrieved: int = 0
     used_lexical: bool = False
     used_rerank: bool = False
+    used_parent: bool = False
+    query_rewrite: str = "off"
+    query_count: int = 1
+    context_chars: int = 0
 
 
 @dataclass
@@ -125,11 +158,17 @@ class RagEngine:
             collection_exists=exists,
         )
 
-    def retrieve(
+    def retrieve_with_trace(
         self,
         question: str,
         options: RetrievalOptions,
-    ) -> tuple[list[RetrievedChunk], bool, bool]:
+    ) -> RetrievalTrace:
+        """查询改写 -> 多查询召回融合 -> 原问题精排 -> 父块扩展。"""
+        rewrite = rewrite_queries(
+            question,
+            options.query_rewrite,
+            model=self.llm_model,
+        )
         lexical = self.lexical if options.use_lexical else None
         retriever = HybridRetriever(
             self.client,
@@ -139,16 +178,52 @@ class RagEngine:
             tags=options.tags,
         )
         with self._retrieval_lock:
-            chunks = retriever.retrieve(question)
+            ranked = [retriever.retrieve(query) for query in rewrite.queries]
+
+        if len(ranked) == 1:
+            chunks = ranked[0]
+        else:
+            chunks = fuse_query_results(ranked)
 
         used_lexical = lexical is not None
         used_rerank = options.use_rerank and self.reranker is not None
+        # 精排始终用原问题：改写查询只负责扩大召回，不改变相关性判断
         if used_rerank:
             with self._rerank_lock:
                 chunks = self.reranker.rerank(question, chunks, top_k=options.top_k)
         else:
             chunks = chunks[: options.top_k]
-        return chunks, used_lexical, used_rerank
+
+        if options.use_parent:
+            chunks = expand_parents(chunks, max_chars=CONTEXT_MAX_CHARS)
+            used_parent = any(chunk.parent_id for chunk in chunks)
+        else:
+            chunks = [
+                replace(chunk, snippet_text=chunk.snippet_text or chunk.text)
+                for chunk in chunks
+            ]
+            used_parent = False
+
+        return RetrievalTrace(
+            chunks=chunks,
+            used_lexical=used_lexical,
+            used_rerank=used_rerank,
+            used_parent=used_parent,
+            queries=list(rewrite.queries),
+            query_rewrite=options.query_rewrite,
+            query_count=len(rewrite.queries),
+            context_chars=count_context_chars(chunks),
+            rewrite_fallback=rewrite.fallback,
+            rewrite_reason=rewrite.reason,
+        )
+
+    def retrieve(
+        self,
+        question: str,
+        options: RetrievalOptions,
+    ) -> tuple[list[RetrievedChunk], bool, bool]:
+        trace = self.retrieve_with_trace(question, options)
+        return trace.chunks, trace.used_lexical, trace.used_rerank
 
     def answer(
         self,
@@ -158,19 +233,23 @@ class RagEngine:
         history: Optional[Sequence[tuple[str, str]]] = None,
     ) -> QaResult:
         options = options or RetrievalOptions()
-        chunks, used_lexical, used_rerank = self.retrieve(question, options)
+        trace = self.retrieve_with_trace(question, options)
         answer, citations = generate_answer(
             question,
-            chunks,
+            trace.chunks,
             model=self.llm_model,
             history=history,
         )
         return QaResult(
             answer=answer,
             citations=citations,
-            retrieved=len(chunks),
-            used_lexical=used_lexical,
-            used_rerank=used_rerank,
+            retrieved=len(trace.chunks),
+            used_lexical=trace.used_lexical,
+            used_rerank=trace.used_rerank,
+            used_parent=trace.used_parent,
+            query_rewrite=trace.query_rewrite,
+            query_count=trace.query_count,
+            context_chars=trace.context_chars,
         )
 
     def stream(
@@ -181,14 +260,19 @@ class RagEngine:
         history: Optional[Sequence[tuple[str, str]]] = None,
     ) -> Iterator[QaEvent]:
         options = options or RetrievalOptions()
-        chunks, used_lexical, used_rerank = self.retrieve(question, options)
+        trace = self.retrieve_with_trace(question, options)
+        chunks = trace.chunks
         citations = build_citations(chunks)
         yield QaEvent(
             "citations",
             citations=citations,
             retrieved=len(chunks),
-            used_lexical=used_lexical,
-            used_rerank=used_rerank,
+            used_lexical=trace.used_lexical,
+            used_rerank=trace.used_rerank,
+            used_parent=trace.used_parent,
+            query_rewrite=trace.query_rewrite,
+            query_count=trace.query_count,
+            context_chars=trace.context_chars,
         )
 
         parts: list[str] = []
@@ -205,8 +289,12 @@ class RagEngine:
             text="".join(parts),
             citations=citations,
             retrieved=len(chunks),
-            used_lexical=used_lexical,
-            used_rerank=used_rerank,
+            used_lexical=trace.used_lexical,
+            used_rerank=trace.used_rerank,
+            used_parent=trace.used_parent,
+            query_rewrite=trace.query_rewrite,
+            query_count=trace.query_count,
+            context_chars=trace.context_chars,
         )
 
     def close(self) -> None:

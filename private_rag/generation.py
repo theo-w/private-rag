@@ -50,7 +50,8 @@ def build_citations(chunks: Sequence[RetrievedChunk]) -> list[Citation]:
     citations: list[Citation] = []
     for index, chunk in enumerate(chunks, start=1):
         metadata = chunk.metadata
-        snippet = " ".join(chunk.text.split())
+        # 父块展开后 text 是整段上下文，引用摘要仍用实际命中的子块
+        snippet = " ".join((chunk.snippet_text or chunk.text).split())
         if len(snippet) > 120:
             snippet = snippet[:120] + "…"
         citations.append(

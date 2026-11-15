@@ -59,6 +59,10 @@ class FakeEngine:
             retrieved=1,
             used_lexical=bool(options.use_lexical if options else True),
             used_rerank=bool(options.use_rerank if options else True),
+            used_parent=bool(options.use_parent if options else True),
+            query_rewrite=options.query_rewrite if options else "off",
+            query_count=2 if options and options.query_rewrite != "off" else 1,
+            context_chars=12,
         )
 
     def stream(self, question, *, options=None, history=None):
@@ -66,12 +70,19 @@ class FakeEngine:
         if self.fail_stream:
             raise RuntimeError("模拟流式失败")
         citation = self._citation()
+        used_parent = bool(options.use_parent if options else True)
+        query_rewrite = options.query_rewrite if options else "off"
+        query_count = 2 if options and options.query_rewrite != "off" else 1
         yield QaEvent(
             "citations",
             citations=[citation],
             retrieved=1,
             used_lexical=True,
             used_rerank=True,
+            used_parent=used_parent,
+            query_rewrite=query_rewrite,
+            query_count=query_count,
+            context_chars=12,
         )
         if self.delay:
             time.sleep(self.delay)
@@ -84,6 +95,10 @@ class FakeEngine:
             retrieved=1,
             used_lexical=True,
             used_rerank=True,
+            used_parent=used_parent,
+            query_rewrite=query_rewrite,
+            query_count=query_count,
+            context_chars=12,
         )
 
 
@@ -128,7 +143,7 @@ def parse_sse(text: str) -> list[tuple[str, dict]]:
 def test_health_root_and_request_id(api):
     response = api.client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": "0.4.0"}
+    assert response.json() == {"status": "ok", "version": "0.5.0"}
     assert response.headers["X-Request-ID"]
 
     root = api.client.get("/", headers={"X-Request-ID": "trace-abc.123"})
@@ -147,6 +162,9 @@ def test_demo_page_and_root_link(api):
     assert response.headers["cache-control"] == "no-store, max-age=0"
     assert 'id="chat-form"' in response.text
     assert 'id="top-k"' in response.text
+    assert 'id="use-parent"' in response.text
+    assert 'id="query-rewrite"' in response.text
+    assert "file://" in response.text
     assert 'id="eval-panel"' in response.text
 
     root = api.client.get("/")
@@ -210,6 +228,8 @@ def test_chat_options_and_filters_reach_engine(api):
             "tags": [" a ", "a", "b"],
             "use_lexical": False,
             "use_rerank": False,
+            "use_parent": False,
+            "query_rewrite": "multi",
         },
     )
     assert response.status_code == 200
@@ -219,6 +239,12 @@ def test_chat_options_and_filters_reach_engine(api):
     assert options.top_k == 2
     assert options.use_lexical is False
     assert options.use_rerank is False
+    assert options.use_parent is False
+    assert options.query_rewrite == "multi"
+    assert response.json()["meta"]["used_parent"] is False
+    assert response.json()["meta"]["query_rewrite"] == "multi"
+    assert response.json()["meta"]["query_count"] == 2
+    assert response.json()["meta"]["context_chars"] == 12
 
 
 def test_sessions_crud_and_unknown_session(api):
@@ -257,6 +283,7 @@ def test_sessions_crud_and_unknown_session(api):
         {"question": "x", "top_k": 11},
         {"question": "x", "source_type": "pdf"},
         {"question": "x", "tags": [f"t{index}" for index in range(11)]},
+        {"question": "x", "query_rewrite": "invalid"},
         {"question": "x", "unknown": True},
     ],
 )
@@ -306,8 +333,13 @@ def test_stream_emits_events_and_persists_session(api):
     session_id = events[0][1]["session_id"]
     assert events[1][1]["retrieved"] == 1
     assert events[1][1]["citations"][0]["title"] == "文档A"
+    assert events[1][1]["used_parent"] is True
+    assert events[1][1]["query_rewrite"] == "off"
+    assert events[1][1]["query_count"] == 1
+    assert events[1][1]["context_chars"] == 12
     assert events[-1][1]["answer"] == "流式回答:流式问题"
     assert events[-1][1]["meta"]["history_turns"] == 0
+    assert events[-1][1]["meta"]["used_parent"] is True
 
     detail = api.client.get(f"/api/v1/sessions/{session_id}").json()
     assert [message["role"] for message in detail["messages"]] == ["user", "assistant"]

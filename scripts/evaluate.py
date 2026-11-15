@@ -1,11 +1,11 @@
-"""v4 评估 CLI：策略对比 + 确定性指标 + Ragas + 报告。
+"""v5 评估 CLI：策略对比 + 确定性指标 + Ragas + 报告。
 
 用法：
     python scripts/evaluate.py --validate-only
     python scripts/evaluate.py --configs full --limit 3 \
         --ragas-configs full --ragas-limit 2 \
-        --output /tmp/v4_smoke.md --json-output /tmp/v4_smoke.json
-    python scripts/evaluate.py --configs dense,hybrid,full --ragas-configs dense,full
+        --output /tmp/v5_smoke.md --json-output /tmp/v5_smoke.json
+    python scripts/evaluate.py --configs dense,hybrid,full,parent,parent_multi,parent_hyde
 """
 
 from __future__ import annotations
@@ -53,12 +53,12 @@ def report_path(value: Path | str) -> str:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="运行 private-rag v4 检索策略评估")
+    parser = argparse.ArgumentParser(description="运行 private-rag 检索策略评估")
     parser.add_argument("--dataset", default=str(DEFAULT_DATASET), help="JSONL 评估集")
     parser.add_argument(
         "--configs",
         default="dense,hybrid,full",
-        help="逗号分隔的策略配置：dense,hybrid,full",
+        help="逗号分隔的策略配置：dense,hybrid,full,parent,parent_multi,parent_hyde",
     )
     parser.add_argument("--limit", type=int, help="只跑前 N 条样本（冒烟用）")
     parser.add_argument("--ids", help="只跑指定样本 ID，逗号分隔，例如 q01,q02")
@@ -93,6 +93,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--validate-only",
         action="store_true",
         help="只校验评估集，不加载 Ollama/Qdrant",
+    )
+    parser.add_argument(
+        "--skip-distribution",
+        action="store_true",
+        help="跳过 v4 固定数据集的 40 条/类别分布校验",
     )
     args = parser.parse_args(argv)
 
@@ -150,8 +155,12 @@ def print_summary(report: dict) -> None:
             f"source_hit={metrics['source_hit']} "
             f"answer_rate={metrics['answer_rate']} "
             f"refusal_accuracy={metrics['refusal_accuracy']} "
+            f"context_chars={metrics['avg_context_chars']} "
+            f"queries={metrics['avg_query_count']} "
             f"latency={metrics['avg_latency_ms']}ms"
         )
+        if metrics["rewrite_fallbacks"]:
+            print(f"  查询改写回退：{metrics['rewrite_fallbacks']} 次")
         ragas = config.get("ragas")
         if ragas:
             values = {
@@ -169,12 +178,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"❌ 评估集校验失败：{exc}")
         return 1
 
-    distribution_errors = validate_distribution(all_samples)
-    if distribution_errors:
-        print("❌ 评估集分布不符合 v4 约定：")
-        for error in distribution_errors:
-            print(f"  - {error}")
-        return 1
+    is_default_dataset = Path(args.dataset).resolve() == Path(DEFAULT_DATASET).resolve()
+    if is_default_dataset and not args.skip_distribution:
+        distribution_errors = validate_distribution(all_samples)
+        if distribution_errors:
+            print("❌ 评估集分布不符合 v4 约定：")
+            for error in distribution_errors:
+                print(f"  - {error}")
+            return 1
+    elif not is_default_dataset:
+        print("ℹ️ 非 v4 固定评估集，跳过 40 条/类别分布校验（结构校验已通过）")
 
     if args.validate_only:
         categories = Counter(sample.category for sample in all_samples)
@@ -215,7 +228,9 @@ def main(argv: list[str] | None = None) -> int:
         f"配置：{config_names}；Ragas：{ragas_configs or '关闭'}"
     )
 
-    engine = build_engine(use_rerank="full" in config_names)
+    engine = build_engine(
+        use_rerank=any(CONFIGS[name].use_rerank for name in config_names)
+    )
     try:
         readiness = engine.readiness()
         if not readiness.ready:
@@ -271,6 +286,9 @@ def main(argv: list[str] | None = None) -> int:
         "sample_ids": [sample.id for sample in samples],
         "categories": dict(Counter(sample.category for sample in samples)),
         "configs": config_names,
+        "dataset_is_default": is_default_dataset,
+        "output_markdown": report_path(args.output),
+        "output_json": report_path(args.json_output),
         "llm_model": LLM_MODEL,
         "judge_model": args.judge_model,
         "embed_model": EMB_MODEL,

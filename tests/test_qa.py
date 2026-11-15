@@ -8,6 +8,7 @@ import pytest
 
 from private_rag.models import Citation
 from private_rag.qa import QaEvent, RagEngine, RetrievalOptions
+from private_rag.query_rewrite import RewriteResult
 from private_rag.retrieval.hybrid import RetrievedChunk
 
 
@@ -52,6 +53,14 @@ def _chunk(index: int) -> RetrievedChunk:
             "doc_id": f"doc-{index}",
         },
     )
+
+
+def _parent_chunk(index: int, parent_text: str) -> RetrievedChunk:
+    chunk = _chunk(index)
+    chunk.parent_id = f"parent-{index}"
+    chunk.parent_text = parent_text
+    chunk.parent_index = index
+    return chunk
 
 
 def _engine(client=None, lexical=None, reranker=None) -> RagEngine:
@@ -198,6 +207,164 @@ def test_stream_without_candidates_refuses_without_llm(monkeypatch):
     assert events[0].citations == []
     assert events[1].text == "【资料中没有相关信息】"
     assert events[2].text == "【资料中没有相关信息】"
+
+
+def test_retrieve_with_trace_uses_multiple_queries_and_original_for_rerank(monkeypatch):
+    queries = []
+
+    class FakeRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def retrieve(self, question):
+            queries.append(question)
+            if question == "原问题":
+                return [_parent_chunk(1, "父块一")]
+            return [_parent_chunk(1, "父块一"), _parent_chunk(2, "父块二")]
+
+    def fake_rewrite(question, mode, *, model):
+        assert mode == "multi"
+        return RewriteResult([question, "改写查询"])
+
+    monkeypatch.setattr("private_rag.qa.HybridRetriever", FakeRetriever)
+    monkeypatch.setattr("private_rag.qa.rewrite_queries", fake_rewrite)
+
+    reranker = FakeReranker()
+    engine = _engine(lexical=object(), reranker=reranker)
+    trace = engine.retrieve_with_trace(
+        "原问题",
+        RetrievalOptions(query_rewrite="multi", top_k=2, use_parent=True),
+    )
+
+    assert queries == ["原问题", "改写查询"]
+    assert reranker.calls == [("原问题", 2, 2)]
+    assert [chunk.point_id for chunk in trace.chunks] == ["p1", "p2"]
+    assert trace.used_parent is True
+    assert trace.query_rewrite == "multi"
+    assert trace.query_count == 2
+    assert trace.queries == ["原问题", "改写查询"]
+    assert trace.context_chars == len("父块一") + len("父块二")
+
+
+def test_retrieve_with_trace_reports_rewrite_fallback(monkeypatch):
+    queries = []
+
+    class FakeRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def retrieve(self, question):
+            queries.append(question)
+            return [_chunk(1)]
+
+    monkeypatch.setattr("private_rag.qa.HybridRetriever", FakeRetriever)
+    monkeypatch.setattr(
+        "private_rag.qa.rewrite_queries",
+        lambda question, mode, *, model: RewriteResult(
+            [question], fallback=True, reason="模拟改写失败"
+        ),
+    )
+
+    engine = _engine(lexical=None, reranker=None)
+    trace = engine.retrieve_with_trace(
+        "问题",
+        RetrievalOptions(query_rewrite="hyde", use_parent=False, use_rerank=False),
+    )
+
+    assert queries == ["问题"]
+    assert trace.query_count == 1
+    assert trace.rewrite_fallback is True
+    assert trace.rewrite_reason == "模拟改写失败"
+    assert [chunk.text for chunk in trace.chunks] == ["第 1 段内容。"]
+    assert trace.context_chars == len("第 1 段内容。")
+
+
+def test_retrieve_without_parent_keeps_child_text_and_snippet(monkeypatch):
+    class FakeRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def retrieve(self, question):
+            return [_parent_chunk(1, "父块完整文本"), _parent_chunk(2, "另一个父块")]
+
+    monkeypatch.setattr("private_rag.qa.HybridRetriever", FakeRetriever)
+
+    engine = _engine(lexical=None, reranker=None)
+    trace = engine.retrieve_with_trace(
+        "问题",
+        RetrievalOptions(use_parent=False, use_rerank=False, top_k=2),
+    )
+
+    assert trace.used_parent is False
+    assert [chunk.text for chunk in trace.chunks] == ["第 1 段内容。", "第 2 段内容。"]
+    assert [chunk.snippet_text for chunk in trace.chunks] == [
+        "第 1 段内容。",
+        "第 2 段内容。",
+    ]
+    assert trace.context_chars == len("第 1 段内容。") + len("第 2 段内容。")
+
+
+def test_answer_reports_parent_and_rewrite_metadata(monkeypatch):
+    class FakeRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def retrieve(self, question):
+            return [_parent_chunk(1, "父块完整文本")]
+
+    monkeypatch.setattr("private_rag.qa.HybridRetriever", FakeRetriever)
+    monkeypatch.setattr(
+        "private_rag.qa.rewrite_queries",
+        lambda question, mode, *, model: RewriteResult([question, "改写查询"]),
+    )
+    monkeypatch.setattr(
+        "private_rag.qa.generate_answer",
+        lambda question, chunks, model, history: (
+            "回答",
+            [Citation(1, "文档1", "file", "data/docs/1.md", "片段")],
+        ),
+    )
+
+    engine = _engine(lexical=object(), reranker=None)
+    result = engine.answer(
+        "问题",
+        options=RetrievalOptions(query_rewrite="multi", use_rerank=False),
+    )
+
+    assert result.answer == "回答"
+    assert result.retrieved == 1
+    assert result.used_parent is True
+    assert result.query_rewrite == "multi"
+    assert result.query_count == 2
+    assert result.context_chars == len("父块完整文本")
+
+
+def test_stream_events_carry_parent_and_query_metadata(monkeypatch):
+    class FakeRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def retrieve(self, question):
+            return [_parent_chunk(1, "父块完整文本")]
+
+    def fake_stream(question, chunks, model, history):
+        assert chunks[0].text == "父块完整文本"
+        yield "回答"
+
+    monkeypatch.setattr("private_rag.qa.HybridRetriever", FakeRetriever)
+    monkeypatch.setattr("private_rag.qa.stream_answer", fake_stream)
+
+    engine = _engine(lexical=None, reranker=None)
+    events = list(engine.stream("问题", options=RetrievalOptions(use_rerank=False)))
+
+    citations = events[0]
+    assert citations.kind == "citations"
+    assert citations.used_parent is True
+    assert citations.query_count == 1
+    assert citations.context_chars == len("父块完整文本")
+    assert events[-1].kind == "done"
+    assert events[-1].used_parent is True
+    assert events[-1].context_chars == len("父块完整文本")
 
 
 def test_engine_close_closes_client():

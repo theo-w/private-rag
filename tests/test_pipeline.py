@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections import defaultdict
 
 from langchain_core.embeddings import Embeddings
 from qdrant_client import QdrantClient
@@ -92,6 +93,51 @@ def test_ingest_is_idempotent_and_updates_replaced_vectors(tmp_path):
             if (record.payload or {}).get("metadata", {}).get("doc_id") == doc_a.doc_id
         }
         assert not (old_ids & new_ids)
+    finally:
+        client.close()
+
+
+def test_ingest_persists_parent_payload_and_lexical_parent(tmp_path):
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    # 两段各 1500 字，按默认 2000 字符父块切分会得到两个父块，
+    # 每个父块再被 700/100 的子块切分器切成多个子块。
+    (docs_dir / "long.txt").write_text(
+        "甲" * 1500 + "\n\n" + "乙" * 1500,
+        encoding="utf-8",
+    )
+
+    config = SourcesConfig(sources=[FileSource(path=str(docs_dir))])
+    lexical_path = tmp_path / "bm25.pkl"
+    client = QdrantClient(path=str(tmp_path / "qdrant"))
+    try:
+        _run(client, config, lexical_path)
+        records = list(scroll_all(client))
+        assert len(records) > 2
+
+        by_parent = defaultdict(list)
+        for record in records:
+            payload = record.payload or {}
+            parent = payload["parent"]
+            assert set(parent) == {"id", "index", "count", "text"}
+            assert parent["count"] == 2
+            assert payload["metadata"]["parent_id"] == parent["id"]
+            assert payload["metadata"]["parent_index"] == parent["index"]
+            assert payload["metadata"]["parent_count"] == parent["count"]
+            assert payload["page_content"] in parent["text"]
+            by_parent[parent["id"]].append(record)
+
+        assert len(by_parent) == 2
+        for items in by_parent.values():
+            parent_text = items[0].payload["parent"]["text"]
+            assert len(parent_text) <= 2000
+            assert all(item.payload["parent"]["text"] == parent_text for item in items)
+
+        index = LexicalIndex.load(lexical_path)
+        assert index is not None
+        assert len(index.documents) == len(records)
+        assert {document["parent"]["id"] for document in index.documents} == set(by_parent)
+        assert all(document["parent"]["text"] for document in index.documents)
     finally:
         client.close()
 

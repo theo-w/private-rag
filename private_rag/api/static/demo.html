@@ -962,7 +962,21 @@
               <input id="use-rerank" type="checkbox" checked>
               <span class="toggle-text">reranker 精排 <small>逐条精读候选，决定最终送入模型的片段。</small></span>
             </label>
+            <label class="toggle" for="use-parent">
+              <input id="use-parent" type="checkbox" checked>
+              <span class="toggle-text">父块上下文 <small>命中子块后把整段父块送给模型；关掉则只送子块。</small></span>
+            </label>
           </div>
+
+          <label class="field" for="query-rewrite">
+            <span class="field-label">查询改写</span>
+            <select id="query-rewrite">
+              <option value="off">关闭（默认）</option>
+              <option value="multi">多查询</option>
+              <option value="hyde">HyDE 假想文档</option>
+            </select>
+            <span class="hint">多查询/HyDE 会额外调用一次本地模型改写检索词，延迟更高；最终仍用原问题精排。</span>
+          </label>
         </section>
 
         <section class="panel" aria-labelledby="session-title">
@@ -1091,6 +1105,8 @@
         tags: $("tags"),
         useLexical: $("use-lexical"),
         useRerank: $("use-rerank"),
+        useParent: $("use-parent"),
+        queryRewrite: $("query-rewrite"),
         sessionId: $("session-id"),
         sessionState: $("session-state"),
         copySession: $("copy-session"),
@@ -1354,6 +1370,21 @@
       }
 
       async function refreshStatus() {
+        if (location.protocol === "file:") {
+          // 相对 URL 在 file:// 下无法解析，先给出明确提示，避免误判为服务离线。
+          setStatus("offline", "请通过服务地址打开");
+          setVersion("");
+          renderReadyFailure(
+            new Error("当前页面以 file:// 打开，无法访问本地服务；请访问 http://127.0.0.1:8766/demo"),
+          );
+          el.evalStatus.textContent = "未加载";
+          el.evalBody.replaceChildren();
+          const hint = document.createElement("p");
+          hint.className = "eval-empty";
+          hint.textContent = "请通过 http://127.0.0.1:8766/demo 打开页面后再刷新。";
+          el.evalBody.append(hint);
+          return;
+        }
         el.refreshStatus.disabled = true;
         setStatus("loading", "正在检查服务…");
         try {
@@ -1476,12 +1507,22 @@
         el.requestId.title = "请求 ID";
       }
 
+      function rewriteLabel(mode) {
+        if (mode === "multi") return "多查询";
+        if (mode === "hyde") return "HyDE";
+        return "关闭";
+      }
+
       function renderMeta(meta, requestId) {
         if (!meta) return;
         el.requestId.textContent = requestId || "—";
         el.requestId.title = requestId ? `request_id: ${requestId}` : "请求 ID";
         const rows = [
-          ["候选片段", String(meta.retrieved ?? "—")],
+          ["上下文片段", String(meta.retrieved ?? "—")],
+          ["上下文长度", meta.context_chars != null ? `${meta.context_chars} 字符` : "—"],
+          ["父块上下文", meta.used_parent ? "开" : "关", meta.used_parent ? "on" : "off"],
+          ["查询改写", rewriteLabel(meta.query_rewrite), meta.query_rewrite === "off" ? "off" : "on"],
+          ["实际查询数", String(meta.query_count ?? "—")],
           ["历史轮次", String(meta.history_turns ?? "—")],
           ["BM25", meta.used_lexical ? "开" : "关", meta.used_lexical ? "on" : "off"],
           ["reranker", meta.used_rerank ? "开" : "关", meta.used_rerank ? "on" : "off"],
@@ -1649,6 +1690,8 @@
           top_k: Number(el.topK.value),
           use_lexical: el.useLexical.checked,
           use_rerank: el.useRerank.checked,
+          use_parent: el.useParent.checked,
+          query_rewrite: el.queryRewrite.value,
         };
         if (el.sourceType.value) body.source_type = el.sourceType.value;
         const tags = parseTags(el.tags.value);

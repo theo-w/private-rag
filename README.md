@@ -1,23 +1,25 @@
 # private-rag
 
-完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储。
+完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Parent-Document 父子块上下文**与**查询改写（多查询 / HyDE）**：子块负责召回，父块负责给模型完整上下文。Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储。
 
 ## 架构
 
 ```
 data/docs (txt/md/pdf) ─┐
-网页 URL ───────────────┼─→ connectors → SourceDocument → 切分 ─→ Qdrant（向量）
-SQL 数据库 ─────────────┘                                      └─→ storage/lexical/bm25.pkl
+网页 URL ───────────────┼─→ connectors → SourceDocument → 父块(2000) → 子块(700/100) ─→ Qdrant（子块向量 + 父块原文）
+SQL 数据库 ─────────────┘                                                          └─→ storage/lexical/bm25.pkl
 
-问题 ─→ RagEngine ─→ dense top20 ─┐
-                     BM25 top20 ───┴─→ RRF 融合 top10 ─→ bge-reranker top3 ─→ Ollama 生成 [n] 引用
+问题 ─→ 查询改写（off / multi / HyDE，可选）
+     ─→ 每个查询各跑 dense top20 + BM25 top20 → RRF 融合 top10（跨查询再融合）
+     ─→ bge-reranker 用原问题精排 top3 → 父块去重/扩展（预算 6000 字符）→ Ollama 生成 [n] 引用
                                    ↑
                      CLI（chat_cli.py）/ HTTP API（serve.py，同步 + SSE 流式）/ Web 演示页（/demo）
 ```
 
 - 入库与问答彻底分离：`ingest.py` 是唯一写入入口，`chat_cli.py` 与 `serve.py` 只读。
 - CLI 与 HTTP API 共用 `private_rag/qa.py` 的 `RagEngine`，检索、精排、生成与引用链路完全一致。
-- 每个 chunk 都带 `doc_id / source_type / source_uri / title / page / table / tags / content_hash`，可直接生成引用。
+- 每个子块都带 `doc_id / source_type / source_uri / title / page / table / tags / content_hash`，另带父块 `parent_id / parent_index` 与父块原文，可直接生成引用；旧库没有父块字段时自动回退子块。
+- 父块默认开启、查询改写默认关闭：日常问答默认不额外调用改写 LLM；需要时可通过 API 或演示页单独打开（CLI 使用默认值）。
 - 阶段路线与验收标准见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 - 想先从零理解“建库 → 检索 → 生成”的完整流程，可读 [docs/beginner-guide.md](docs/beginner-guide.md)（小白版流程导读 + 示意代码）。
 
@@ -100,7 +102,8 @@ python scripts/serve.py --reload         # 开发模式，代码变更自动重�
 
 - 实时读取 `/health` 与 `/ready`，显示版本、向量数、BM25/reranker 状态、未就绪原因与 warning。
 - 对话支持流式/同步切换、停止生成、示例问题；Enter 发送，Shift+Enter 换行，问题上限 2000 字符。
-- 可调 `top_k`（1–10）、`source_type`、`tags`、`use_lexical`、`use_rerank`；结果区的 `meta`、引用和会话历史会随参数变化。
+- 可调 `top_k`（1–10）、`source_type`、`tags`、`use_lexical`、`use_rerank`、`use_parent` 与 `query_rewrite`（关闭 / 多查询 / HyDE）；结果区的 `meta`、引用和会话历史会随参数变化。
+- 本轮信息会展示实际送入的父块字符数、查询数与改写模式；引用片段优先显示命中的子块原文。
 - 支持新建、复制、删除会话与刷新历史；流式生成会逐字显示，并展示 `session → citations → token → done` 的真实事件效果。
 - 错误统一展示 `code / message / details / request_id`；流式中途停止不会留下半轮会话。
 - 仅用于本机演示：服务默认无鉴权，请勿直接暴露公网。
@@ -144,11 +147,13 @@ curl -s -o /dev/null -w '%{http_code}\n' -X DELETE http://127.0.0.1:8000/api/v1/
 
 - `question`：1–2000 字符，必填。
 - `session_id`：可选；省略时自动创建新会话，响应回传 `session_id`；未知/过期 ID 返回 404。
-- `top_k`：1–10，默认 3，表示最终送入 LLM 的片段数。
+- `top_k`：1–10，默认 3，表示最终送入 LLM 的片段数；父块开启时按“最多几个父块”计。
 - `source_type`：`file` / `web` / `sql`；`tags`：最多 10 个，命中任意一个即可。
 - `use_lexical` / `use_rerank`：是否启用 BM25 与 reranker，默认均为 `true`。
+- `use_parent`：是否把命中的子块扩展为父块上下文，默认 `true`；关闭后只送命中子块。
+- `query_rewrite`：`off` / `multi` / `hyde`，默认 `off`。`multi` 生成最多 2 个改写查询，`hyde` 生成一段假想文档；两者都只用于检索，最终仍用原问题精排。
 
-同步响应包含 `session_id / answer / citations / meta / request_id`；`meta` 中有 `retrieved / used_lexical / used_rerank / history_turns / elapsed_ms`。
+同步响应包含 `session_id / answer / citations / meta / request_id`；`meta` 中有 `retrieved / used_lexical / used_rerank / used_parent / query_rewrite / query_count / context_chars / history_turns / elapsed_ms`。
 
 ### SSE 流式输出
 
@@ -279,6 +284,76 @@ python3 scripts/evaluate.py --configs dense,hybrid,full --ragas-configs dense,fu
 - **评估语料就是仓库文档**：改完 README/docs 或标注集后，必须重新执行 `prepare_eval_kb.py --recreate` 再跑报告，否则结果与仓库内容不一致。
 - 报告与数据集会提交到仓库，评估库、BM25 与缓存不会（`storage/` 已 gitignore）。
 
+## v5 Parent-Document RAG 与查询改写
+
+v5 处理两个问题：子块召回准，但 700 字符上下文容易丢前因后果；用户换个说法或多跳提问时，单次检索容易漏。默认策略是**父块开、查询改写关**，日常问答不增加额外的 LLM 调用。
+
+### 父子块：小块召回，大段阅读
+
+- 入库先按 2000 字符、0 重叠切父块，再在每个父块内按 700/100 切子块；向量与 BM25 **只索引子块**。
+- 子块 payload 带 `parent.id/index/count/text`，BM25 索引同样保存父块字段；命中后按父块去重，在 `RAG_CONTEXT_MAX_CHARS` 预算内送父块整段原文。
+- 父块放不进剩余预算时回退到命中的子块（必要时截断），保证命中内容不丢；`snippet_text` 保存子块原文，用于引用展示。
+- `top_k` 限制的是最终送入的父块数；`retrieved` 也按父块数计。
+- 旧库没有 `parent` 字段时自动回退子块，无需迁移；重新执行 ingest 后生效。
+- 父块文本随每个子块各存一份，Qdrant 与 BM25 体积约放大 2–3 倍；换来的是无需额外 docstore，也不会出现父子存储不一致。
+
+| 环境变量 | 默认 | 说明 |
+|---|---:|---|
+| `RAG_PARENT_CHUNK_SIZE` | 2000 | 父块最大字符数；修改后需重建知识库 |
+| `RAG_PARENT_CHUNK_OVERLAP` | 0 | 父块重叠字符数 |
+| `RAG_CONTEXT_MAX_CHARS` | 6000 | 送入 LLM 的父块总字符预算 |
+
+### 查询改写：换个说法再搜一次
+
+| 模式 | 行为 | 额外成本 |
+|---|---|---|
+| `off` | 只用原问题检索；默认 | 无 |
+| `multi` | 让本地 LLM 生成最多 2 个语义等价的查询，原问题 + 变体各跑一遍 dense + BM25，再按子块做跨查询 RRF | 1 次 LLM 调用 + 2 次检索 |
+| `hyde` | 让 LLM 写一段“假想文档”，与原问题一起检索；HyDE 文本只用于检索，不进入最终上下文 | 1 次 LLM 调用 |
+
+- 所有查询最终仍用**原问题**做 reranker 精排，避免改写文本把答案带偏。
+- 改写失败（JSON 非法、模型不可用、没有可用变体）自动回退原问题，`meta.query_count` 为 1；错误信息最多 200 字符且不包含问题正文。
+- 改写温度固定 0、`num_predict=512`，每个变体 ≤300 字符，HyDE ≤400 字符。
+
+API 示例：
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/v1/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"香蕉要放冰箱吗？","use_parent":true,"query_rewrite":"multi"}'
+```
+
+响应 `meta` 会给出 `used_parent / query_rewrite / query_count / context_chars`；SSE 的 `citations` 与 `done` 事件携带同一组字段。
+
+### v5 评估
+
+评估集 `eval/v5_paraphrase_qa.jsonl` 共 18 条（15 条可回答 + 3 条应拒答），覆盖口语化、多跳、降级与边界问题；`evidence` 必须逐字出现在来源文档。确定性指标覆盖 4 组配置，Ragas 只跑 `full` 与 `parent_multi` 各 12 条子集：
+
+| 配置 | 父块 | 查询改写 | 用途 |
+|---|---|---|---|
+| `full` | 否 | `off` | v4 基线（父块关闭，保持原口径） |
+| `parent` | 是 | `off` | 单独观察父块上下文 |
+| `parent_multi` | 是 | `multi` | 父块 + 多查询 |
+| `parent_hyde` | 是 | `hyde` | 父块 + HyDE |
+
+```bash
+# v5 主报告（新数据集）
+python3 scripts/evaluate.py --dataset eval/v5_paraphrase_qa.jsonl \
+  --configs full,parent,parent_multi,parent_hyde \
+  --ragas-configs full,parent_multi --ragas-limit 12 \
+  --output eval/reports/v5_report.md --json-output eval/reports/v5_report.json
+
+# v4 40 条回归（同一 4 组配置）
+python3 scripts/evaluate.py --configs full,parent,parent_multi,parent_hyde \
+  --ragas-configs full,parent_multi --ragas-limit 12 \
+  --output eval/reports/v5_v4_regression.md --json-output eval/reports/v5_v4_regression.json
+```
+
+报告会列出 `avg_context_chars`、`avg_query_count`、`used_parent_rate`、`rewrite_fallbacks`、相对 `full` 的差值与失败案例；Ragas 只覆盖 12 条子集，不能写成全量结论。实际增益或负增益以报告为准，见 [eval/reports/v5_report.md](eval/reports/v5_report.md) 与 [eval/reports/v5_v4_regression.md](eval/reports/v5_v4_regression.md)。
+
+- 评估语料仍是仓库文档：先定稿 README/docs，再 `prepare_eval_kb.py --recreate`，最后跑报告。
+- 演示页的“v4 评估”面板继续读取 `v4_report`；v5 四组对比在报告里查看，避免一次运行覆盖 v4 基线。
+
 ## 多源配置
 
 复制示例并按需修改：
@@ -363,7 +438,7 @@ python scripts/ingest.py --recreate                               # 清空集合
 python -m pytest tests -q
 ```
 
-覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。
+覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4/v5 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。
 
 冒烟测试需要已入库并启动 Ollama：
 
@@ -384,10 +459,12 @@ private_rag/
 │   ├── files.py          txt / md / pdf（按页）
 │   ├── web.py            URL 抓取 + 正文抽取
 │   ├── sql.py            SQLAlchemy 查询 -> 行级文档
-│   └── pipeline.py       切分、幂等写入、更新替换、prune、BM25 重建
+│   ├── chunking.py       父块(2000/0)内切子块(700/100)，生成稳定父块 ID
+│   └── pipeline.py       父子块切分、幂等写入、更新替换、prune、BM25 重建
 ├── retrieval/
-│   ├── lexical.py        jieba + rank_bm25，落盘/加载/过滤
-│   ├── hybrid.py         dense + BM25 + RRF
+│   ├── lexical.py        jieba + rank_bm25，落盘/加载/过滤（保存父块字段）
+│   ├── hybrid.py         dense + BM25 + RRF，多查询融合与父块字段解析
+│   ├── parent.py         父块去重、预算控制与子块回退
 │   └── rerank.py         bge-reranker 精排
 ├── api/
 │   ├── app.py            FastAPI 工厂、lifespan、请求 ID 中间件
@@ -395,26 +472,28 @@ private_rag/
 │   ├── schemas.py        Pydantic 请求/响应模型
 │   ├── errors.py         统一错误响应与异常处理器
 │   └── static/demo.html  单文件 Web 演示页（/demo）
-├── qa.py                 共享问答引擎（CLI/API 同一条链路）
+├── qa.py                 共享问答引擎（CLI/API 同一条链路，含检索 trace）
+├── query_rewrite.py      多查询 / HyDE 改写与失败回退
 ├── sessions.py           内存多轮会话、TTL/容量/历史裁剪
 ├── generation.py         编号上下文、历史、[n] 引用与流式生成
-├── evaluation.py         v4 数据集校验、策略对比、Ragas 与报告渲染
-└── eval_env.py           v4 评估库路径隔离（导入配置前生效）
+├── evaluation.py         v4/v5 数据集校验、策略对比、Ragas 与报告渲染
+└── eval_env.py           评估库路径隔离（导入配置前生效）
 config/settings.py        兼容入口（re-export private_rag.config）
 config/sources.example.yaml / sources.demo.yaml / sources.eval.yaml
 scripts/ingest.py         多源入库 CLI
 scripts/chat_cli.py       混合检索问答 CLI
 scripts/serve.py          HTTP 服务入口（单 worker）
 scripts/init_demo_db.py   生成演示 SQLite 库
-scripts/prepare_eval_kb.py 构建 v4 评估专用知识库
-scripts/evaluate.py       v4 策略评估与报告 CLI
-eval/project_rag_qa.jsonl 40 条固定标注问答
-eval/reports/             v4 Markdown / JSON 报告
+scripts/prepare_eval_kb.py 构建评估专用知识库
+scripts/evaluate.py       策略评估与报告 CLI
+eval/project_rag_qa.jsonl 40 条固定标注问答（v4）
+eval/v5_paraphrase_qa.jsonl 18 条口语化/复杂问题（v5）
+eval/reports/             v4/v5 Markdown / JSON 报告
 tests/                    pytest 单测 + smoke_test.py
 docs/ROADMAP.md           v1–v7 路线与验收标准
 data/docs/                本地文档
 storage/                  向量库与 BM25 索引（已 gitignore，可由 ingest 重建）
-requirements-eval.txt     v4 可选依赖（Ragas）
+requirements-eval.txt     可选评估依赖（Ragas）
 legacy/                   v1 FAISS 单脚本版，仅作演进参考
 ```
 
@@ -426,6 +505,7 @@ legacy/                   v1 FAISS 单脚本版，仅作演进参考
 - **为什么凭证不落元数据**：SQL `source_uri` 只使用 `label#pk`，DSN 只保留驱动/主机/库名；配置支持环境变量插值。
 - **为什么 API 单 worker + 同步路由**：Qdrant 本地磁盘模式只允许一个进程；同步路由由 FastAPI 放入线程池，避免 CPU 密集的检索/精排/生成阻塞事件循环。扩展到多 worker 需要 Qdrant server 模式与外部会话存储。
 - **可对比的实验开关**：`--dense-only`、`--no-rerank`、`--source-type`、`--tag` 可用于记录“改造前/后”的检索与回答差异；v4 用 Ragas 把差异量化。
+- **为什么父块存在每个子块里**：避免额外 docstore 与父子一致性维护；代价是索引体积放大 2–3 倍，对本地规模可接受。父块超预算时回退子块，保证精排命中的片段一定进入上下文。
 
 ## v1 与当前版本的关系
 
