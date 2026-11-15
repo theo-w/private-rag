@@ -59,6 +59,8 @@ class LexicalHit:
     text: str
     metadata: dict
     score: float
+    # 父块信息随 payload 一起走，命中后可直接展开父块；旧索引没有此字段。
+    parent: Optional[dict] = None
 
 
 class LexicalIndex:
@@ -99,6 +101,7 @@ class LexicalIndex:
                     text=document.get("text", ""),
                     metadata=document.get("metadata", {}),
                     score=float(score),
+                    parent=document.get("parent"),
                 )
             )
         hits.sort(key=lambda hit: (-hit.score, hit.point_id))
@@ -150,6 +153,7 @@ def build_from_store(
                 "point_id": str(record.id),
                 "text": text,
                 "metadata": payload.get("metadata", {}),
+                "parent": payload.get("parent"),
             }
         )
     index = LexicalIndex(documents)

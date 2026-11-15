@@ -30,6 +30,65 @@ class RetrievedChunk:
     lexical_score: Optional[float] = None
     rrf_score: float = 0.0
     rerank_score: Optional[float] = None
+    # 父块字段只在父子块索引中存在；旧数据保持 None，自动回退子块。
+    parent_id: Optional[str] = None
+    parent_text: Optional[str] = None
+    parent_index: Optional[int] = None
+    # 命中的子块原文，用于引用摘要；展开父块后 text 会变成长文本。
+    snippet_text: Optional[str] = None
+
+    @classmethod
+    def from_payload(
+        cls,
+        point_id: str,
+        payload: Optional[dict],
+        **kwargs,
+    ) -> "RetrievedChunk":
+        """统一解析 Qdrant payload；旧数据没有 parent 字段时按子块处理。"""
+        payload = payload or {}
+        parent = payload.get("parent")
+        if not isinstance(parent, dict):
+            parent = {}
+        return cls(
+            point_id=str(point_id),
+            text=str(payload.get("page_content", "")),
+            metadata=payload.get("metadata") or {},
+            parent_id=parent.get("id"),
+            parent_text=parent.get("text"),
+            parent_index=parent.get("index"),
+            **kwargs,
+        )
+
+
+def _fill_parent(target: RetrievedChunk, source: RetrievedChunk) -> None:
+    """融合时补全父块字段：两路命中同一子块，任一路带父块即可。"""
+    if target.parent_id is None and source.parent_id is not None:
+        target.parent_id = source.parent_id
+        target.parent_text = source.parent_text
+        target.parent_index = source.parent_index
+
+
+def _chunk_from_lexical(hit: LexicalHit) -> RetrievedChunk:
+    parent = hit.parent if isinstance(hit.parent, dict) else {}
+    return RetrievedChunk(
+        point_id=hit.point_id,
+        text=hit.text,
+        metadata=hit.metadata,
+        parent_id=parent.get("id"),
+        parent_text=parent.get("text"),
+        parent_index=parent.get("index"),
+    )
+
+
+def _chunk_from_dense(item: RetrievedChunk) -> RetrievedChunk:
+    return RetrievedChunk(
+        point_id=item.point_id,
+        text=item.text,
+        metadata=item.metadata,
+        parent_id=item.parent_id,
+        parent_text=item.parent_text,
+        parent_index=item.parent_index,
+    )
 
 
 def build_filter(
@@ -59,23 +118,45 @@ def reciprocal_rank_fusion(
     merged: dict[str, RetrievedChunk] = {}
 
     for rank, item in enumerate(dense, start=1):
-        chunk = merged.setdefault(
-            item.point_id,
-            RetrievedChunk(point_id=item.point_id, text=item.text, metadata=item.metadata),
-        )
+        chunk = merged.setdefault(item.point_id, _chunk_from_dense(item))
+        _fill_parent(chunk, item)
         chunk.dense_rank = rank
         chunk.dense_score = item.dense_score
         chunk.rrf_score += 1.0 / (rrf_k + rank)
 
     for rank, hit in enumerate(lexical, start=1):
-        chunk = merged.setdefault(
-            hit.point_id,
-            RetrievedChunk(point_id=hit.point_id, text=hit.text, metadata=hit.metadata),
-        )
+        lexical_chunk = _chunk_from_lexical(hit)
+        chunk = merged.setdefault(hit.point_id, lexical_chunk)
+        _fill_parent(chunk, lexical_chunk)
         chunk.lexical_rank = rank
         chunk.lexical_score = hit.score
         chunk.rrf_score += 1.0 / (rrf_k + rank)
 
+    return sorted(merged.values(), key=lambda chunk: (-chunk.rrf_score, chunk.point_id))[:top_k]
+
+
+def fuse_query_results(
+    ranked_lists: Sequence[Sequence[RetrievedChunk]],
+    *,
+    rrf_k: int = RRF_K,
+    top_k: int = FUSION_TOP_K,
+) -> list[RetrievedChunk]:
+    """融合多个查询各自的结果：按 point id 去重并累加 RRF 分数。
+
+    单个查询内部已经做过 dense/BM25 融合；这里再做一层跨查询 RRF，
+    让同时被多个改写查询命中的子块排名更靠前。
+    """
+    merged: dict[str, RetrievedChunk] = {}
+    for ranked in ranked_lists:
+        for rank, item in enumerate(ranked, start=1):
+            chunk = merged.setdefault(item.point_id, _chunk_from_dense(item))
+            _fill_parent(chunk, item)
+            if chunk.dense_rank is None:
+                chunk.dense_rank = item.dense_rank
+                chunk.dense_score = item.dense_score
+                chunk.lexical_rank = item.lexical_rank
+                chunk.lexical_score = item.lexical_score
+            chunk.rrf_score += 1.0 / (rrf_k + rank)
     return sorted(merged.values(), key=lambda chunk: (-chunk.rrf_score, chunk.point_id))[:top_k]
 
 
@@ -117,12 +198,10 @@ class HybridRetriever:
         )
         results: list[RetrievedChunk] = []
         for point in response.points:
-            payload = point.payload or {}
             results.append(
-                RetrievedChunk(
-                    point_id=str(point.id),
-                    text=payload.get("page_content", ""),
-                    metadata=payload.get("metadata", {}),
+                RetrievedChunk.from_payload(
+                    str(point.id),
+                    point.payload,
                     dense_score=float(point.score),
                 )
             )

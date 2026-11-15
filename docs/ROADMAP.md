@@ -8,7 +8,7 @@
 | v2 | `v2-qdrant-rerank-citation` | Qdrant 持久化、bge-reranker、混合检索（BM25 + 向量 + RRF）、标签/来源过滤、多源接入（文件/网页/SQL）、页码与引用溯源、增量与 prune | ✅ 本分支完成 | 三源可入库；重复入库跳过；更新只替换对应 doc_id；引用含类型/标题/URL 或页码；过滤生效；pytest 通过 |
 | v3 | `v3-fastapi-session` | FastAPI 服务化、多轮会话（session + 历史裁剪）、流式输出、统一错误处理 | ✅ 本分支完成 | API 可并发处理多会话；历史不串号；有接口级测试与启动说明 |
 | v4 | `v4-ragas-eval` | Ragas 自动评估：30–50 条标注问答、faithfulness / answer relevancy / context precision / recall、调参对比报告 | ✅ 本分支完成 | 固化评估集与脚本；给出 v2→v4 的量化对比（至少 2 组参数/策略） |
-| v5 | `v5-parent-rag-query-rewrite` | Parent-Document RAG（子块召回、父块送上下文）、查询改写（多查询 / HyDE）、去重与上下文预算 | 计划中 | 复杂/口语化问题命中率提升；有前后对比与失败案例分析 |
+| v5 | `v5-parent-rag-query-rewrite` | Parent-Document RAG（子块召回、父块送上下文）、查询改写（多查询 / HyDE）、去重与上下文预算 | ✅ 本分支完成（评估结果见报告） | 支持父子块、多查询/HyDE、预算与去重；有 `full` / `parent` / `parent_multi` / `parent_hyde` 前后对比、Ragas 子集与失败案例分析，见 `eval/reports/v5_report.md` |
 | v6 | `v6-ocr-parser` | 扫描件 OCR、表格解析、版面处理，接入现有连接器与元数据 | 计划中 | 扫描 PDF 与表格可检索；页码/表格名进入引用 |
 | v7 | `v7-agentic-rag` | Agentic RAG：意图路由、SQL/工具调用、检索-行动循环、可观测 trace | 计划中 | 业务问题能自动选择知识库或工具；trace 可回放每条决策 |
 
@@ -50,6 +50,21 @@
 - [x] `evaluate.py --validate-only` 与不依赖 Ollama/Ragas 的单元测试
 - [x] README 与 `eval/README.md` 说明安装、重建、冒烟、全量运行与自评偏差
 - [x] 评估语料就是仓库文档：文档定稿后重建评估库并重跑，报告与仓库内容一致
+
+## v5 详细验收（本分支）
+
+- [x] 父子块切分：父块 2000/0，父块内子块 700/100；向量与 BM25 只索引子块
+- [x] 子块 payload / BM25 documents 携带父块 `id/index/count/text`，父块 ID 确定性生成
+- [x] 命中后按父块去重扩展，`RAG_CONTEXT_MAX_CHARS` 默认 6000；超预算回退子块并保留命中片段
+- [x] 旧库没有 `parent` 字段时自动回退子块，无需迁移
+- [x] 查询改写 `off` / `multi` / `hyde`：多查询最多 2 个变体、HyDE ≤400 字符；失败回退原问题且不泄露问题正文
+- [x] 多查询各自 dense + BM25 后按子块做跨查询 RRF，rerank 始终使用原问题
+- [x] API / SSE / 演示页可开关父块与改写，并展示 `used_parent / query_rewrite / query_count / context_chars`
+- [x] 生成缓存 key 含配置名、上下文哈希与模型，避免跨配置/跨父块复用错误答案
+- [x] 新增 v5 18 条口语化/复杂问题集（15 可答 + 3 拒答），证据逐字校验；v4 40 条回归
+- [x] 四组配置前后对比；Ragas 子集 12 条并标注样本数；失败案例与限制写入报告
+- [x] 父子块、预算、跨查询融合、改写回退、API 元数据与旧数据兼容的单测覆盖
+- [x] README、beginner-guide、eval/README 说明参数、数据流、命令与局限
 
 ## 分支与提交约定
 

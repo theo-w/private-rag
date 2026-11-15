@@ -12,7 +12,13 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 
-from private_rag.config import CHUNK_OVERLAP, CHUNK_SIZE, COLLECTION_NAME, LEXICAL_INDEX_PATH
+from private_rag.config import COLLECTION_NAME, LEXICAL_INDEX_PATH
+from private_rag.ingestion.chunking import (
+    SEPARATORS,
+    build_child_splitter,
+    build_parent_splitter,
+    split_parent_child,
+)
 from private_rag.ingestion.files import load_file_documents
 from private_rag.ingestion.sql import load_sql_documents, redact_dsn
 from private_rag.ingestion.web import load_web_documents
@@ -36,7 +42,6 @@ from private_rag.store import (
 Source = Union[FileSource, WebSource, SqlSource]
 Logger = Callable[[str], None]
 
-SEPARATORS = ["\n\n", "\n", "。", "！", "？", ". ", " ", ""]
 EMBED_BATCH_SIZE = 32
 
 
@@ -68,11 +73,8 @@ def load_source(source: Source) -> LoadedSource:
 
 
 def build_splitter() -> RecursiveCharacterTextSplitter:
-    return RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-        separators=SEPARATORS,
-    )
+    """子块切分器；保留旧名字，供入库与测试复用。"""
+    return build_child_splitter()
 
 
 def chunk_metadata(
@@ -80,6 +82,10 @@ def chunk_metadata(
     chunk_index: int,
     chunk_count: int,
     content_hash: str,
+    *,
+    parent_id: str | None = None,
+    parent_index: int | None = None,
+    parent_count: int | None = None,
 ) -> dict:
     """chunk 的 payload 元数据：既能过滤，也能直接生成引用。"""
     metadata = {
@@ -94,6 +100,10 @@ def chunk_metadata(
         "chunk_index": chunk_index,
         "chunk_count": chunk_count,
     }
+    if parent_id is not None:
+        metadata["parent_id"] = parent_id
+        metadata["parent_index"] = parent_index
+        metadata["parent_count"] = parent_count
     for key in ("page", "table", "file_name", "format", "url", "sitename", "pk", "label"):
         value = document.extra.get(key)
         if value is not None:
@@ -105,7 +115,8 @@ def _ingest_document(
     client: QdrantClient,
     embedding: Embeddings,
     document: SourceDocument,
-    splitter: RecursiveCharacterTextSplitter,
+    child_splitter: RecursiveCharacterTextSplitter,
+    parent_splitter: RecursiveCharacterTextSplitter,
     stats: IngestStats,
 ) -> None:
     content_hash = document.content_hash
@@ -114,33 +125,55 @@ def _ingest_document(
         stats.skipped += 1
         return
 
-    chunks = [chunk.strip() for chunk in splitter.split_text(document.text)]
-    chunks = [chunk for chunk in chunks if chunk]
-    if not chunks:
+    children = split_parent_child(
+        document,
+        parent_splitter=parent_splitter,
+        child_splitter=child_splitter,
+    )
+    if not children:
         stats.skipped += 1
         return
 
-    # 先算向量，再删除旧版本：embedding 失败时至少不会丢数据
+    # 先算子块向量，再删除旧版本：embedding 失败时至少不会丢数据
+    texts = [child.text for child in children]
     vectors: list[list[float]] = []
-    for start in range(0, len(chunks), EMBED_BATCH_SIZE):
-        batch = chunks[start : start + EMBED_BATCH_SIZE]
+    for start in range(0, len(texts), EMBED_BATCH_SIZE):
+        batch = texts[start : start + EMBED_BATCH_SIZE]
         vectors.extend(embedding.embed_documents(batch))
     delete_doc(client, document.doc_id)
 
     points = []
-    for index, (text, vector) in enumerate(zip(chunks, vectors)):
+    for index, (child, vector) in enumerate(zip(children, vectors)):
         point_id = str(
             uuid.uuid5(
                 uuid.NAMESPACE_URL,
                 f"{document.doc_id}:{content_hash}:{index}",
             )
         )
-        metadata = chunk_metadata(document, index, len(chunks), content_hash)
+        metadata = chunk_metadata(
+            document,
+            index,
+            len(children),
+            content_hash,
+            parent_id=child.parent_id,
+            parent_index=child.parent_index,
+            parent_count=child.parent_count,
+        )
         points.append(
             PointStruct(
                 id=point_id,
                 vector=vector,
-                payload={"page_content": text, "metadata": metadata},
+                # 父块文本随子块存储，命中后无需再查第二个存储
+                payload={
+                    "page_content": child.text,
+                    "metadata": metadata,
+                    "parent": {
+                        "id": child.parent_id,
+                        "index": child.parent_index,
+                        "count": child.parent_count,
+                        "text": child.parent_text,
+                    },
+                },
             )
         )
     for start in range(0, len(points), 64):
@@ -169,6 +202,7 @@ def run_ingest(
         logger("🆕 已创建集合（按 embedding 维度）")
 
     splitter = build_splitter()
+    parent_splitter = build_parent_splitter()
     for source in config.sources:
         loaded = load_source(source)
         stats.errors.extend(loaded.errors)
@@ -176,7 +210,14 @@ def run_ingest(
 
         for document in loaded.documents:
             try:
-                _ingest_document(client, embedding, document, splitter, source_stats)
+                _ingest_document(
+                    client,
+                    embedding,
+                    document,
+                    splitter,
+                    parent_splitter,
+                    source_stats,
+                )
             except Exception as exc:
                 source_stats.errors.append(f"写入失败 {document.doc_id}: {exc}")
 

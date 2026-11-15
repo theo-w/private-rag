@@ -64,6 +64,14 @@ class ChatRequest(BaseModel):
     )
     use_lexical: bool = Field(default=True, description="是否启用 BM25 混合召回")
     use_rerank: bool = Field(default=True, description="是否启用 reranker 精排")
+    use_parent: bool = Field(
+        default=True,
+        description="是否把命中的子块扩展为父块上下文",
+    )
+    query_rewrite: Literal["off", "multi", "hyde"] = Field(
+        default="off",
+        description="查询改写模式：off / multi（多查询）/ hyde（假想文档）",
+    )
 
     @field_validator("question")
     @classmethod
@@ -99,6 +107,8 @@ class ChatRequest(BaseModel):
             top_k=self.top_k,
             use_lexical=self.use_lexical,
             use_rerank=self.use_rerank,
+            use_parent=self.use_parent,
+            query_rewrite=self.query_rewrite,
         )
 
 
@@ -120,6 +130,10 @@ class ChatMeta(BaseModel):
     retrieved: int
     used_lexical: bool
     used_rerank: bool
+    used_parent: bool
+    query_rewrite: str
+    query_count: int
+    context_chars: int
     history_turns: int
     elapsed_ms: int
 

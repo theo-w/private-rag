@@ -44,8 +44,11 @@ COLLECTION_NAME = os.getenv("RAG_COLLECTION_NAME", "").strip() or "rag_knowledge
 DEFAULT_SOURCES_CONFIG = ROOT / "config" / "sources.yaml"
 
 # 文本切分
+# 子块用于向量/BM25 召回，父块保留完整上下文；父块默认不重叠，避免重复内容。
 CHUNK_SIZE = 700
 CHUNK_OVERLAP = 100
+PARENT_CHUNK_SIZE = _env_int("RAG_PARENT_CHUNK_SIZE", 2000)
+PARENT_CHUNK_OVERLAP = _env_int("RAG_PARENT_CHUNK_OVERLAP", 0)
 
 # 检索参数
 DENSE_TOP_K = 20
@@ -53,6 +56,8 @@ LEXICAL_TOP_K = 20
 FUSION_TOP_K = 10
 RRF_K = 60
 TOP_K_RERANK = 3
+# 送入 LLM 的上下文总字符预算；父块超预算时回退到命中的子块。
+CONTEXT_MAX_CHARS = _env_int("RAG_CONTEXT_MAX_CHARS", 6000)
 
 # 模型
 EMB_MODEL = "bge-m3"
@@ -63,7 +68,7 @@ RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
 WEB_USER_AGENT = "private-rag/0.2 (+https://github.com/theo-w/private-rag)"
 
 # v3 HTTP 服务
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 API_PREFIX = "/api/v1"
 DEFAULT_API_HOST = "127.0.0.1"
 DEFAULT_API_PORT = 8000

@@ -19,6 +19,7 @@ from private_rag.evaluation import (
     aggregate_results,
     build_report,
     build_ragas_inputs,
+    citation_numbers,
     collect_results,
     dataset_fingerprint,
     extract_ragas_scores,
@@ -32,6 +33,7 @@ from private_rag.evaluation import (
 )
 from private_rag.generation import REFUSAL
 from private_rag.models import Citation
+from private_rag.qa import RetrievalTrace
 from private_rag.retrieval.hybrid import RetrievedChunk
 
 
@@ -45,6 +47,25 @@ def test_default_dataset_is_valid_and_balanced():
     assert len({sample.question for sample in samples}) == 40
     assert dataset_fingerprint() == dataset_fingerprint()
     assert all(len(normalize_text(item)) >= 4 for sample in samples for item in sample.evidence)
+
+
+def test_v5_paraphrase_dataset_is_valid():
+    path = Path(config.ROOT) / "eval" / "v5_paraphrase_qa.jsonl"
+    samples = load_dataset(path)
+    assert len(samples) == 18
+    assert sum(sample.answerable for sample in samples) == 15
+    assert sum(not sample.answerable for sample in samples) == 3
+    assert len({sample.id for sample in samples}) == 18
+    assert {sample.category for sample in samples} == {
+        "architecture",
+        "ingestion",
+        "retrieval",
+        "api",
+        "boundary",
+        "refusal",
+    }
+    # v5 数据集不适用 v4 的固定 40 条分布校验
+    assert validate_distribution(samples)
 
 
 def test_dataset_rejects_stale_evidence(tmp_path: Path):
@@ -135,6 +156,63 @@ def test_score_deterministic_reward_and_citation():
     assert invalid["citation_validity"] == 0.0
 
 
+def test_citation_numbers_ignore_code_and_format_notations():
+    # 反引号/代码块中的 [n] 是在讲引用格式，不应算作引用。
+    assert citation_numbers("先看 `[1][2][3]` 的示例。") == []
+    assert citation_numbers("```text\n[4]\n```\n依据 [1]。") == [1]
+    # 文档里的“带 [1][2][3] 编号”属于被引用的格式说明，不算越界引用。
+    assert citation_numbers("系统拼成带 [1][2][3] 编号的提示词，依据 [1]。") == [1]
+    # 没有“编号”字样的格式句同样按连续 1..N 规则剔除。
+    assert citation_numbers(
+        "模型只负责在答案里标 [1][2][3]。依据 [1]。", citation_count=1
+    ) == [1]
+    # citations 足够时，连续编号可以是真的多引用，应保留。
+    assert citation_numbers("依据 [1][2][3]。", citation_count=3) == [1, 2, 3]
+    # 真正的越界引用仍然保留，交给指标判为无效。
+    assert citation_numbers("答案依据 [1]，另见 [3]。") == [1, 3]
+
+
+def test_score_deterministic_citation_format_mention_is_valid():
+    sample = EvalSample(
+        id="t04",
+        question="提示词如何编号？",
+        reference="带编号的上下文",
+        evidence=("上下文",),
+        source="README.md",
+        category="retrieval",
+        answerable=True,
+    )
+    metrics = score_deterministic(
+        sample,
+        contexts=["上下文片段"],
+        source_uris=["README.md"],
+        citations=[{"index": 1}],
+        answer="系统拼成带 [1][2][3] 编号的提示词，真实依据 [1]。",
+    )
+    assert metrics["citation_rate"] == 1.0
+    assert metrics["citation_validity"] == 1.0
+
+    unmarked_notation = score_deterministic(
+        sample,
+        contexts=["上下文片段"],
+        source_uris=["README.md"],
+        citations=[{"index": 1}],
+        answer="模型只负责在答案里标 [1][2][3]。真实依据 [1]。",
+    )
+    assert unmarked_notation["citation_rate"] == 1.0
+    assert unmarked_notation["citation_validity"] == 1.0
+
+    notation_only = score_deterministic(
+        sample,
+        contexts=["上下文片段"],
+        source_uris=["README.md"],
+        citations=[{"index": 1}],
+        answer="只介绍格式：`[1][2][3]`。",
+    )
+    assert notation_only["citation_rate"] == 0.0
+    assert notation_only["citation_validity"] == 0.0
+
+
 def test_score_deterministic_partial_evidence_and_refusal():
     sample = EvalSample(
         id="t02",
@@ -179,6 +257,14 @@ def test_configs_are_ablations():
     assert CONFIGS["hybrid"].use_rerank is False
     assert CONFIGS["full"].use_lexical is True
     assert CONFIGS["full"].use_rerank is True
+    assert CONFIGS["full"].use_parent is False
+    assert CONFIGS["full"].query_rewrite == "off"
+    assert CONFIGS["parent"].use_parent is True
+    assert CONFIGS["parent"].query_rewrite == "off"
+    assert CONFIGS["parent_multi"].use_parent is True
+    assert CONFIGS["parent_multi"].query_rewrite == "multi"
+    assert CONFIGS["parent_hyde"].use_parent is True
+    assert CONFIGS["parent_hyde"].query_rewrite == "hyde"
     assert all(spec.top_k == 3 for spec in CONFIGS.values())
 
 
@@ -222,22 +308,94 @@ def test_collect_results_uses_retrieve_and_caches_generation(monkeypatch):
         answerable=True,
     )
     engine = FakeEngine()
+    cache = {}
     results = collect_results(
         engine,
         [sample],
         [CONFIGS["dense"], CONFIGS["full"]],
+        answer_cache=cache,
     )
 
     assert len(engine.calls) == 2
-    assert len(calls) == 1  # 相同问题 + 相同 point ids，第二次生成走缓存
-    assert results[0].generation_cached is False
-    assert results[1].generation_cached is True
+    # v5 缓存键包含配置名：dense 与 full 即使命中同一子块也不复用答案
+    assert len(calls) == 2
+    assert all(result.generation_cached is False for result in results)
     assert results[1].used_rerank is True
     assert results[1].retrieved == 1
     assert results[1].metrics["evidence_hit@3"] == 1.0
+
+    # 同一配置再次运行且上下文完全一致时命中缓存
+    repeated = collect_results(
+        engine,
+        [sample],
+        [CONFIGS["dense"], CONFIGS["full"]],
+        answer_cache=cache,
+    )
+    assert all(result.generation_cached is True for result in repeated)
+    assert len(calls) == 2
     aggregate = aggregate_results(results)
     assert aggregate["answer_rate"] == 1.0
     assert aggregate["citation_validity"] == 1.0
+    assert aggregate["generation_cache_hits"] == 0
+
+
+def test_collect_results_uses_trace_and_parent_metadata(monkeypatch):
+    chunk = RetrievedChunk(
+        point_id="p1",
+        text="父块完整文本：向量与 BM25 通过 RRF 融合。",
+        metadata={"source_uri": "README.md", "title": "README"},
+        parent_id="parent-1",
+        parent_text="父块完整文本：向量与 BM25 通过 RRF 融合。",
+        parent_index=0,
+        snippet_text="向量与 BM25",
+    )
+
+    class TraceEngine:
+        def __init__(self):
+            self.calls = []
+
+        def retrieve_with_trace(self, question, options):
+            self.calls.append((question, options))
+            return RetrievalTrace(
+                chunks=[chunk],
+                used_lexical=options.use_lexical,
+                used_rerank=False,
+                used_parent=options.use_parent,
+                queries=[question, "改写查询"],
+                query_rewrite=options.query_rewrite,
+                query_count=2 if options.query_rewrite != "off" else 1,
+                context_chars=len(chunk.text),
+                rewrite_fallback=False,
+            )
+
+    monkeypatch.setattr(
+        "private_rag.evaluation.generate_answer",
+        lambda question, chunks, model=None: ("融合 [1]", []),
+    )
+    sample = EvalSample(
+        id="t05",
+        question="向量和 BM25 如何融合？",
+        reference="通过 RRF 融合。",
+        evidence=("向量与 BM25",),
+        source="README.md",
+        category="retrieval",
+        answerable=True,
+    )
+    engine = TraceEngine()
+    results = collect_results(engine, [sample], [CONFIGS["parent_multi"]])
+
+    assert len(engine.calls) == 1
+    options = engine.calls[0][1]
+    assert options.use_parent is True
+    assert options.query_rewrite == "multi"
+    result = results[0]
+    assert result.used_parent is True
+    assert result.query_rewrite == "multi"
+    assert result.query_count == 2
+    assert result.context_chars == len(chunk.text)
+    assert result.rewrite_fallback is False
+    assert aggregate_results(results)["used_parent_rate"] == 1.0
+    assert aggregate_results(results)["avg_query_count"] == 2.0
 
 
 def test_build_ragas_inputs_only_answerable_without_error():
@@ -421,6 +579,8 @@ def test_report_markdown_and_json_are_complete():
             contexts=[],
             source_uris=[],
             refusal=True,
+            rewrite_fallback=True,
+            rewrite_reason="模拟模型超时",
             metrics={
                 "evidence_hit@3": 0.0,
                 "evidence_recall@3": 0.0,
@@ -472,12 +632,20 @@ def test_report_markdown_and_json_are_complete():
     assert '"configs"' in payload
 
     markdown = render_markdown(report)
-    assert "# private-rag v4 Ragas 评估报告" in markdown
+    assert "# private-rag v5 检索策略评估报告" in markdown
+    assert "## 策略配置" in markdown
     assert "`full`" in markdown
+    assert "父块上下文" in markdown
     assert "faithfulness" in markdown
     assert "NaN" in markdown
     assert "relative" not in markdown
     assert "相对 full 基线的差值" in markdown
+    assert "avg_context_chars" in markdown
+    assert "rewrite_fallbacks" in markdown
+    # 回退次数是计数，不能显示成 1.000 这种比例格式。
+    assert "| `rewrite_fallbacks` | 0 | 1 |" in markdown
+    assert "查询改写回退" in markdown
+    assert "模拟模型超时" in markdown
     assert "r01" in markdown
 
 

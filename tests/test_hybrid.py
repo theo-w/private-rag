@@ -74,10 +74,19 @@ class _FakeResponse:
 
 
 class _FakePoint:
-    def __init__(self, point_id: str, score: float, text: str, metadata: dict):
+    def __init__(
+        self,
+        point_id: str,
+        score: float,
+        text: str,
+        metadata: dict,
+        parent: dict | None = None,
+    ):
         self.id = point_id
         self.score = score
         self.payload = {"page_content": text, "metadata": metadata}
+        if parent is not None:
+            self.payload["parent"] = parent
 
 
 class _FakeClient:
@@ -108,3 +117,42 @@ def test_hybrid_retriever_passes_filters_and_degrades_without_lexical():
     assert [chunk.point_id for chunk in chunks] == ["dense-1"]
     assert client.kwargs["query_filter"] is not None
     assert client.kwargs["limit"] == retriever.dense_top_k
+
+
+class _ParentClient:
+    def query_points(self, **kwargs):
+        return _FakeResponse(
+            [
+                _FakePoint(
+                    "dense-1",
+                    0.9,
+                    "命中子块",
+                    {"source_type": "file"},
+                    parent={"id": "parent-1", "index": 0, "count": 2, "text": "父块全文"},
+                )
+            ]
+        )
+
+
+def test_dense_search_parses_parent_fields():
+    chunks = HybridRetriever(_ParentClient(), _FakeEmbedding()).dense_search("苹果")
+    assert chunks[0].text == "命中子块"
+    assert chunks[0].parent_id == "parent-1"
+    assert chunks[0].parent_text == "父块全文"
+    assert chunks[0].parent_index == 0
+
+
+def test_rrf_fills_parent_from_lexical_when_dense_lacks_it():
+    dense = [_chunk("a")]
+    hit = LexicalHit(
+        point_id="a",
+        text="text-a",
+        metadata={"doc_id": "doc-a"},
+        score=1.0,
+        parent={"id": "parent-a", "text": "父块 A", "index": 0},
+    )
+    fused = reciprocal_rank_fusion(dense, [hit], top_k=1)
+    assert fused[0].parent_id == "parent-a"
+    assert fused[0].parent_text == "父块 A"
+    assert fused[0].dense_rank == 1
+    assert fused[0].lexical_rank == 1

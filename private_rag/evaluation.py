@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
-from private_rag.config import EMB_MODEL, LLM_MODEL, TOP_K_RERANK, ROOT
+from private_rag.config import CONTEXT_MAX_CHARS, EMB_MODEL, LLM_MODEL, TOP_K_RERANK, ROOT
 from private_rag.generation import REFUSAL, generate_answer
 from private_rag.qa import RetrievalOptions
 
@@ -53,6 +53,45 @@ RAGAS_SCORE_KEYS = {
 }
 
 CITATION_RE = re.compile(r"\[(\d+)\]")
+CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+INLINE_CODE_RE = re.compile(r"`[^`]*`")
+# 文档里会用“带 [1][2][3] 编号”这类说法讲引用格式；它是被引用的原文，
+# 不是模型给出的引用，统计前应剔除，避免把格式说明误判成越界引用。
+NOTATION_RE = re.compile(
+    r"(?:\[[0-9]+\]\s*)+(?:编号|标号|引用格式|编号格式|标注格式)"
+)
+CITATION_RUN_RE = re.compile(r"(?:\[[0-9]+\])+")
+
+
+def _strip_format_runs(text: str, citation_count: int) -> str:
+    """剔除“1..N 连续编号”的格式示例，保留真正的引用。
+
+    文档里常出现“标 [1][2][3]”这类讲引用格式的句子；当答案被引用的
+    citations 不足 N 条时，这种从 1 开始连续枚举的编号不可能是真实引用，
+    视为格式说明。citations 足够时（N ≤ citation_count）仍按真实引用统计。
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        numbers = [int(value) for value in CITATION_RE.findall(match.group(0))]
+        if (
+            len(numbers) >= 3
+            and numbers == list(range(1, len(numbers) + 1))
+            and len(numbers) > citation_count
+        ):
+            return ""
+        return match.group(0)
+
+    return CITATION_RUN_RE.sub(replace, text)
+
+
+def citation_numbers(answer: str, *, citation_count: int | None = None) -> list[int]:
+    """提取答案里真正表示引用的 [n]，忽略代码片段与引用格式说明。"""
+    text = CODE_FENCE_RE.sub("", answer or "")
+    text = INLINE_CODE_RE.sub("", text)
+    text = NOTATION_RE.sub("", text)
+    if citation_count is not None:
+        text = _strip_format_runs(text, citation_count)
+    return [int(value) for value in CITATION_RE.findall(text)]
 
 
 class DatasetError(ValueError):
@@ -77,12 +116,44 @@ class ConfigSpec:
     use_lexical: bool
     use_rerank: bool
     top_k: int = TOP_K_RERANK
+    use_parent: bool = True
+    query_rewrite: str = "off"
+    context_max_chars: int = CONTEXT_MAX_CHARS
 
 
 CONFIGS = {
-    "dense": ConfigSpec("dense", "仅向量召回", False, False),
-    "hybrid": ConfigSpec("hybrid", "向量 + BM25 + RRF", True, False),
-    "full": ConfigSpec("full", "混合召回 + 精排（v2/v3 默认基线）", True, True),
+    "dense": ConfigSpec("dense", "仅向量召回", False, False, use_parent=False),
+    "hybrid": ConfigSpec("hybrid", "向量 + BM25 + RRF", True, False, use_parent=False),
+    "full": ConfigSpec(
+        "full",
+        "混合召回 + 精排（v4 基线）",
+        True,
+        True,
+        use_parent=False,
+    ),
+    "parent": ConfigSpec(
+        "parent",
+        "混合召回 + 精排 + 父块上下文",
+        True,
+        True,
+        use_parent=True,
+    ),
+    "parent_multi": ConfigSpec(
+        "parent_multi",
+        "父块上下文 + 多查询改写",
+        True,
+        True,
+        use_parent=True,
+        query_rewrite="multi",
+    ),
+    "parent_hyde": ConfigSpec(
+        "parent_hyde",
+        "父块上下文 + HyDE",
+        True,
+        True,
+        use_parent=True,
+        query_rewrite="hyde",
+    ),
 }
 
 
@@ -102,6 +173,12 @@ class SampleResult:
     source_uris: list[str] = field(default_factory=list)
     used_lexical: bool = False
     used_rerank: bool = False
+    used_parent: bool = False
+    query_rewrite: str = "off"
+    query_count: int = 1
+    context_chars: int = 0
+    rewrite_fallback: bool = False
+    rewrite_reason: str = ""
     requested_rerank: bool = False
     retrieved: int = 0
     refusal: bool = False
@@ -343,12 +420,14 @@ def score_deterministic(
         else 0.0
     )
 
-    citation_numbers = [int(value) for value in CITATION_RE.findall(answer or "")]
-    citation_rate = 1.0 if citation_numbers else 0.0
+    citation_numbers_list = citation_numbers(
+        answer, citation_count=len(citations)
+    )
+    citation_rate = 1.0 if citation_numbers_list else 0.0
     citation_validity = (
         1.0
-        if citation_numbers
-        and all(1 <= number <= len(citations) for number in citation_numbers)
+        if citation_numbers_list
+        and all(1 <= number <= len(citations) for number in citation_numbers_list)
         else 0.0
     )
 
@@ -394,6 +473,12 @@ def aggregate_results(results: Sequence[SampleResult]) -> dict[str, Any]:
         "avg_generation_ms": _mean([item.generation_ms for item in results]),
         "generation_cache_hits": sum(1 for item in results if item.generation_cached),
         "avg_retrieved": _mean([float(item.retrieved) for item in results]),
+        "avg_context_chars": _mean([float(item.context_chars) for item in results]),
+        "avg_query_count": _mean([float(item.query_count) for item in results]),
+        "used_parent_rate": _mean(
+            [1.0 if item.used_parent else 0.0 for item in results]
+        ),
+        "rewrite_fallbacks": sum(1 for item in results if item.rewrite_fallback),
         "n_answerable": len(answerable),
         "n_refusal": len(refusal),
         "n_errors": sum(1 for item in results if item.error),
@@ -454,8 +539,33 @@ def collect_results(
                     top_k=spec.top_k,
                     use_lexical=spec.use_lexical,
                     use_rerank=spec.use_rerank,
+                    use_parent=spec.use_parent,
+                    query_rewrite=spec.query_rewrite,
                 )
-                chunks, used_lexical, used_rerank = engine.retrieve(sample.question, options)
+                if hasattr(engine, "retrieve_with_trace"):
+                    trace = engine.retrieve_with_trace(sample.question, options)
+                    chunks = trace.chunks
+                    used_lexical = trace.used_lexical
+                    used_rerank = trace.used_rerank
+                    result.used_parent = bool(trace.used_parent)
+                    result.query_rewrite = trace.query_rewrite
+                    result.query_count = int(trace.query_count)
+                    result.context_chars = int(trace.context_chars)
+                    result.rewrite_fallback = bool(trace.rewrite_fallback)
+                    result.rewrite_reason = str(
+                        getattr(trace, "rewrite_reason", "") or ""
+                    )
+                else:
+                    # 兼容只实现 retrieve() 的测试替身
+                    chunks, used_lexical, used_rerank = engine.retrieve(
+                        sample.question, options
+                    )
+                    result.used_parent = spec.use_parent and any(
+                        chunk.parent_id for chunk in chunks
+                    )
+                    result.query_rewrite = spec.query_rewrite
+                    result.query_count = 1
+                    result.context_chars = sum(len(chunk.text) for chunk in chunks)
                 result.retrieval_ms = (time.perf_counter() - retrieval_started) * 1000.0
                 result.used_lexical = bool(used_lexical)
                 result.used_rerank = bool(used_rerank)
@@ -465,9 +575,14 @@ def collect_results(
                     str((chunk.metadata or {}).get("source_uri", "")) for chunk in chunks
                 ]
 
+                context_digest = hashlib.sha256(
+                    "\n\n".join(chunk.text for chunk in chunks).encode("utf-8")
+                ).hexdigest()[:16]
                 cache_key = (
+                    spec.name,
                     sample.question,
                     tuple(chunk.point_id for chunk in chunks),
+                    context_digest,
                     model,
                 )
                 if cache_key in cache:
@@ -703,6 +818,10 @@ DETERMINISTIC_METRICS = (
     "citation_validity",
     "avg_latency_ms",
     "avg_retrieved",
+    "avg_context_chars",
+    "avg_query_count",
+    "used_parent_rate",
+    "rewrite_fallbacks",
 )
 DELTA_METRICS = (
     "evidence_hit@3",
@@ -715,6 +834,8 @@ DELTA_METRICS = (
     "citation_rate",
     "citation_validity",
     "avg_latency_ms",
+    "avg_context_chars",
+    "avg_query_count",
 )
 
 
@@ -734,6 +855,12 @@ def _result_to_dict(result: SampleResult) -> dict:
         "source_uris": list(result.source_uris),
         "used_lexical": result.used_lexical,
         "used_rerank": result.used_rerank,
+        "used_parent": result.used_parent,
+        "query_rewrite": result.query_rewrite,
+        "query_count": result.query_count,
+        "context_chars": result.context_chars,
+        "rewrite_fallback": result.rewrite_fallback,
+        "rewrite_reason": result.rewrite_reason,
         "requested_rerank": result.requested_rerank,
         "retrieved": result.retrieved,
         "refusal": result.refusal,
@@ -793,6 +920,16 @@ def _fmt(value: Any, *, digits: int = 3) -> str:
     return f"{number:.{digits}f}"
 
 
+def _fmt_count(value: Any) -> str:
+    """计数类指标按整数展示，避免“2 次回退”被写成 2.000。"""
+    if value is None:
+        return "NaN"
+    try:
+        return str(int(value))
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _cell(text: Any) -> str:
     return " ".join(str(text).split()).replace("|", "\\|")
 
@@ -820,6 +957,31 @@ def _category_table(report: dict) -> list[str]:
             )
             cells.append(f"{_fmt(hit)} / {_fmt(precision)}")
         lines.append(f"| {category} | " + " | ".join(cells) + " |")
+    return lines
+
+
+def _rewrite_fallback_lines(report: dict, limit: int = 20) -> list[str]:
+    """列出改写失败回退的样本与原因，便于区分模型波动与实现问题。"""
+    fallbacks = [
+        item for item in report["samples"] if item.get("rewrite_fallback")
+    ]
+    if not fallbacks:
+        return []
+    lines = [
+        "## 查询改写回退",
+        "",
+        "下表样本因改写失败退回原问题；检索与生成仍正常执行，`query_count` 为 1。",
+        "",
+        "| 样本 | 配置 | 原因 |",
+        "|---|---|---|",
+    ]
+    for item in fallbacks[:limit]:
+        reason = item.get("rewrite_reason") or "未记录原因"
+        lines.append(
+            f"| {item['id']} | `{item['config']}` | {_cell(reason)} |"
+        )
+    if len(fallbacks) > limit:
+        lines.append(f"| … | 其余 {len(fallbacks) - limit} 条 | 省略 |")
     return lines
 
 
@@ -944,12 +1106,13 @@ def render_markdown(report: dict) -> str:
     meta = report["meta"]
     config_names = list(report["configs"])
     lines: list[str] = []
-    lines.append("# private-rag v4 Ragas 评估报告")
+    lines.append("# private-rag v5 检索策略评估报告")
     lines.append("")
     lines.append(
-        "本报告比较同一评估集上的三组检索策略；`full` 是 v2/v3 默认链路，"
-        "作为 v2→v4 的基线。所有分数都来自本地实际运行，NaN 表示 judge 失败或"
-        "输出无法解析，未用 0 替代。"
+        "本报告比较同一评估集上的多组检索策略；`full` 是 v4 基线"
+        "（子块上下文、不查询改写），`parent` / `parent_multi` / `parent_hyde` "
+        "依次增加父块上下文、多查询和 HyDE。所有分数都来自本地实际运行，"
+        "NaN 表示 judge 失败或输出无法解析，未用 0 替代。"
     )
     lines.append("")
     lines.append("## 运行信息")
@@ -994,17 +1157,41 @@ def render_markdown(report: dict) -> str:
     lines.append(f"- 总耗时：{_fmt(meta.get('duration_seconds'), digits=1)} 秒")
     lines.append("")
 
+    lines.append("## 策略配置")
+    lines.append("")
+    lines.append(
+        "| 配置 | 说明 | BM25 | 精排 | 父块 | 查询改写 | top_k |"
+    )
+    lines.append("|---|---|---|---|---|---|---:|")
+    for name in config_names:
+        spec = asdict(CONFIGS[name]) if name in CONFIGS else {}
+        lines.append(
+            f"| `{name}` | {_cell(spec.get('label', '—'))} | "
+            f"{'开' if spec.get('use_lexical') else '关'} | "
+            f"{'开' if spec.get('use_rerank') else '关'} | "
+            f"{'开' if spec.get('use_parent') else '关'} | "
+            f"{spec.get('query_rewrite', '—')} | {spec.get('top_k', '—')} |"
+        )
+    lines.append("")
+
     lines.append("## 确定性指标汇总")
     lines.append("")
     lines.append("| 指标 | " + " | ".join(config_names) + " |")
     lines.append("|---|" + "|".join("---:" for _ in config_names) + "|")
     for metric in DETERMINISTIC_METRICS:
-        cells = [_fmt(report["configs"][name]["metrics"].get(metric)) for name in config_names]
+        cells = [
+            _fmt_count(report["configs"][name]["metrics"].get(metric))
+            if metric == "rewrite_fallbacks"
+            else _fmt(report["configs"][name]["metrics"].get(metric))
+            for name in config_names
+        ]
         lines.append(f"| `{metric}` | " + " | ".join(cells) + " |")
     lines.append("")
     lines.append(
         "说明：`evidence_*@3`、`context_precision@3`、`mrr@3`、`source_hit` "
         "只统计可回答样本；`refusal_accuracy` 只统计应拒答样本；"
+        "`avg_context_chars` 是送入 LLM 的上下文字符数，`rewrite_fallbacks` "
+        "是查询改写失败回退原问题的次数；"
         "生成耗时含缓存命中（命中按 0 计），缓存命中数见 JSON。"
     )
     lines.append("")
@@ -1084,6 +1271,11 @@ def render_markdown(report: dict) -> str:
     lines.extend(_category_table(report))
     lines.append("")
 
+    fallback_lines = _rewrite_fallback_lines(report)
+    if fallback_lines:
+        lines.extend(fallback_lines)
+        lines.append("")
+
     lines.append("## 失败与关注案例（最多 20 条）")
     lines.append("")
     lines.extend(_failure_lines(report))
@@ -1103,7 +1295,12 @@ def render_markdown(report: dict) -> str:
     lines.append("python3 scripts/prepare_eval_kb.py --recreate")
     configs = ",".join(meta.get("configs", []))
     ragas_configs = ",".join(meta.get("ragas", {}).get("configs", []))
-    lines.append(f"python3 scripts/evaluate.py --configs {configs} \\")
+    dataset = meta.get("dataset")
+    if dataset:
+        lines.append(f"python3 scripts/evaluate.py --dataset {dataset} \\")
+        lines.append(f"  --configs {configs} \\")
+    else:
+        lines.append(f"python3 scripts/evaluate.py --configs {configs} \\")
     if ragas_configs:
         lines.append(f"  --ragas-configs {ragas_configs} \\")
     else:
@@ -1121,10 +1318,10 @@ def render_markdown(report: dict) -> str:
     sample_ids = meta.get("sample_ids") or []
     if dataset_total and sample_ids and len(sample_ids) != dataset_total:
         lines.append(f"  --ids {','.join(sample_ids)} \\")
-    lines.append(
-        "  --output eval/reports/v4_report.md "
-        "--json-output eval/reports/v4_report.json"
-    )
+    output = meta.get("output_markdown", "eval/reports/v5_report.md")
+    json_output = meta.get("output_json", "eval/reports/v5_report.json")
+    lines.append(f"  --output {output} \\")
+    lines.append(f"  --json-output {json_output}")
     lines.append("```")
     lines.append("")
 
@@ -1154,6 +1351,18 @@ def render_markdown(report: dict) -> str:
     )
     lines.append(
         "- 若只跑了 `--ragas-limit` 子集，报告中会明确标注覆盖数，不能写成全量结论。"
+    )
+    lines.append(
+        "- 多查询/HyDE 配置每次提问会额外调用一次本地 LLM，"
+        "延迟与显存占用高于 `full`，默认 API 配置保持 `query_rewrite=off`。"
+    )
+    lines.append(
+        "- 父块文本随每个子块存入 Qdrant/BM25，索引体积会明显增大；"
+        "这是为了命中后无需二次查询 docstore，换来更完整的上下文。"
+    )
+    lines.append(
+        "- v4 的 40 条固定评估集仍用 `validate_distribution` 校验；"
+        "v5 口语化数据集规模较小，只做结构/证据校验，不能与 v4 分数直接混比。"
     )
     lines.append(
         "- 生成调用未固定采样参数（`ChatOllama` 默认温度/随机种子），"

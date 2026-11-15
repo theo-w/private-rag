@@ -85,6 +85,10 @@ def _chat_meta(
     retrieved: int,
     used_lexical: bool,
     used_rerank: bool,
+    used_parent: bool,
+    query_rewrite: str,
+    query_count: int,
+    context_chars: int,
     history_turns: int,
     elapsed_ms: int,
 ) -> ChatMeta:
@@ -92,6 +96,10 @@ def _chat_meta(
         retrieved=retrieved,
         used_lexical=used_lexical,
         used_rerank=used_rerank,
+        used_parent=used_parent,
+        query_rewrite=query_rewrite,
+        query_count=query_count,
+        context_chars=context_chars,
         history_turns=history_turns,
         elapsed_ms=elapsed_ms,
     )
@@ -204,6 +212,10 @@ def chat(
             retrieved=result.retrieved,
             used_lexical=result.used_lexical,
             used_rerank=result.used_rerank,
+            used_parent=result.used_parent,
+            query_rewrite=result.query_rewrite,
+            query_count=result.query_count,
+            context_chars=result.context_chars,
             history_turns=history_turns,
             elapsed_ms=elapsed_ms,
         ),
@@ -231,6 +243,10 @@ def chat_stream(
         retrieved = 0
         used_lexical = False
         used_rerank = False
+        used_parent = False
+        query_rewrite = "off"
+        query_count = 1
+        context_chars = 0
         history_turns = 0
 
         yield _sse(
@@ -251,11 +267,19 @@ def chat_stream(
                         retrieved = event.retrieved
                         used_lexical = event.used_lexical
                         used_rerank = event.used_rerank
+                        used_parent = event.used_parent
+                        query_rewrite = event.query_rewrite
+                        query_count = event.query_count
+                        context_chars = event.context_chars
                         yield _sse(
                             "citations",
                             {
                                 "citations": _citations_payload(citations),
                                 "retrieved": retrieved,
+                                "used_parent": used_parent,
+                                "query_rewrite": query_rewrite,
+                                "query_count": query_count,
+                                "context_chars": context_chars,
                             },
                         )
                     elif event.kind == "token":
@@ -267,12 +291,20 @@ def chat_stream(
                         retrieved = event.retrieved or retrieved
                         used_lexical = event.used_lexical
                         used_rerank = event.used_rerank
+                        used_parent = event.used_parent
+                        query_rewrite = event.query_rewrite
+                        query_count = event.query_count
+                        context_chars = event.context_chars
                         elapsed_ms = int((time.perf_counter() - started) * 1000)
                         session.add_exchange(payload.question, answer, citations)
                         meta = _chat_meta(
                             retrieved=retrieved,
                             used_lexical=used_lexical,
                             used_rerank=used_rerank,
+                            used_parent=used_parent,
+                            query_rewrite=query_rewrite,
+                            query_count=query_count,
+                            context_chars=context_chars,
                             history_turns=history_turns,
                             elapsed_ms=elapsed_ms,
                         )
