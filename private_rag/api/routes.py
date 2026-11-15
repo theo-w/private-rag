@@ -15,6 +15,7 @@ from private_rag.api.schemas import (
     ChatMeta,
     ChatRequest,
     ChatResponse,
+    EvalSummaryOut,
     HealthOut,
     ReadyCheckOut,
     ReadyOut,
@@ -26,6 +27,7 @@ from private_rag.api.schemas import (
     session_summary,
 )
 from private_rag.config import API_PREFIX, APP_VERSION
+from private_rag.eval_report import DEFAULT_EVAL_REPORT_PATH, load_eval_summary
 from private_rag.models import Citation
 from private_rag.qa import RagEngine
 from private_rag.sessions import Session, SessionCapacityError, SessionStore
@@ -128,6 +130,13 @@ def ready(engine: RagEngine = Depends(get_engine)) -> JSONResponse:
         status_code=200 if readiness.ready else 503,
         content=body.model_dump(),
     )
+
+
+@router.get("/eval/summary", response_model=EvalSummaryOut, summary="v4 评估摘要")
+def get_eval_summary(request: Request) -> EvalSummaryOut:
+    # 报告是离线生成的只读产物；缺失或损坏时返回 available=false，不影响问答服务。
+    path = getattr(request.app.state, "eval_report_path", DEFAULT_EVAL_REPORT_PATH)
+    return EvalSummaryOut(**load_eval_summary(path))
 
 
 @router.post("/sessions", response_model=SessionOut, status_code=201, summary="创建会话")

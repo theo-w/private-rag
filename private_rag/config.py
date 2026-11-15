@@ -23,11 +23,24 @@ def _env_int(name: str, default: int) -> int:
 def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
+
+def _env_path(name: str, default: Path) -> Path:
+    """读取路径环境变量；相对路径按项目根目录解析，空值回退默认。"""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    path = Path(raw).expanduser()
+    return path if path.is_absolute() else ROOT / path
+
+
 # 数据与存储
+# 可用环境变量隔离评估库，避免与演示服务共用同一个 Qdrant 本地目录
 DOCS_DIR = ROOT / "data" / "docs"
-STORAGE_DIR = ROOT / "storage" / "qdrant_storage"
-LEXICAL_INDEX_PATH = ROOT / "storage" / "lexical" / "bm25.pkl"
-COLLECTION_NAME = "rag_knowledge_base"
+STORAGE_DIR = _env_path("RAG_STORAGE_DIR", ROOT / "storage" / "qdrant_storage")
+LEXICAL_INDEX_PATH = _env_path(
+    "RAG_LEXICAL_INDEX_PATH", ROOT / "storage" / "lexical" / "bm25.pkl"
+)
+COLLECTION_NAME = os.getenv("RAG_COLLECTION_NAME", "").strip() or "rag_knowledge_base"
 DEFAULT_SOURCES_CONFIG = ROOT / "config" / "sources.yaml"
 
 # 文本切分
@@ -50,7 +63,7 @@ RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
 WEB_USER_AGENT = "private-rag/0.2 (+https://github.com/theo-w/private-rag)"
 
 # v3 HTTP 服务
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"
 API_PREFIX = "/api/v1"
 DEFAULT_API_HOST = "127.0.0.1"
 DEFAULT_API_PORT = 8000

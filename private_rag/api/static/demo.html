@@ -780,6 +780,52 @@
 
     .notice.bad { background: var(--red-soft); color: #71342c; }
 
+    .eval-body { margin-top: 11px; }
+    .eval-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 9px; }
+    .eval-chip {
+      padding: 2px 7px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel-strong);
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 10px;
+    }
+    .eval-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .eval-table th,
+    .eval-table td { padding: 5px 4px; border-bottom: 1px solid var(--line); }
+    .eval-table thead th {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 600;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .eval-table thead th:first-child { text-align: left; }
+    .eval-table tbody th {
+      color: var(--ink-soft);
+      font-size: 11px;
+      font-weight: 500;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .eval-table td { text-align: right; color: var(--ink-soft); font-family: var(--font-mono); }
+    .eval-table tr:last-child th,
+    .eval-table tr:last-child td { border-bottom: 0; }
+    .eval-value.unavailable { color: var(--muted); }
+    .eval-coverage { display: block; color: var(--muted); font-size: 9px; }
+    .eval-base {
+      margin-left: 3px;
+      padding: 1px 5px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+      font-size: 9px;
+      font-weight: 500;
+    }
+    .eval-empty { margin: 0; color: var(--muted); font-size: 12px; }
+    .eval-empty code { font-family: var(--font-mono); font-size: 11px; overflow-wrap: anywhere; }
+
     .footer {
       display: flex;
       flex-wrap: wrap;
@@ -972,6 +1018,16 @@
           <div id="ready-checks" class="checks"></div>
           <div id="ready-notices" class="notices"></div>
         </section>
+
+        <section id="eval-panel" class="panel" aria-labelledby="eval-title">
+          <div class="panel-head">
+            <h2 id="eval-title">v4 评估</h2>
+            <p id="eval-status">加载中…</p>
+          </div>
+          <div id="eval-body" class="eval-body">
+            <p class="eval-empty">正在读取评估结果…</p>
+          </div>
+        </section>
       </aside>
     </main>
 
@@ -994,6 +1050,18 @@
       const MAX_QUESTION = 2000;
       const MAX_TAGS = 10;
       const MAX_TAG_CHARS = 50;
+
+      const EVAL_ROWS = [
+        { key: "evidence_hit@3", label: "证据命中@3", source: "metrics", format: "percent" },
+        { key: "context_precision@3", label: "上下文精确率@3", source: "metrics", format: "percent" },
+        { key: "mrr@3", label: "MRR@3", source: "metrics", format: "percent" },
+        { key: "refusal_accuracy", label: "拒答准确率", source: "metrics", format: "percent" },
+        { key: "avg_latency_ms", label: "平均延迟", source: "metrics", format: "latency" },
+        { key: "faithfulness", label: "Ragas 忠实度", source: "ragas", format: "percent" },
+        { key: "answer_relevancy", label: "Ragas 答案相关度", source: "ragas", format: "percent" },
+        { key: "context_precision", label: "Ragas 上下文精确率", source: "ragas", format: "percent" },
+        { key: "context_recall", label: "Ragas 上下文召回率", source: "ragas", format: "percent" },
+      ];
 
       const state = {
         sessionId: null,
@@ -1035,6 +1103,8 @@
         citationCount: $("citation-count"),
         readyChecks: $("ready-checks"),
         readyNotices: $("ready-notices"),
+        evalStatus: $("eval-status"),
+        evalBody: $("eval-body"),
         errorPanel: $("error-panel"),
         errorMessage: $("error-message"),
         errorDetails: $("error-details"),
@@ -1107,6 +1177,182 @@
         updateControls();
       }
 
+      function isFiniteNumber(value) {
+        return typeof value === "number" && Number.isFinite(value);
+      }
+
+      function formatEvalValue(value, format) {
+        if (!isFiniteNumber(value)) return null;
+        if (format === "latency") return `${(value / 1000).toFixed(1)} 秒`;
+        return `${(value * 100).toFixed(1)}%`;
+      }
+
+      function formatEvalDuration(seconds) {
+        if (!isFiniteNumber(seconds)) return "—";
+        if (seconds >= 3600) return `${(seconds / 3600).toFixed(1)} 小时`;
+        return `${Math.round(seconds / 60)} 分钟`;
+      }
+
+      function makeEvalChip(text) {
+        const chip = document.createElement("span");
+        chip.className = "eval-chip";
+        chip.textContent = text;
+        return chip;
+      }
+
+      function makeEvalCell(row, config) {
+        const cell = document.createElement("td");
+        const valueEl = document.createElement("span");
+        valueEl.className = "eval-value";
+        let value = null;
+        let coverage = null;
+        let unavailableText = null;
+
+        if (row.source === "ragas") {
+          if (!config.ragas) {
+            unavailableText = "未运行";
+            valueEl.classList.add("unavailable");
+          } else {
+            const metric = config.ragas[row.key] || {};
+            value = formatEvalValue(metric.value, row.format);
+            if (isFiniteNumber(metric.coverage) && metric.coverage < 1) {
+              coverage = `覆盖 ${metric.valid ?? "?"}/${config.ragas_total ?? "?"}`;
+            }
+          }
+        } else {
+          value = formatEvalValue((config.metrics || {})[row.key], row.format);
+        }
+
+        if (value === null) {
+          valueEl.textContent = unavailableText || (row.source === "ragas" ? "NaN" : "—");
+          valueEl.classList.add("unavailable");
+        } else {
+          valueEl.textContent = value;
+        }
+        cell.append(valueEl);
+        if (coverage) {
+          const note = document.createElement("span");
+          note.className = "eval-coverage";
+          note.textContent = coverage;
+          cell.append(note);
+        }
+        return cell;
+      }
+
+      function renderEvalSummary(body) {
+        el.evalBody.replaceChildren();
+        if (!body || body.available !== true) {
+          const reason = body && body.reason;
+          const message = document.createElement("p");
+          message.className = "eval-empty";
+          message.textContent = reason === "missing"
+            ? "尚未生成评估报告。运行 python3 scripts/evaluate.py 后刷新状态。"
+            : "评估报告无法读取，请重新生成后刷新。";
+          el.evalBody.append(message);
+          el.evalStatus.textContent = "未生成";
+          return;
+        }
+
+        el.evalStatus.textContent = "已加载";
+        const chips = [];
+        if (isFiniteNumber(body.dataset_total)) chips.push(`${body.dataset_total} 条样本`);
+        if (isFiniteNumber(body.samples_answerable) && isFiniteNumber(body.samples_refusal)) {
+          chips.push(`${body.samples_answerable} 可答 / ${body.samples_refusal} 拒答`);
+        }
+        if (body.duration_seconds !== null && body.duration_seconds !== undefined) {
+          chips.push(`耗时 ${formatEvalDuration(body.duration_seconds)}`);
+        }
+        if (body.generated_at) chips.push(String(body.generated_at).slice(0, 10));
+        if (body.git_commit) chips.push(String(body.git_commit).slice(0, 7));
+        const meta = document.createElement("div");
+        meta.className = "eval-meta";
+        for (const text of chips) meta.append(makeEvalChip(text));
+        el.evalBody.append(meta);
+
+        const configs = Array.isArray(body.configs) ? body.configs : [];
+        if (!configs.length) {
+          const message = document.createElement("p");
+          message.className = "eval-empty";
+          message.textContent = "报告中没有可展示的配置。";
+          el.evalBody.append(message);
+          return;
+        }
+
+        const table = document.createElement("table");
+        table.className = "eval-table";
+        table.setAttribute("aria-label", "v4 评估指标");
+        const headRow = document.createElement("tr");
+        const metricHead = document.createElement("th");
+        metricHead.scope = "col";
+        metricHead.textContent = "指标";
+        headRow.append(metricHead);
+        for (const config of configs) {
+          const head = document.createElement("th");
+          head.scope = "col";
+          head.textContent = config.name;
+          head.title = config.label || config.name;
+          if (String(config.label || "").includes("基线")) {
+            const badge = document.createElement("span");
+            badge.className = "eval-base";
+            badge.textContent = "基线";
+            head.append(badge);
+          }
+          headRow.append(head);
+        }
+        const thead = document.createElement("thead");
+        thead.append(headRow);
+        table.append(thead);
+
+        const tbody = document.createElement("tbody");
+        for (const row of EVAL_ROWS) {
+          const tr = document.createElement("tr");
+          const label = document.createElement("th");
+          label.scope = "row";
+          label.textContent = row.label;
+          tr.append(label);
+          for (const config of configs) tr.append(makeEvalCell(row, config));
+          tbody.append(tr);
+        }
+        table.append(tbody);
+        el.evalBody.append(table);
+
+        const hint = document.createElement("p");
+        hint.className = "hint";
+        hint.textContent = `生成模型 ${body.llm_model || "—"} · judge ${body.judge_model || "—"} · 分数仅用于同 judge/语料下的相对比较。`;
+        el.evalBody.append(hint);
+      }
+
+      function renderEvalFailure(error) {
+        el.evalStatus.textContent = "不可用";
+        el.evalBody.replaceChildren();
+        const timedOut = error && error.name === "AbortError";
+        const message = document.createElement("p");
+        message.className = "eval-empty";
+        message.textContent = timedOut
+          ? "评估接口响应超时，请点“刷新状态”或刷新页面。"
+          : "评估接口不可用：/api/v1/eval/summary 未返回有效数据；若服务刚升级，请刷新页面后重试。";
+        if (error && error.message) message.title = error.message;
+        el.evalBody.append(message);
+      }
+
+      async function loadEvalSummary() {
+        el.evalStatus.textContent = "加载中…";
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        try {
+          const response = await fetch("/api/v1/eval/summary", {
+            headers: { Accept: "application/json" },
+            signal: controller.signal,
+          });
+          if (!response.ok) throw new Error(`/api/v1/eval/summary 返回 HTTP ${response.status}`);
+          renderEvalSummary(await response.json());
+        } catch (error) {
+          renderEvalFailure(error);
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
       async function refreshStatus() {
         el.refreshStatus.disabled = true;
         setStatus("loading", "正在检查服务…");
@@ -1131,6 +1377,8 @@
         } finally {
           el.refreshStatus.disabled = false;
         }
+        // 评估报告与问答就绪状态相互独立：即使 /ready 失败，也要结束面板的加载态。
+        await loadEvalSummary();
       }
 
       function updateControls() {

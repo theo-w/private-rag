@@ -24,6 +24,7 @@ from private_rag.api.errors import (
 )
 from private_rag.api.routes import ops_router, router
 from private_rag.config import API_PREFIX, APP_VERSION
+from private_rag.eval_report import DEFAULT_EVAL_REPORT_PATH
 from private_rag.qa import RagEngine, build_engine
 from private_rag.sessions import SessionStore
 
@@ -66,6 +67,7 @@ def create_app(
     engine: Optional[RagEngine] = None,
     session_store: Optional[SessionStore] = None,
     use_rerank: Optional[bool] = None,
+    eval_report_path: Optional[Path] = None,
 ) -> FastAPI:
     app = FastAPI(
         title="private-rag API",
@@ -81,6 +83,9 @@ def create_app(
     app.state.session_store = session_store
     app.state.owns_engine = False
     app.state.use_rerank = use_rerank
+    app.state.eval_report_path = (
+        Path(eval_report_path) if eval_report_path is not None else DEFAULT_EVAL_REPORT_PATH
+    )
 
     @app.middleware("http")
     async def attach_request_id(request: Request, call_next):
@@ -120,8 +125,13 @@ def create_app(
 
     @app.get("/demo", include_in_schema=False)
     def demo_page() -> FileResponse:
-        # 单文件演示页：与 API 同源，直接调用真实接口，不引入前端构建步骤
-        return FileResponse(_DEMO_PAGE, media_type="text/html")
+        # 单文件演示页：与 API 同源，直接调用真实接口，不引入前端构建步骤。
+        # 不缓存 HTML，避免页面仍在运行旧版内联脚本（例如新增面板后一直“加载中”）。
+        return FileResponse(
+            _DEMO_PAGE,
+            media_type="text/html",
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
 
     app.include_router(ops_router)
     app.include_router(router)

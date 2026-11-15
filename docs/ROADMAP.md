@@ -7,7 +7,7 @@
 | v1 | `main`（历史脚本在 `legacy/`） | FAISS 基础 RAG：单文件、向量召回、LLM 问答 | ✅ 已完成，仅作演进参考 | 能对一个 txt 文件完成切分、检索、问答 |
 | v2 | `v2-qdrant-rerank-citation` | Qdrant 持久化、bge-reranker、混合检索（BM25 + 向量 + RRF）、标签/来源过滤、多源接入（文件/网页/SQL）、页码与引用溯源、增量与 prune | ✅ 本分支完成 | 三源可入库；重复入库跳过；更新只替换对应 doc_id；引用含类型/标题/URL 或页码；过滤生效；pytest 通过 |
 | v3 | `v3-fastapi-session` | FastAPI 服务化、多轮会话（session + 历史裁剪）、流式输出、统一错误处理 | ✅ 本分支完成 | API 可并发处理多会话；历史不串号；有接口级测试与启动说明 |
-| v4 | `v4-ragas-eval` | Ragas 自动评估：30–50 条标注问答、faithfulness / answer relevancy / context precision / recall、调参对比报告 | ⏳ 下一阶段 | 固化评估集与脚本；给出 v2→v4 的量化对比（至少 2 组参数/策略） |
+| v4 | `v4-ragas-eval` | Ragas 自动评估：30–50 条标注问答、faithfulness / answer relevancy / context precision / recall、调参对比报告 | ✅ 本分支完成 | 固化评估集与脚本；给出 v2→v4 的量化对比（至少 2 组参数/策略） |
 | v5 | `v5-parent-rag-query-rewrite` | Parent-Document RAG（子块召回、父块送上下文）、查询改写（多查询 / HyDE）、去重与上下文预算 | 计划中 | 复杂/口语化问题命中率提升；有前后对比与失败案例分析 |
 | v6 | `v6-ocr-parser` | 扫描件 OCR、表格解析、版面处理，接入现有连接器与元数据 | 计划中 | 扫描 PDF 与表格可检索；页码/表格名进入引用 |
 | v7 | `v7-agentic-rag` | Agentic RAG：意图路由、SQL/工具调用、检索-行动循环、可观测 trace | 计划中 | 业务问题能自动选择知识库或工具；trace 可回放每条决策 |
@@ -36,6 +36,20 @@
 - [x] 未知会话 404、参数校验 422、知识库未就绪/容量 503、内部异常 500，均带 `request_id`
 - [x] API 级测试：同步/流式/错误/多会话隔离/并发；不依赖 Ollama 与真实 Qdrant
 - [x] README 启动与 curl 说明，明确单 worker、内存会话与本地无鉴权的边界
+
+## v4 详细验收（本分支）
+
+- [x] 固定评估集 40 条：36 条可回答 + 4 条应拒答，覆盖架构/入库/检索/API/边界/拒答 6 类
+- [x] `evidence` 使用来源文档原文并做规范化校验；证据漂移会在加载时报错，防止分数悄悄失真
+- [x] `dense` / `hybrid` / `full` 三组策略对比，`full` 明确标注为 v2/v3 默认基线
+- [x] 四个 Ragas 指标：faithfulness、answer relevancy、context precision、context recall
+- [x] 确定性指标：evidence hit/recall、context precision、MRR、source hit、拒答准确率、引用率/有效性、延迟
+- [x] 评估库独立路径（`rag_eval_kb` + `storage/eval`），不与演示服务争抢 Qdrant 本地锁
+- [x] Ragas NaN 与指标覆盖率如实展示，不把解析失败替换成 0
+- [x] Markdown/JSON 报告包含基线差值、分类别汇总、失败案例、复现命令与限制说明
+- [x] `evaluate.py --validate-only` 与不依赖 Ollama/Ragas 的单元测试
+- [x] README 与 `eval/README.md` 说明安装、重建、冒烟、全量运行与自评偏差
+- [x] 评估语料就是仓库文档：文档定稿后重建评估库并重跑，报告与仓库内容一致
 
 ## 分支与提交约定
 
