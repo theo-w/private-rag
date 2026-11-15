@@ -140,6 +140,17 @@ def test_health_root_and_request_id(api):
     assert replaced.headers["X-Request-ID"] != "bad id!"
 
 
+def test_demo_page_and_root_link(api):
+    response = api.client.get("/demo")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert 'id="chat-form"' in response.text
+    assert 'id="top-k"' in response.text
+
+    root = api.client.get("/")
+    assert root.json()["demo"] == "/demo"
+
+
 def test_ready_reports_components_and_unready_state(api):
     response = api.client.get("/ready")
     assert response.status_code == 200

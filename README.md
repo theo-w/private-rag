@@ -12,7 +12,7 @@ SQL 数据库 ─────────────┘                        
 问题 ─→ RagEngine ─→ dense top20 ─┐
                      BM25 top20 ───┴─→ RRF 融合 top10 ─→ bge-reranker top3 ─→ Ollama 生成 [n] 引用
                                    ↑
-                     CLI（chat_cli.py）/ HTTP API（serve.py，同步 + SSE 流式）
+                     CLI（chat_cli.py）/ HTTP API（serve.py，同步 + SSE 流式）/ Web 演示页（/demo）
 ```
 
 - 入库与问答彻底分离：`ingest.py` 是唯一写入入口，`chat_cli.py` 与 `serve.py` 只读。
@@ -93,6 +93,17 @@ python scripts/serve.py --reload         # 开发模式，代码变更自动重�
 - `GET /health`：存活检查；`GET /ready`：检查 Qdrant 集合、BM25 与 reranker，未就绪返回 503。
 - 默认只监听本机、无鉴权，请勿直接暴露公网。
 - `--no-rerank` 等价于 `RAG_DISABLE_RERANK=1`；readiness 会显示“重排模型未加载”，问答仍按融合结果降级运行。
+
+### Web 演示页
+
+启动服务后打开 <http://127.0.0.1:8000/demo>。页面由 FastAPI 同源提供，只有一个 HTML 文件，无构建步骤、无 CDN、无外部资源，直接调用真实 API：
+
+- 实时读取 `/health` 与 `/ready`，显示版本、向量数、BM25/reranker 状态、未就绪原因与 warning。
+- 对话支持流式/同步切换、停止生成、示例问题；Enter 发送，Shift+Enter 换行，问题上限 2000 字符。
+- 可调 `top_k`（1–10）、`source_type`、`tags`、`use_lexical`、`use_rerank`；结果区的 `meta`、引用和会话历史会随参数变化。
+- 支持新建、复制、删除会话与刷新历史；流式生成会逐字显示，并展示 `session → citations → token → done` 的真实事件效果。
+- 错误统一展示 `code / message / details / request_id`；流式中途停止不会留下半轮会话。
+- 仅用于本机演示：服务默认无鉴权，请勿直接暴露公网。
 
 ### 端点
 
@@ -285,7 +296,7 @@ python scripts/ingest.py --recreate                               # 清空集合
 python -m pytest tests -q
 ```
 
-覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。
+覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。
 
 冒烟测试需要已入库并启动 Ollama：
 
@@ -315,7 +326,8 @@ private_rag/
 │   ├── app.py            FastAPI 工厂、lifespan、请求 ID 中间件
 │   ├── routes.py         health/ready/sessions/chat/stream 路由
 │   ├── schemas.py        Pydantic 请求/响应模型
-│   └── errors.py         统一错误响应与异常处理器
+│   ├── errors.py         统一错误响应与异常处理器
+│   └── static/demo.html  单文件 Web 演示页（/demo）
 ├── qa.py                 共享问答引擎（CLI/API 同一条链路）
 ├── sessions.py           内存多轮会话、TTL/容量/历史裁剪
 └── generation.py         编号上下文、历史、[n] 引用与流式生成
