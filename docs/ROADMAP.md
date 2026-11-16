@@ -69,8 +69,9 @@
 ## v6 详细验收（本分支）
 
 - [x] 新增 `pdfplumber` + `rapidocr-onnxruntime` 依赖，Python 3.9 macOS arm64 wheel 可用
-- [x] 扫描件 PDF 经 OCR 后可被检索，页码进入引用
-- [x] PDF 中的表格被结构化提取，表格名/内容进入引用
+- [x] 扫描件 PDF 经 OCR 后可被检索，页码进入引用（OCR 渲染 200 dpi；72 dpi 下中文识别明显出错）
+- [x] 文本型 PDF 的表格被结构化提取，表格名/内容进入引用（依赖页面文字与边框线）
+- [ ] 扫描件上的表格结构化提取（版面表格识别，依赖位图上的表格检测）→ 归入 v7 版面处理
 - [x] 文本型 PDF 继续正常工作（不退回 v5 功能）
 - [x] 依赖可选：未安装 OCR 后端时 PDF 仍按现有方式处理（文本提取），不阻塞服务启动
 - [x] `generation.py` 的 `_source_brief` / `build_citations` 无需改动即可展示页码/表格名

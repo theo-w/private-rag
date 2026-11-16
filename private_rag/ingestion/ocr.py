@@ -67,26 +67,37 @@ def ocr_image(image: Any) -> OCRResult:
             cls_use_cuda=False,
             rec_use_cuda=False,
         )
-        result, _boxs = ocr(np_array_from_image(image))
+        # rapidocr 返回 (result, elapse)：
+        #   result = [[box, text, confidence], ...]，box 是四个角点
+        #   elapse = [det, cls, rec] 三段耗时，不是边界框
+        result, _elapse = ocr(np_array_from_image(image))
 
-        if result is None:
+        if not result:
             return OCRResult()
 
-        # 按 y 坐标排序后合并文本
-        sorted_boxes = sorted(_boxs, key=lambda b: b[0][1])  # y 坐标
+        entries: list[tuple] = []
+        for item in result:
+            box, text = item[0], str(item[1]).strip()
+            confidence = float(item[2]) if len(item) > 2 else 0.0
+            if not text:
+                continue
+            # 左上角 y 作为行坐标
+            entries.append((float(box[0][1]), box, text, confidence))
+
+        if not entries:
+            return OCRResult()
+
+        # 按 y 坐标排序后按行合并
+        entries.sort(key=lambda entry: entry[0])
         boxes: list[tuple] = []
         lines: list[str] = []
 
         current_y: float | None = None
         line_texts: list[str] = []
-        y_threshold = 8.0  # 同一行的 y 坐标容差
+        y_threshold = 12.0  # 同一行的 y 坐标容差（200 dpi 下约半行高）
 
-        for box in sorted_boxes:
-            text = str(result[0]).strip()
-            confidence = float(result[1]) if len(result) > 1 else 0.0
-            y = box[0][1][1]  # 四个角的 y 坐标中点
-
-            boxes.append((box[0], text, confidence))
+        for y, box, text, confidence in entries:
+            boxes.append((box, text, confidence))
 
             if current_y is None:
                 current_y = y
@@ -94,8 +105,7 @@ def ocr_image(image: Any) -> OCRResult:
             elif abs(y - current_y) < y_threshold:
                 line_texts.append(text)
             else:
-                if line_texts:
-                    lines.append(" ".join(line_texts))
+                lines.append(" ".join(line_texts))
                 current_y = y
                 line_texts = [text]
 
@@ -115,6 +125,25 @@ def np_array_from_image(image: Any) -> Any:
     return np.array(image)
 
 
+# OCR 渲染分辨率。pdfplumber 默认 72 dpi，实测中文会识别错
+# （"产品库存" -> "产品本存"，置信度 0.79）；200 dpi 整句正确、置信度约 0.98。
+OCR_RENDER_RESOLUTION = 200
+
+
+def render_page(pdf_page: Any, resolution: int = OCR_RENDER_RESOLUTION) -> Any:
+    """把 pdfplumber page 渲染成 PIL Image。
+
+    page.to_image() 返回的是 PageImage 包装对象，对它做 np.array() 只会得到
+    一个 0 维对象（形状 ()），OCR 会直接拒收。这里取出它内部的 PIL Image。
+    """
+    image = pdf_page.to_image(resolution=resolution)
+    for attr in ("to_pil", "original"):
+        inner = getattr(image, attr, None)
+        if inner is not None:
+            return inner() if callable(inner) else inner
+    return image
+
+
 def ocr_page(pdf_page: Any) -> OCRResult:
     """对 pdfplumber page 执行 OCR。
 
@@ -127,8 +156,7 @@ def ocr_page(pdf_page: Any) -> OCRResult:
         OCRResult。
     """
     try:
-        image = pdf_page.to_image()
-        return ocr_image(image)
+        return ocr_image(render_page(pdf_page))
     except Exception as exc:
         logger.warning("页面 OCR 渲染失败：%s", exc)
         return OCRResult()
@@ -174,17 +202,10 @@ def extract_tables(
         return []
 
     try:
-        if is_scanned:
-            # 扫描件：在渲染图像上查找表格
-            image = pdf_page.to_image()
-            tables = image.pages[0].extract_tables()
-            # image.pages[0] 是 pypdfium2 渲染后的图像对象
-            # 实际上 to_image() 返回 PageImage，需要换一种方式
-            # 使用 pdfplumber 的 find_tables 在图像上提取
-            tables = _find_tables_on_image(pdf_page)
-        else:
-            # 文本型 PDF：直接提取
-            tables = pdf_page.extract_tables() or []
+        # 说明：表格提取依赖页面里的文字对象与绘制线条。扫描页是一整张位图，
+        # 这两者都不存在，因此扫描件只能拿到 OCR 文本，提不出结构化表格
+        # （版面表格识别属于后续版本范围）。
+        tables = pdf_page.extract_tables() or []
 
         results: list[dict] = []
         for table in tables:
@@ -218,18 +239,4 @@ def extract_tables(
         return results
     except Exception as exc:
         logger.warning("表格提取失败：%s", exc)
-        return []
-
-
-def _find_tables_on_image(pdf_page: Any) -> list[list]:
-    """在扫描页面的渲染图像上提取表格。
-
-    使用 pdfplumber 的 PageImage 的 extract_tables 方法。
-    """
-    try:
-        image = pdf_page.to_image()
-        # PageImage 有 extract_tables 方法
-        tables = image.extract_tables() if hasattr(image, "extract_tables") else []
-        return tables
-    except Exception:
         return []
