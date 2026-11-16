@@ -401,6 +401,75 @@ pip install pdfplumber rapidocr-onnxruntime
 - **表格需要有边框线**：只是靠文字对齐排版的表格，`extract_tables` 默认策略识别不出来（实测返回 0 张）；这类内容仍会以整页正文的形式被检索到。
 - **OCR 精度**：清晰印刷体效果好，手写体、低分辨率、倾斜页面识别率下降；200 dpi 渲染可缓解低分辨率这一类。
 
+## 只读公网演示（Render）
+
+完整问答依赖本机 Ollama（`bge-m3` 嵌入 + `qwen3.8:27b-mlx` 生成）与 `bge-reranker`，
+云上既没有 Ollama，也没有能装下 27B 与 reranker 的小实例。因此公网演示走**只读**路线：
+把 v6 入库链路的真实产物导出成快照，只用一个小服务暴露语料与检索，问答接口明确拒绝。
+
+当前实例：<https://private-rag-readonly.onrender.com>（演示页 `/demo`，就绪状态 `/ready`）。
+
+### 生成快照
+
+快照由真实加载器产出，因此扫描件 OCR 文本、表格文档、页码与表格名与本地一致：
+
+```bash
+python scripts/init_demo_db.py                    # 生成 data/sql/demo.db
+python scripts/build_demo_snapshot.py             # 导出 data/demo_snapshot.json
+```
+
+构建器带白名单校验：file 源只允许 `data/docs`，sql 源只允许 `data/sql/demo.db`，
+出现 web 源直接拒绝构建，避免把个人文档打进公网部署。
+
+### 本地跑只读服务
+
+```bash
+python scripts/serve_readonly.py --port 8799
+```
+
+不加载模型、不连 Qdrant，因此启动快、内存占用低；依赖清单单独放在
+`requirements-readonly.txt`（只有 fastapi/uvicorn/pydantic/jieba/rank-bm25）。
+
+### 部署
+
+服务用 Render CLI 创建，Python 运行时 + 免费实例：
+
+```bash
+render services create --name private-rag-readonly --type web_service \
+  --repo https://github.com/theo-w/private-rag --branch v6.1-readonly-render \
+  --runtime python --plan free \
+  --build-command "pip install -r requirements-readonly.txt" \
+  --start-command "python scripts/serve_readonly.py" \
+  --health-check-path /health
+```
+
+`scripts/serve_readonly.py` 监听 `0.0.0.0` 并读取 Render 注入的 `PORT`；
+开 auto-deploy 后推送到该分支即重新部署。
+
+### 端点
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/health` | 存活检查，200 |
+| GET | `/ready` | 快照就绪状态，含文档数、扫描件数、表格数；模型三项显式为 `false` |
+| GET | `/api/v1/documents` | 分页列出快照文档（标题/来源/页码/表格名/扫描件标记） |
+| GET | `/api/v1/document?doc_id=` | 单文档全文。`doc_id` 含 `:` 与 `#`，只能走查询参数 |
+| POST | `/api/v1/search` | BM25 关键词检索，返回与线上同字段的 `citations`（含 `page` / `table`） |
+| POST | `/api/v1/chat`、`/chat/stream` | 恒返回 409 `generation_disabled` |
+
+默认无鉴权。需要加锁时设 `RAG_DEMO_TOKEN`（或启动加 `--token`），此后 `/api/v1/*`
+要求请求头 `X-Demo-Token` 与之相等，缺失或不匹配返回 401；`/health` 与 `/ready` 不受限。
+
+### 只读部署不能代表完整效果
+
+- **没有语义召回**：检索只有 BM25 关键词那一路，向量召回、RRF 融合、`bge-reranker`
+  精排都不在其中，命中顺序与本地 `full` 策略不同。
+- **没有父子块与查询改写**：`meta` 里 `used_parent=false`、`query_rewrite=off` 是真实状态。
+- **索引粒度是页 / 表 / 行**，不是 v5 的子块；引用片段因此可能是整页文本的开头。
+- **不能问答**：任何回答都需要模型，这个部署里没有模型。
+
+要看完整链路仍在本地跑 `scripts/serve.py` 配合 Ollama。
+
 ## 多源配置
 
 复制示例并按需修改：
