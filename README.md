@@ -407,7 +407,7 @@ pip install pdfplumber rapidocr-onnxruntime
 云上既没有 Ollama，也没有能装下 27B 与 reranker 的小实例。因此公网演示走**只读**路线：
 把 v6 入库链路的真实产物导出成快照，只用一个小服务暴露语料与检索，问答接口明确拒绝。
 
-当前实例：<https://private-rag-readonly.onrender.com>（演示页 `/demo`，就绪状态 `/ready`）。
+当前实例：<https://private-rag-readonly.onrender.com>（打开即是演示页，就绪状态 `/ready`，服务信息 `/info`）。
 
 ### 生成快照
 
@@ -450,6 +450,8 @@ render services create --name private-rag-readonly --type web_service \
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
+| GET | `/`、`/demo` | 演示页。根路径与 `/demo` 是同一页面，分享根链接即可直接看 |
+| GET | `/info` | 服务信息 JSON（版本、模式、模型开关、可用路径） |
 | GET | `/health` | 存活检查，200 |
 | GET | `/ready` | 快照就绪状态，含文档数、扫描件数、表格数；模型三项显式为 `false` |
 | GET | `/api/v1/documents` | 分页列出快照文档（标题/来源/页码/表格名/扫描件标记） |

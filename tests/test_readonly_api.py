@@ -224,3 +224,21 @@ def test_readonly_index_ranks_like_lexical_index(tmp_path):
 
     assert readonly_titles == lexical_titles
     assert readonly_titles, "对齐用的排序不该为空"
+
+
+def test_root_serves_demo_page(client):
+    """分享出去的链接通常就是根地址，所以根路径要直接是演示页而不是 JSON。"""
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "只读演示" in response.text
+
+
+def test_service_info_available_at_info(client):
+    """服务信息挪到 /info，仍能被外部脚本读到。"""
+    response = client.get("/info")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "readonly"
+    assert body["models"] == "off"
+    assert body["demo"] == "/demo"

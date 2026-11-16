@@ -221,6 +221,11 @@ def create_readonly_app(
         return response
 
     @app.get("/", include_in_schema=False)
+    def index() -> FileResponse:
+        """根路径直接给演示页：分享出去的链接一般就是根地址。"""
+        return FileResponse(str(_PAGE_PATH), media_type="text/html")
+
+    @app.get("/info", include_in_schema=False)
     def service_info() -> dict[str, Any]:
         return {
             "service": "private-rag-readonly",
