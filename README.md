@@ -352,7 +352,47 @@ python3 scripts/evaluate.py --configs full,parent,parent_multi,parent_hyde \
 报告会列出 `avg_context_chars`、`avg_query_count`、`used_parent_rate`、`rewrite_fallbacks`、相对 `full` 的差值与失败案例；Ragas 只覆盖 12 条子集，不能写成全量结论。实际增益或负增益以报告为准，见 [eval/reports/v5_report.md](eval/reports/v5_report.md) 与 [eval/reports/v5_v4_regression.md](eval/reports/v5_v4_regression.md)。
 
 - 评估语料仍是仓库文档：先定稿 README/docs，再 `prepare_eval_kb.py --recreate`，最后跑报告。
-- 演示页的“v4 评估”面板继续读取 `v4_report`；v5 四组对比在报告里查看，避免一次运行覆盖 v4 基线。
+- 演示页的”v4 评估”面板继续读取 `v4_report`；v5 四组对比在报告里查看，避免一次运行覆盖 v4 基线。
+
+## v6 扫描件 OCR 与表格解析
+
+v6 为 PDF 文件接入 **OCR 与表格提取**：扫描件 PDF 经 OCR 后可被检索，PDF 中的表格被结构化提取为独立文档，页码与表格名进入引用。
+
+### 原理
+
+- 入库时优先使用 `pdfplumber` 打开 PDF：
+  - **文本型 PDF**：直接提取页面文本与表格（`extract_text` / `extract_tables`），速度同 v5。
+  - **扫描件 PDF**：页面文本为空或中文比例极低时，自动调用 OCR 渲染页面 → 识别文字。
+- 表格作为独立的 `SourceDocument` 入库，获得独立的向量与 BM25 索引；引用中显示表名与页码。
+- 父子块切分对 OCR 与表格透明：正文与表格各自走相同的父子块流程。
+
+### 依赖安装
+
+OCR 功能为**可选依赖**，不安装时 PDF 仍按现有方式处理（文本提取），不阻塞服务启动：
+
+```bash
+# 安装 OCR 依赖（可选）
+pip install pdfplumber rapidocr-onnxruntime
+```
+
+- `pdfplumber 0.11.7`：PDF 渲染 + 表格提取。
+- `rapidocr-onnxruntime 1.4.4`：中英 OCR，ONNX 模型内置（约 100MB），无需联网下载。
+
+### 降级行为
+
+| 场景 | 行为 |
+|---|---|
+| 未安装 `pdfplumber` | 回退到 `PyPDFLoader`（文本提取，无 OCR/表格） |
+| 未安装 `rapidocr-onnxruntime` | 扫描件页面跳过 OCR，文本为空则记录 warning |
+| OCR 推理失败 | 该页跳过，记录 warning，不影响其他文件 |
+
+降级行为在入库日志中输出 warning，不阻塞其他文件。
+
+### 效果
+
+- 扫描 PDF 入库后，OCR 文本进入向量与 BM25 索引，问答时可被召回。
+- 表格作为独立文档入库，引用中显示 `表 {表名}_table_{N}` 与页码。
+- 文本型 PDF 继续正常工作，不退回 v5 功能。
 
 ## 多源配置
 
@@ -438,7 +478,7 @@ python scripts/ingest.py --recreate                               # 清空集合
 python -m pytest tests -q
 ```
 
-覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4/v5 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。
+覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、OCR 与表格提取、PDF 加载器（文本/扫描件/表格/降级）、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4/v5 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。
 
 冒烟测试需要已入库并启动 Ollama：
 
@@ -456,7 +496,8 @@ private_rag/
 ├── sources.py            sources.yaml 校验、环境变量插值、source_key
 ├── store.py              Qdrant client、集合、按 doc_id 查询/删除/prune
 ├── ingestion/
-│   ├── files.py          txt / md / pdf（按页）
+│   ├── files.py          txt / md / pdf（pdfplumber + OCR + 表格）
+│   ├── ocr.py            图片 OCR（rapidocr）与表格提取
 │   ├── web.py            URL 抓取 + 正文抽取
 │   ├── sql.py            SQLAlchemy 查询 -> 行级文档
 │   ├── chunking.py       父块(2000/0)内切子块(700/100)，生成稳定父块 ID

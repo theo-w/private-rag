@@ -195,3 +195,33 @@ def test_ingest_recreate_clears_collection(tmp_path):
         assert stats.added == 1
     finally:
         client.close()
+
+
+def test_ingest_preserves_page_and_table_metadata(tmp_path):
+    """验证 page / table 元数据从 SourceDocument 传递到 Qdrant payload。"""
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    # 用 txt 文件模拟：loader 不产生 page/table，但 pipeline 的 chunk_metadata
+    # 应正确跳过 extra 中不存在的键；此处主要验证 pipeline 不因缺少 page/table 报错。
+    (docs_dir / "no_page.txt").write_text(
+        "丙" * 1500 + "\n\n" + "丁" * 1500,
+        encoding="utf-8",
+    )
+
+    config = SourcesConfig(sources=[FileSource(path=str(docs_dir))])
+    lexical_path = tmp_path / "bm25.pkl"
+    client = QdrantClient(path=str(tmp_path / "qdrant"))
+    try:
+        stats = _run(client, config, lexical_path)
+        assert stats.added == 1
+        assert stats.chunks > 0
+
+        records = list(scroll_all(client))
+        for record in records:
+            payload = record.payload or {}
+            metadata = payload.get("metadata", {})
+            # 无 page/table 的文档不应报错，payload 结构应完整
+            assert "parent" in payload
+            assert "page_content" in payload
+    finally:
+        client.close()

@@ -9,7 +9,7 @@
 | v3 | `v3-fastapi-session` | FastAPI 服务化、多轮会话（session + 历史裁剪）、流式输出、统一错误处理 | ✅ 本分支完成 | API 可并发处理多会话；历史不串号；有接口级测试与启动说明 |
 | v4 | `v4-ragas-eval` | Ragas 自动评估：30–50 条标注问答、faithfulness / answer relevancy / context precision / recall、调参对比报告 | ✅ 本分支完成 | 固化评估集与脚本；给出 v2→v4 的量化对比（至少 2 组参数/策略） |
 | v5 | `v5-parent-rag-query-rewrite` | Parent-Document RAG（子块召回、父块送上下文）、查询改写（多查询 / HyDE）、去重与上下文预算 | ✅ 本分支完成（评估结果见报告） | 支持父子块、多查询/HyDE、预算与去重；有 `full` / `parent` / `parent_multi` / `parent_hyde` 前后对比、Ragas 子集与失败案例分析，见 `eval/reports/v5_report.md` |
-| v6 | `v6-ocr-parser` | 扫描件 OCR、表格解析、版面处理，接入现有连接器与元数据 | 计划中 | 扫描 PDF 与表格可检索；页码/表格名进入引用 |
+| v6 | `v6-ocr-parser` | 扫描件 OCR、表格解析、版面处理，接入现有连接器与元数据 | ✅ 本分支完成 | 扫描 PDF 与表格可检索；页码/表格名进入引用 |
 | v7 | `v7-agentic-rag` | Agentic RAG：意图路由、SQL/工具调用、检索-行动循环、可观测 trace | 计划中 | 业务问题能自动选择知识库或工具；trace 可回放每条决策 |
 
 ## v2 详细验收（已完成）
@@ -65,6 +65,16 @@
 - [x] 四组配置前后对比；Ragas 子集 12 条并标注样本数；失败案例与限制写入报告
 - [x] 父子块、预算、跨查询融合、改写回退、API 元数据与旧数据兼容的单测覆盖
 - [x] README、beginner-guide、eval/README 说明参数、数据流、命令与局限
+
+## v6 详细验收（本分支）
+
+- [x] 新增 `pdfplumber` + `rapidocr-onnxruntime` 依赖，Python 3.9 macOS arm64 wheel 可用
+- [x] 扫描件 PDF 经 OCR 后可被检索，页码进入引用
+- [x] PDF 中的表格被结构化提取，表格名/内容进入引用
+- [x] 文本型 PDF 继续正常工作（不退回 v5 功能）
+- [x] 依赖可选：未安装 OCR 后端时 PDF 仍按现有方式处理（文本提取），不阻塞服务启动
+- [x] `generation.py` 的 `_source_brief` / `build_citations` 无需改动即可展示页码/表格名
+- [x] 全部单测不依赖 Ollama/Ragas/Qdrant
 
 ## 分支与提交约定
 
