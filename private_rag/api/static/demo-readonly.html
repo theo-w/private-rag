@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>private-rag · 只读演示</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1a1d21; --muted:#6b7280; --line:#e5e7eb; --accent:#2f6f4f; --warn:#8a5a00; --warnbg:#fff6e0; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:1080px; margin:0 auto; padding:28px 20px 64px; }
+  header { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  h1 { font-size:20px; margin:0; }
+  .badge { font-size:12px; padding:3px 9px; border-radius:999px; background:#e8f0eb; color:var(--accent); border:1px solid #cfe0d6; }
+  .ready { font-size:13px; color:var(--muted); margin-left:auto; }
+  .notice { margin:16px 0; padding:12px 14px; background:var(--warnbg); border:1px solid #f0dfae;
+            border-radius:10px; color:var(--warn); font-size:13px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; margin-top:18px; }
+  .panel h2 { font-size:15px; margin:0 0 12px; }
+  form { display:flex; gap:10px; flex-wrap:wrap; }
+  input[type=search] { flex:1 1 320px; padding:11px 13px; border:1px solid var(--line); border-radius:10px; font-size:15px; }
+  select,input[type=number] { padding:11px 10px; border:1px solid var(--line); border-radius:10px; background:#fff; font-size:14px; }
+  button { padding:11px 18px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:14px; cursor:pointer; }
+  button.ghost { background:#eef0f2; color:var(--ink); }
+  .examples { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .chip { font-size:13px; padding:6px 11px; border-radius:999px; background:#eef0f2; border:1px solid var(--line); cursor:pointer; }
+  .card { border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-top:12px; background:#fff; }
+  .head { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+  .idx { font-size:12px; font-weight:600; color:#fff; background:#4b5563; border-radius:6px; padding:2px 7px; }
+  .title { font-weight:600; }
+  .type { font-size:12px; color:var(--muted); border:1px solid var(--line); border-radius:6px; padding:2px 7px; }
+  .score { font-size:12px; color:var(--muted); margin-left:auto; }
+  .uri { font-size:12px; color:var(--muted); margin:8px 0 0; word-break:break-all; }
+  .loc { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .mini-tag { font-size:12px; padding:3px 9px; border-radius:999px; background:#eef4f0; color:var(--accent); border:1px solid #d5e5db; }
+  .mini-tag.scan { background:#f2f0ff; color:#4b3fa8; border-color:#ddd7f7; }
+  .snip { margin:10px 0 0; font-size:14px; color:#374151; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
+  tr:hover td { background:#fafbfc; }
+  .muted { color:var(--muted); font-size:13px; }
+  .full { margin-top:10px; padding:12px 14px; background:#fafbfc; border:1px solid var(--line);
+          border-radius:10px; white-space:pre-wrap; font-size:14px; display:none; }
+  footer { margin-top:26px; font-size:12px; color:var(--muted); }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>private-rag 知识库</h1>
+    <span class="badge">只读演示</span>
+    <span class="badge">未加载模型</span>
+    <span class="ready" id="ready">正在检查就绪状态…</span>
+  </header>
+
+  <p class="notice">
+    这份部署不加载任何模型：可以看<b>已入库的语料</b>与<b>检索命中的引用（含页码、表格名）</b>，
+    检索走 BM25 关键词召回。语义向量召回、精排与问答生成在此部署不可用，
+    完整效果请在本地跑 <code>scripts/serve.py</code> 配合 Ollama 查看。
+  </p>
+
+  <section class="panel">
+    <h2>关键词检索</h2>
+    <form id="search-form">
+      <input type="search" id="q" placeholder="例如：SKU-2026-001 的库存与单价" autocomplete="off">
+      <select id="source">
+        <option value="">全部来源</option>
+        <option value="file">仅文件</option>
+        <option value="sql">仅数据库</option>
+      </select>
+      <input type="number" id="topk" value="5" min="1" max="20" title="返回条数">
+      <button type="submit">检索</button>
+    </form>
+    <div class="examples">
+      <span class="chip">SKU-2026-001 的库存与单价</span>
+      <span class="chip">哪些商品库存低于安全库存</span>
+      <span class="chip">扫描件里写了什么</span>
+      <span class="chip">橙子怎么保存</span>
+    </div>
+    <p class="muted" id="search-meta"></p>
+    <div id="results"></div>
+  </section>
+
+  <section class="panel">
+    <h2>语料清单（点击行看全文）</h2>
+    <table>
+      <thead><tr><th>标题</th><th>来源</th><th>页</th><th>表格</th><th>扫描件</th><th>字数</th></tr></thead>
+      <tbody id="docs"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
+    </table>
+    <div class="full" id="fulltext"></div>
+  </section>
+
+  <footer>
+    数据来自 <code>data/demo_snapshot.json</code>，由 v6 的真实入库链路（含扫描件 OCR 与表格解析）在本机生成。
+    接口：<code>GET /ready</code> · <code>GET /api/v1/documents</code> · <code>POST /api/v1/search</code> · <code>GET /api/v1/document?doc_id=</code>
+  </footer>
+</div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+const headers = { "Content-Type": "application/json" };
+if (TOKEN) headers["X-Demo-Token"] = TOKEN;
+
+function el(id) { return document.getElementById(id); }
+
+function tag(text, cls) {
+  const s = document.createElement("span");
+  s.className = "mini-tag" + (cls ? " " + cls : "");
+  s.textContent = text;
+  return s;
+}
+
+function renderReady(data) {
+  const c = data.checks || {};
+  el("ready").textContent = data.ready
+    ? `就绪 · ${c.documents} 个文档 · 扫描件 ${c.scanned_documents} · 表格 ${c.table_documents}`
+    : "未就绪：缺少快照";
+}
+
+function renderCitations(list) {
+  const box = el("results");
+  box.textContent = "";
+  list.forEach((citation) => {
+    const card = document.createElement("div");
+    card.className = "card";
+
+    const head = document.createElement("div");
+    head.className = "head";
+    const idx = document.createElement("span");
+    idx.className = "idx";
+    idx.textContent = citation.index;
+    const title = document.createElement("span");
+    title.className = "title";
+    title.textContent = citation.title;
+    const type = document.createElement("span");
+    type.className = "type";
+    type.textContent = citation.source_type;
+    const score = document.createElement("span");
+    score.className = "score";
+    score.textContent = "BM25 " + Number(citation.score).toFixed(3);
+    head.append(idx, title, type, score);
+
+    const uri = document.createElement("p");
+    uri.className = "uri";
+    uri.textContent = citation.source_uri || "（无来源地址）";
+
+    const loc = document.createElement("div");
+    loc.className = "loc";
+    if (citation.page != null) loc.append(tag(`第 ${citation.page} 页`));
+    if (citation.table) loc.append(tag(`表 ${citation.table}`));
+    if (citation.scanned) loc.append(tag("扫描件 OCR", "scan"));
+
+    const snip = document.createElement("p");
+    snip.className = "snip";
+    snip.textContent = citation.snippet || "";
+
+    card.append(head, uri);
+    if (loc.childElementCount) card.append(loc);
+    card.append(snip);
+    box.append(card);
+  });
+}
+
+async function search(query) {
+  const body = { query, top_k: Number(el("topk").value) || 5 };
+  const source = el("source").value;
+  if (source) body.source_type = source;
+  el("search-meta").textContent = "检索中…";
+  try {
+    const res = await fetch("/api/v1/search", { method: "POST", headers, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) {
+      el("search-meta").textContent = `检索失败：${data.message || res.status}`;
+      el("results").textContent = "";
+      return;
+    }
+    el("search-meta").textContent =
+      `命中 ${data.citations.length} / 候选 ${data.retrieved} · 分词 ${data.tokens.join(" / ")}` +
+      " · 只读部署未做语义召回与精排";
+    renderCitations(data.citations);
+  } catch (err) {
+    el("search-meta").textContent = "请求失败：" + err;
+  }
+}
+
+async function loadDocs() {
+  try {
+    const res = await fetch("/api/v1/documents?limit=200", { headers });
+    const data = await res.json();
+    const tbody = el("docs");
+    tbody.textContent = "";
+    if (!data.documents) {
+      tbody.innerHTML = '<tr><td colspan="6" class="muted">快照不可用</td></tr>';
+      return;
+    }
+    data.documents.forEach((doc) => {
+      const tr = document.createElement("tr");
+      [doc.title, doc.source_type, doc.page ?? "—", doc.table ?? "—",
+       doc.scanned ? "是" : "—", doc.char_count].forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = String(value);
+        tr.append(td);
+      });
+      tr.addEventListener("click", () => showFull(doc.doc_id));
+      tbody.append(tr);
+    });
+  } catch (err) {
+    el("docs").innerHTML = '<tr><td colspan="6" class="muted">加载失败</td></tr>';
+  }
+}
+
+async function showFull(docId) {
+  const box = el("fulltext");
+  const res = await fetch(
+    "/api/v1/document?doc_id=" + encodeURIComponent(docId), { headers });
+  const data = await res.json();
+  box.style.display = "block";
+  box.textContent = `${data.title}\n\n${data.text || ""}`;
+}
+
+el("search-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const value = el("q").value.trim();
+  if (value) search(value);
+});
+document.querySelectorAll(".chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    el("q").value = chip.textContent.trim();
+    search(chip.textContent.trim());
+  });
+});
+
+fetch("/ready").then((r) => r.json()).then(renderReady).catch(() => {
+  el("ready").textContent = "无法读取就绪状态";
+});
+loadDocs();
+</script>
+</body>
+</html>

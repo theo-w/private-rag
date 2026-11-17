@@ -10,6 +10,7 @@
 | v4 | `v4-ragas-eval` | Ragas 自动评估：30–50 条标注问答、faithfulness / answer relevancy / context precision / recall、调参对比报告 | ✅ 本分支完成 | 固化评估集与脚本；给出 v2→v4 的量化对比（至少 2 组参数/策略） |
 | v5 | `v5-parent-rag-query-rewrite` | Parent-Document RAG（子块召回、父块送上下文）、查询改写（多查询 / HyDE）、去重与上下文预算 | ✅ 本分支完成（评估结果见报告） | 支持父子块、多查询/HyDE、预算与去重；有 `full` / `parent` / `parent_multi` / `parent_hyde` 前后对比、Ragas 子集与失败案例分析，见 `eval/reports/v5_report.md` |
 | v6 | `v6-ocr-parser` | 扫描件 OCR、表格解析、版面处理，接入现有连接器与元数据 | ✅ 本分支完成 | 扫描 PDF 与表格可检索；页码/表格名进入引用 |
+| v6.1 | `v6.1-readonly-render` | 只读公网演示：v6 入库产物导出快照，小服务暴露语料与 BM25 检索，问答明确关闭 | ✅ 已部署 (<https://private-rag-readonly.onrender.com>) | 公网可看到扫描件 OCR 文本、表格文档与页码/表格名引用；不加载模型，问答返回 409 |
 | v7 | `v7-agentic-rag` | Agentic RAG：意图路由、SQL/工具调用、检索-行动循环、可观测 trace | 计划中 | 业务问题能自动选择知识库或工具；trace 可回放每条决策 |
 
 ## v2 详细验收（已完成）
@@ -76,6 +77,20 @@
 - [x] 依赖可选：未安装 OCR 后端时 PDF 仍按现有方式处理（文本提取），不阻塞服务启动
 - [x] `generation.py` 的 `_source_brief` / `build_citations` 无需改动即可展示页码/表格名
 - [x] 全部单测不依赖 Ollama/Ragas/Qdrant
+
+## v6.1 详细验收（只读公网演示）
+
+- [x] `scripts/build_demo_snapshot.py` 用真实加载器导出快照，含扫描件 OCR 文本与表格文档
+- [x] 构建器白名单校验：file 源只允许 `data/docs`，sql 源只允许 `data/sql/demo.db`，web 源拒绝构建
+- [x] 拆出 `retrieval/tokenizer.py`，只读服务复用同一套分词而不依赖 qdrant-client
+- [x] 只读服务不加载模型：依赖清单不含 torch/transformers/sentence-transformers/FlagEmbedding/
+      qdrant-client/pdfplumber/rapidocr，可在免费实例（512 MB）上运行
+- [x] `/ready` 的 `checks` 显式给出 `embedding_model/reranker/llm = false`，不让只读状态被误读成就绪的完整服务
+- [x] 引用条目字段与线上 `CitationOut` 一致，页码与表格名在公网演示页可见
+- [x] `/api/v1/chat*` 恒返回 409 `generation_disabled`，不假装能回答
+- [x] 只读索引与 `LexicalIndex` 的排序对齐测试；共 12 条只读接口测试，不依赖 Ollama/Qdrant/网络
+- [x] 可选令牌 `RAG_DEMO_TOKEN`：设置后 `/api/v1/*` 要求 `X-Demo-Token`
+- [x] README 说明只读部署不能代表完整效果（无语义召回、无精排、无父子块、无问答）
 
 ## 分支与提交约定
 

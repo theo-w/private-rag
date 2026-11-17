@@ -1,0 +1,195 @@
+{
+  "schema_version": 1,
+  "app_version": "0.6.0",
+  "source_config": "config/sources.demo.yaml",
+  "sources": [
+    "data/docs",
+    "demo.products"
+  ],
+  "mode": "readonly",
+  "retrieval": "bm25",
+  "chunk_granularity": "document",
+  "stats": {
+    "documents": 9,
+    "scanned_documents": 2,
+    "table_documents": 5,
+    "total_chars": 1278
+  },
+  "build_log": [
+    "file:data/docs: 5 个文档，0 条告警",
+    "sql:1a6b6b6f0d74: 4 个文档，0 条告警"
+  ],
+  "documents": [
+    {
+      "doc_id": "file:data/docs/test.txt",
+      "text": "# RAG测试文档：水果相关知识库\n版本：v1.0\n\n## 苹果\n苹果，蔷薇科苹果属果实。\n成熟季节：秋季。\n常见品种：红富士、嘎啦、花牛。\n口感特点：酸甜脆爽，富含果胶，适合生吃、榨汁、做派。\n储存：阴凉避光处可以存放2~4周，冷藏更久。\n\n## 橙子\n芸香科柑橘。\n成熟季节：秋冬。\n富含维C，果皮精油可以用来除味。\n注意：橙子和牛奶不建议短时间大量同食，容易影响蛋白吸收。\n\n## 猕猴桃\n奇异果，维C含量很高。\n软了才好吃，硬的需要和苹果放一起催熟。\n禁忌：不要和螃蟹大量同吃。\n\n## 香蕉\n芭蕉科，热带水果。\n熟香蕉表皮出现黑点的时候甜度最高。\n适合快速补充能量，钾含量丰富。\n怕冷，不能放冰箱冷藏。\n\n## 问答测试样例（用来验证RAG会不会正确检索）\n问：苹果适合放冰箱吗？\n答：苹果可以冷藏保存，延长保鲜时间。\n问：香蕉能不能放冰箱？\n答：香蕉不适合放冰箱，低温容易发黑变质。\n问：橙子有什么营养？\n答：橙子含有丰富维生素C。",
+      "title": "test.txt",
+      "source_type": "file",
+      "source_uri": "data/docs/test.txt",
+      "source_key": "file:data/docs",
+      "updated_at": "2026-11-14T20:09:25",
+      "tags": [
+        "local",
+        "demo"
+      ],
+      "content_hash": "4d2a5e8b22fc507b89089c194572e5f077777c4441e5b31811fb60abe93793db",
+      "page": null,
+      "table": null,
+      "file_name": "test.txt",
+      "scanned": false,
+      "char_count": 422
+    },
+    {
+      "doc_id": "file:data/docs/演示-商品库存表.pdf#page=1#table=1",
+      "text": "商品名称,单价（元）,当前库存,安全库存,补货周期\n智能保温杯,89.00,128,40,7 天\n无线降噪耳机,1299.00,36,20,10 天\n便携咖啡机,459.00,12,25,7 天",
+      "title": "演示-商品库存表.pdf 第 1 页 表格 1",
+      "source_type": "file",
+      "source_uri": "data/docs/演示-商品库存表.pdf",
+      "source_key": "file:data/docs",
+      "updated_at": "2026-11-16T15:25:12",
+      "tags": [
+        "local",
+        "demo"
+      ],
+      "content_hash": "7e3c505ded6f16fc2c6a2cb7e0afd249f4c5e371db03ed6c212981fb2552009d",
+      "page": 1,
+      "table": "演示-商品库存表_table_1",
+      "file_name": "演示-商品库存表.pdf",
+      "scanned": false,
+      "char_count": 97
+    },
+    {
+      "doc_id": "file:data/docs/演示-商品库存表.pdf#page=1",
+      "text": "商品库存与补货规则说明\n本节给出在售商品的单价、库存与安全库存阈值。当库存低于安全库存阈值时，系统自动生\n成补货工单并通知采购负责人。补货周期为 7 天，供应商为华东仓储中心。\n商品名称 单价（元） 当前库存 安全库存 补货周期\n智能保温杯 89.00 128 40 7 天\n无线降噪耳机 1299.00 36 20 10 天\n便携咖啡机 459.00 12 25 7 天",
+      "title": "演示-商品库存表.pdf 第 1 页",
+      "source_type": "file",
+      "source_uri": "data/docs/演示-商品库存表.pdf",
+      "source_key": "file:data/docs",
+      "updated_at": "2026-11-16T15:25:12",
+      "tags": [
+        "local",
+        "demo"
+      ],
+      "content_hash": "edd759b7904c4ca7f812c10ef6e52094b4a458b8a4a52e2e777947e333dcc626",
+      "page": 1,
+      "table": null,
+      "file_name": "演示-商品库存表.pdf",
+      "scanned": false,
+      "char_count": 186
+    },
+    {
+      "doc_id": "file:data/docs/演示-扫描件模拟.pdf#page=1",
+      "text": "产品库存与安全库存说明\n商品编号SKU-2026-001，商品名称智能保温杯，当前库存128件\n该商品的安全库存阅值为40件，补货周期为7天，供应商为华东仓储中心\n当库存低于安全库存阈值时，系统自动生成补货工单并通知采购负责人。\n本页面仅供私有RAG扫描件检索演示使用，不含真实业务数据。",
+      "title": "演示-扫描件模拟.pdf 第 1 页",
+      "source_type": "file",
+      "source_uri": "data/docs/演示-扫描件模拟.pdf",
+      "source_key": "file:data/docs",
+      "updated_at": "2026-11-16T15:22:00",
+      "tags": [
+        "local",
+        "demo"
+      ],
+      "content_hash": "0c0667b85bdc9a9c108b627fe1d02d929b2893e497c85913de610fdf6bb5b032",
+      "page": 1,
+      "table": null,
+      "file_name": "演示-扫描件模拟.pdf",
+      "scanned": true,
+      "char_count": 144
+    },
+    {
+      "doc_id": "file:data/docs/演示-扫描件模拟.pdf#page=2",
+      "text": "产品库存与安全库存说明\n该商品的安至库存阈值为40件，补货周期为7天，供应商为华东仓储中心。\n当库存低于安全库存阈值时，系统自动生成补货工单并通知采购负责人。\n本页面仅供私有RAG扫描件检索演示使用，不含真实业务数据。",
+      "title": "演示-扫描件模拟.pdf 第 2 页",
+      "source_type": "file",
+      "source_uri": "data/docs/演示-扫描件模拟.pdf",
+      "source_key": "file:data/docs",
+      "updated_at": "2026-11-16T15:22:00",
+      "tags": [
+        "local",
+        "demo"
+      ],
+      "content_hash": "e2b8c828d4ba00827b27f9672744e4597ecd7ad89d35d51f18877279a377e4c6",
+      "page": 2,
+      "table": null,
+      "file_name": "演示-扫描件模拟.pdf",
+      "scanned": true,
+      "char_count": 109
+    },
+    {
+      "doc_id": "sql:1a6b6b6f0d74:1",
+      "text": "name: 橙子\ncategory: 水果\ndescription: 橙子富含维生素 C，适合日常补充维 C；表皮较厚，常温可存放一周左右。\nprice: 12.5",
+      "title": "橙子",
+      "source_type": "sql",
+      "source_uri": "demo.products#1",
+      "source_key": "sql:1a6b6b6f0d74",
+      "updated_at": "2026-01-10",
+      "tags": [
+        "business",
+        "demo"
+      ],
+      "content_hash": "7ae5820c8b6f081b32e076b749cce0b023a8d70cb5e570e7423f6970f96a54be",
+      "page": null,
+      "table": "demo.products",
+      "file_name": null,
+      "scanned": false,
+      "char_count": 82
+    },
+    {
+      "doc_id": "sql:1a6b6b6f0d74:2",
+      "text": "name: 苹果\ncategory: 水果\ndescription: 苹果适合冷藏保存，可以延长保鲜时间；切开后容易氧化，建议尽快食用。\nprice: 8.0",
+      "title": "苹果",
+      "source_type": "sql",
+      "source_uri": "demo.products#2",
+      "source_key": "sql:1a6b6b6f0d74",
+      "updated_at": "2026-01-12",
+      "tags": [
+        "business",
+        "demo"
+      ],
+      "content_hash": "89ead8506b7276aec1cf64906f00ffa02d5db0fd6a63f27639dbb04fc8ea9cc3",
+      "page": null,
+      "table": "demo.products",
+      "file_name": null,
+      "scanned": false,
+      "char_count": 79
+    },
+    {
+      "doc_id": "sql:1a6b6b6f0d74:3",
+      "text": "name: 香蕉\ncategory: 水果\ndescription: 香蕉不适合放冰箱，低温会让表皮变黑、口感变差；建议常温阴凉处保存。\nprice: 6.5",
+      "title": "香蕉",
+      "source_type": "sql",
+      "source_uri": "demo.products#3",
+      "source_key": "sql:1a6b6b6f0d74",
+      "updated_at": "2026-01-15",
+      "tags": [
+        "business",
+        "demo"
+      ],
+      "content_hash": "f4b46971184f10aa0e9f18f3df741124e85de1bcf47d23670dd5fdbac649dacd",
+      "page": null,
+      "table": "demo.products",
+      "file_name": null,
+      "scanned": false,
+      "char_count": 79
+    },
+    {
+      "doc_id": "sql:1a6b6b6f0d74:4",
+      "text": "name: 猕猴桃\ncategory: 水果\ndescription: 猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化。\nprice: 15.0",
+      "title": "猕猴桃",
+      "source_type": "sql",
+      "source_uri": "demo.products#4",
+      "source_key": "sql:1a6b6b6f0d74",
+      "updated_at": "2026-01-18",
+      "tags": [
+        "business",
+        "demo"
+      ],
+      "content_hash": "e227ba44151296a10bd63b560489e12878ec0c240f8d124487d8f5df1d32068f",
+      "page": null,
+      "table": "demo.products",
+      "file_name": null,
+      "scanned": false,
+      "char_count": 80
+    }
+  ]
+}

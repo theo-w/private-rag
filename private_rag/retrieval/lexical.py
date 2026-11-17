@@ -9,39 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
-import jieba
 from rank_bm25 import BM25Okapi
 from qdrant_client import QdrantClient
 
 from private_rag.config import LEXICAL_INDEX_PATH, LEXICAL_TOP_K
+from private_rag.retrieval.tokenizer import STOPWORDS, tokenize
 from private_rag.store import scroll_all
-
-STOPWORDS = {
-    "的", "了", "是", "在", "和", "与", "及", "或", "有", "我", "你", "他", "她", "它",
-    "吗", "呢", "啊", "吧", "就", "都", "也", "这", "那", "什么", "怎么", "为什么",
-    "如何", "哪些", "哪个", "请问", "一下", "可以", "需要", "能", "会", "要", "把",
-    "被", "对", "中", "上", "下", "里", "个", "但", "而", "又", "很", "更", "最",
-    "还", "已经", "因为", "所以", "如果", "然后", "以及", "一个", "一种",
-    "the", "a", "an", "of", "to", "in", "on", "is", "are", "was", "were", "be",
-    "and", "or", "for", "with", "what", "how", "why", "which", "who", "when",
-    "where", "do", "does", "did", "can", "could", "should", "would", "will",
-    "this", "that", "these", "those", "it", "its", "as", "at", "by", "from",
-    "we", "you", "they", "he", "she", "i",
-}
-
-
-def tokenize(text: str) -> list[str]:
-    """中英文混合分词：去掉标点与高频停用词，保留否定词等语义词。"""
-    tokens: list[str] = []
-    for raw in jieba.lcut_for_search(text):
-        token = raw.strip().lower()
-        if not token or token in STOPWORDS:
-            continue
-        if not any(char.isalnum() for char in token):
-            continue
-        tokens.append(token)
-    return tokens
-
 
 def _passes_filter(metadata: dict, source_type: Optional[str], tags: Optional[Sequence[str]]) -> bool:
     if source_type and metadata.get("source_type") != source_type:
