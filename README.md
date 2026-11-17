@@ -444,7 +444,15 @@ render services create --name private-rag-readonly --type web_service \
 ```
 
 `scripts/serve_readonly.py` 监听 `0.0.0.0` 并读取 Render 注入的 `PORT`；
-开 auto-deploy 后推送到该分支即重新部署。
+开 auto-deploy 后推送到部署分支即重新部署。
+
+该服务的部署分支现已改为 `main`（上面 `--branch` 是创建时的取值）：
+
+```bash
+render services update srv-dbtfv3jbc2fs73f3cg40 --branch main
+```
+
+改分支不会自动重新部署，需要手动触发一次或等下一次推送到 main。
 
 ### 端点
 
