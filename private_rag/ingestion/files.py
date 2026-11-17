@@ -1,4 +1,10 @@
-"""本地文件连接器：txt / md / pdf。"""
+"""本地文件连接器：txt / md / pdf。
+
+PDF 支持：
+- 文本型 PDF：使用 pdfplumber 逐页提取文本和表格。
+- 扫描件 PDF：使用 pdfplumber 渲染页面 + rapidocr_onnxruntime OCR。
+- 若 pdfplumber 不可用，回退到 PyPDFLoader（仅文本提取，无 OCR/表格）。
+"""
 
 from __future__ import annotations
 
@@ -13,6 +19,17 @@ from private_rag.models import SourceDocument
 from private_rag.sources import FileSource, resolve_path
 
 SUPPORTED_SUFFIXES = {".txt", ".md", ".pdf"}
+
+# 模块级 pdfplumber 导入（供测试打桩使用）
+try:
+    import pdfplumber  # noqa: F401
+except ImportError:
+    pdfplumber = None  # type: ignore[assignment]
+
+
+def _try_import_pdfplumber():
+    """返回模块级 pdfplumber，失败返回 None。供测试打桩使用。"""
+    return pdfplumber
 
 
 def _relative(path: Path) -> str:
@@ -42,6 +59,131 @@ def iter_files(target: Path, include: list[str] | None = None) -> list[Path]:
     return files
 
 
+def _is_scanned(text: str) -> bool:
+    """判断页面是否为扫描件（文本为空或几乎没有可识别字符）。"""
+    stripped = text.strip()
+    if not stripped:
+        return True
+    # 检测是否有"实质字符"：CJK 统一表意文字（汉字）、拉丁字母
+    has_cjk = any(0x4E00 <= ord(c) <= 0x9FFF for c in stripped)
+    has_latin = any(c.isascii() and c.isalpha() for c in stripped)
+    # 既没有汉字也没有拉丁字母，说明是纯标点/噪声 → 扫描件
+    if not has_cjk and not has_latin:
+        return True
+    # 有实质字符，不算扫描件
+    return False
+
+
+def _load_pdf_with_pdfplumber(path: Path, relative: str, source_key: str,
+                               updated_at: str, tags: list[str]) -> tuple[list[SourceDocument], list[str]]:
+    """使用 pdfplumber 加载 PDF（支持 OCR 和表格提取）。"""
+    documents: list[SourceDocument] = []
+    errors: list[str] = []
+    file_name = path.name
+    file_stem = path.stem
+
+    try:
+        pdfplumber = _try_import_pdfplumber()
+        with pdfplumber.open(str(path)) as pdf:
+            for page_index, page in enumerate(pdf.pages, start=1):
+                # 提取文本
+                text = page.extract_text() or ""
+                scanned = _is_scanned(text)
+
+                # 扫描件：OCR
+                if scanned:
+                    from private_rag.ingestion.ocr import ocr_page as _ocr_page
+                    ocr_result = _ocr_page(page)
+                    text = ocr_result.text
+                    if not text.strip():
+                        # 纯图片页无内容，跳过
+                        continue
+
+                # 提取表格
+                from private_rag.ingestion.ocr import extract_tables as _extract_tables
+                tables = _extract_tables(page, table_label=file_stem, is_scanned=scanned)
+
+                for table_index, table_info in enumerate(tables, start=1):
+                    table_text = table_info["text"]
+                    documents.append(
+                        SourceDocument(
+                            doc_id=f"file:{relative}#page={page_index}#table={table_index}",
+                            text=table_text,
+                            title=f"{file_name} 第 {page_index} 页 表格 {table_index}",
+                            source_type="file",
+                            source_uri=relative,
+                            source_key=source_key,
+                            updated_at=updated_at,
+                            tags=list(tags),
+                            extra={
+                                "page": page_index,
+                                "table": f"{file_stem}_table_{table_index}",
+                                "file_name": file_name,
+                                "format": "pdf",
+                                "scanned": scanned,
+                            },
+                        )
+                    )
+
+                # 正文
+                if text.strip():
+                    documents.append(
+                        SourceDocument(
+                            doc_id=f"file:{relative}#page={page_index}",
+                            text=text,
+                            title=f"{file_name} 第 {page_index} 页",
+                            source_type="file",
+                            source_uri=relative,
+                            source_key=source_key,
+                            updated_at=updated_at,
+                            tags=list(tags),
+                            extra={
+                                "page": page_index,
+                                "file_name": file_name,
+                                "format": "pdf",
+                                "scanned": scanned,
+                            },
+                        )
+                    )
+
+    except Exception as exc:
+        errors.append(f"pdfplumber 读取失败 {relative}: {exc}")
+
+    return documents, errors
+
+
+def _load_pdf_with_pypdf(path: Path, relative: str, source_key: str,
+                          updated_at: str, tags: list[str]) -> tuple[list[SourceDocument], list[str]]:
+    """回退方案：使用 PyPDFLoader 加载 PDF（仅文本提取，无 OCR/表格）。"""
+    documents: list[SourceDocument] = []
+    errors: list[str] = []
+    file_name = path.name
+
+    try:
+        for index, page in enumerate(PyPDFLoader(str(path)).load(), start=1):
+            page_number = int(page.metadata.get("page", index - 1)) + 1
+            text = page.page_content.strip()
+            if not text:
+                continue
+            documents.append(
+                SourceDocument(
+                    doc_id=f"file:{relative}#page={page_number}",
+                    text=text,
+                    title=f"{file_name} 第 {page_number} 页",
+                    source_type="file",
+                    source_uri=relative,
+                    source_key=source_key,
+                    updated_at=updated_at,
+                    tags=list(tags),
+                    extra={"page": page_number, "file_name": file_name, "format": "pdf"},
+                )
+            )
+    except Exception as exc:
+        errors.append(f"PyPDFLoader 读取失败 {relative}: {exc}")
+
+    return documents, errors
+
+
 def load_file_documents(source: FileSource, source_key: str) -> tuple[list[SourceDocument], list[str]]:
     """把一个文件或目录展开成文档单元；PDF 按页展开。"""
     errors: list[str] = []
@@ -57,24 +199,13 @@ def load_file_documents(source: FileSource, source_key: str) -> tuple[list[Sourc
         updated_at = _updated_at(path)
         try:
             if path.suffix.lower() == ".pdf":
-                for index, page in enumerate(PyPDFLoader(str(path)).load(), start=1):
-                    page_number = int(page.metadata.get("page", index - 1)) + 1
-                    text = page.page_content.strip()
-                    if not text:
-                        continue
-                    documents.append(
-                        SourceDocument(
-                            doc_id=f"file:{relative}#page={page_number}",
-                            text=text,
-                            title=f"{path.name} 第 {page_number} 页",
-                            source_type="file",
-                            source_uri=relative,
-                            source_key=source_key,
-                            updated_at=updated_at,
-                            tags=list(source.tags),
-                            extra={"page": page_number, "file_name": path.name, "format": "pdf"},
-                        )
-                    )
+                # 优先使用 pdfplumber（支持 OCR + 表格）
+                if _try_import_pdfplumber() is not None:
+                    docs, errs = _load_pdf_with_pdfplumber(path, relative, source_key, updated_at, list(source.tags))
+                else:
+                    docs, errs = _load_pdf_with_pypdf(path, relative, source_key, updated_at, list(source.tags))
+                documents.extend(docs)
+                errors.extend(errs)
             else:
                 text = path.read_text(encoding="utf-8").strip()
                 if not text:

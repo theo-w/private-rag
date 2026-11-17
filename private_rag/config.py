@@ -68,7 +68,7 @@ RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
 WEB_USER_AGENT = "private-rag/0.2 (+https://github.com/theo-w/private-rag)"
 
 # v3 HTTP 服务
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.6.0"
 API_PREFIX = "/api/v1"
 DEFAULT_API_HOST = "127.0.0.1"
 DEFAULT_API_PORT = 8000
