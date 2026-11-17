@@ -57,28 +57,28 @@ pip install -r requirements-dev.txt
 
 ```bash
 # 1. 生成演示 SQLite 库（data/sql/demo.db 已 gitignore）
-python scripts/init_demo_db.py
+python3 scripts/init_demo_db.py
 
 # 2. 按演示配置全量入库（文件 data/docs + 数据库 products 表）
-python scripts/ingest.py --config config/sources.demo.yaml --recreate
+python3 scripts/ingest.py --config config/sources.demo.yaml --recreate
 
 # 3. 按来源过滤提问，回答会带编号引用
-python scripts/chat_cli.py "橙子有什么营养？" --source-type sql
-python scripts/chat_cli.py "香蕉要放冰箱吗？" --source-type file
+python3 scripts/chat_cli.py "橙子有什么营养？" --source-type sql
+python3 scripts/chat_cli.py "香蕉要放冰箱吗？" --source-type file
 ```
 
 常用参数：
 
 ```bash
-python scripts/chat_cli.py "维生素 C 相关的记录有哪些？" --tag business
-python scripts/chat_cli.py "苹果适合冷藏吗？" --dense-only        # 只走向量，用于对比
-python scripts/chat_cli.py "苹果适合冷藏吗？" --no-rerank         # 跳过精排，便于观察召回
+python3 scripts/chat_cli.py "维生素 C 相关的记录有哪些？" --tag business
+python3 scripts/chat_cli.py "苹果适合冷藏吗？" --dense-only        # 只走向量，用于对比
+python3 scripts/chat_cli.py "苹果适合冷藏吗？" --no-rerank         # 跳过精排，便于观察召回
 ```
 
 交互模式（`exit` 退出）：
 
 ```bash
-python scripts/chat_cli.py --source-type sql
+python3 scripts/chat_cli.py --source-type sql
 ```
 
 ## HTTP API（v3）
@@ -86,9 +86,9 @@ python scripts/chat_cli.py --source-type sql
 启动服务（另开终端）：
 
 ```bash
-python scripts/serve.py                  # 默认 127.0.0.1:8000
-python scripts/serve.py --port 8766 --no-rerank
-python scripts/serve.py --reload         # 开发模式，代码变更自动重启
+python3 scripts/serve.py                  # 默认 127.0.0.1:8000
+python3 scripts/serve.py --port 8766 --no-rerank
+python3 scripts/serve.py --reload         # 开发模式，代码变更自动重启
 ```
 
 - Swagger 文档：<http://127.0.0.1:8000/docs>
@@ -414,8 +414,8 @@ pip install pdfplumber rapidocr-onnxruntime
 快照由真实加载器产出，因此扫描件 OCR 文本、表格文档、页码与表格名与本地一致：
 
 ```bash
-python scripts/init_demo_db.py                    # 生成 data/sql/demo.db
-python scripts/build_demo_snapshot.py             # 导出 data/demo_snapshot.json
+python3 scripts/init_demo_db.py                    # 生成 data/sql/demo.db
+python3 scripts/build_demo_snapshot.py             # 导出 data/demo_snapshot.json
 ```
 
 构建器带白名单校验：file 源只允许 `data/docs`，sql 源只允许 `data/sql/demo.db`，
@@ -424,7 +424,7 @@ python scripts/build_demo_snapshot.py             # 导出 data/demo_snapshot.js
 ### 本地跑只读服务
 
 ```bash
-python scripts/serve_readonly.py --port 8799
+python3 scripts/serve_readonly.py --port 8799
 ```
 
 不加载模型、不连 Qdrant，因此启动快、内存占用低；依赖清单单独放在
@@ -486,7 +486,7 @@ render services update srv-dbtfv3jbc2fs73f3cg40 --branch main
 
 ```bash
 cp config/sources.example.yaml config/sources.yaml
-python scripts/ingest.py --config config/sources.yaml
+python3 scripts/ingest.py --config config/sources.yaml
 ```
 
 `sources.yaml` 支持三类来源：
@@ -538,8 +538,8 @@ sources:
 - **词法索引**：每次入库结束重建 `storage/lexical/bm25.pkl`；问答时缺失会自动降级为纯向量检索并提示。
 
 ```bash
-python scripts/ingest.py --config config/sources.yaml --prune     # 增量 + 清理消失来源
-python scripts/ingest.py --recreate                               # 清空集合全量重建
+python3 scripts/ingest.py --config config/sources.yaml --prune     # 增量 + 清理消失来源
+python3 scripts/ingest.py --recreate                               # 清空集合全量重建
 ```
 
 ## 引用输出
@@ -561,7 +561,7 @@ python scripts/ingest.py --recreate                               # 清空集合
 单元测试不依赖 Ollama 与真实数据库：
 
 ```bash
-python -m pytest tests -q
+python3 -m pytest tests -q
 ```
 
 覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、OCR 与表格提取、PDF 加载器（文本/扫描件/表格/降级）、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4/v5 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。
@@ -569,8 +569,8 @@ python -m pytest tests -q
 冒烟测试需要已入库并启动 Ollama：
 
 ```bash
-python tests/smoke_test.py            # 知识库 + 混合检索
-python tests/smoke_test.py --e2e      # 额外验证完整问答与拒答（较慢）
+python3 tests/smoke_test.py            # 知识库 + 混合检索
+python3 tests/smoke_test.py --e2e      # 额外验证完整问答与拒答（较慢）
 ```
 
 ## 目录结构
