@@ -186,7 +186,10 @@ class AgentRuntime:
                 tool=str(action.get("tool") or ""),
                 args=dict(action.get("args") or {}),
                 reason=reason,
-                observation=f"决策模型不可用，回退关键词路由：{type(exc).__name__}",
+                # 连底层原因一起记下：只留异常类名时，事后看不出是模型超时还是 JSON 被截断
+                observation=trace.record_observation(
+                    f"决策模型不可用，回退关键词路由：{type(exc).__name__}: {exc}"
+                ),
                 elapsed_ms=int((time.perf_counter() - route_started) * 1000),
             )
         intent = route.intent

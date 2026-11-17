@@ -16,7 +16,7 @@ from private_rag.agent.prompts import (
     parse_decision,
     parse_route,
 )
-from private_rag.config import AGENT_LLM_MODEL
+from private_rag.config import AGENT_LLM_MODEL, AGENT_PLANNER_TOKENS
 from private_rag.generation import History
 
 
@@ -86,7 +86,7 @@ class LlmPlanner(Planner):
         history: Optional[History] = None,
     ) -> RouteDecision:
         prompt = build_route_prompt(question, tool_specs, history)
-        data = ask_json(prompt, model=self.model, num_predict=400)
+        data = ask_json(prompt, model=self.model, num_predict=AGENT_PLANNER_TOKENS)
         intent, action, reason = parse_route(data)
         return RouteDecision(intent=intent, action=action, reason=reason)
 
@@ -110,7 +110,7 @@ class LlmPlanner(Planner):
             steps_used=steps_used,
             max_steps=max_steps,
         )
-        data = ask_json(prompt, model=self.model, num_predict=600)
+        data = ask_json(prompt, model=self.model, num_predict=AGENT_PLANNER_TOKENS)
         action, payload, reason, answer = parse_decision(data)
         if action == "final":
             return StepDecision(action="final", reason=reason, answer=answer)

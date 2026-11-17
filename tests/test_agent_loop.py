@@ -198,7 +198,10 @@ class TestRouting:
         planner = ScriptedPlanner(route_error=RuntimeError("ollama down"))
         result = make_runtime(tmp_path, [kb], planner).run("增量入库怎么做")
 
+        # 回退可接受，但底层原因必须留在轨迹里，否则事后查不出是超时还是 JSON 截断
         assert "决策模型不可用" in result.steps[0].observation
+        assert "RuntimeError" in result.steps[0].observation
+        assert "ollama down" in result.steps[0].observation
         assert len(kb.calls) == 1
         assert result.answer == "脚本答案"
         assert result.tool_calls == 1

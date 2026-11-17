@@ -22,11 +22,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from private_rag.agent.trace import format_trace, load_traces
 from private_rag.config import AGENT_TRACE_PATH
 
+# --list 是索引，默认要多列几条；不带 --list 时只回放最近一条
+LIST_LIMIT = 20
+
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="回放 agentic 决策轨迹")
     parser.add_argument("--trace-id", help="要回放的 trace_id")
-    parser.add_argument("--last", type=int, default=1, help="没有指定 trace-id 时回放最近 N 条")
+    parser.add_argument(
+        "--last",
+        type=int,
+        default=None,
+        help=f"没有指定 trace-id 时取最近 N 条（回放默认 1 条，--list 默认 {LIST_LIMIT} 条）",
+    )
     parser.add_argument("--list", action="store_true", help="只列出轨迹索引，不展开细节")
     parser.add_argument("--json", action="store_true", help="输出原始 JSON，便于二次处理")
     parser.add_argument("--path", default=str(AGENT_TRACE_PATH), help="轨迹文件路径")
@@ -60,8 +68,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             print("   可用 --list 查看现有轨迹")
             return 1
     else:
-        limit = max(1, args.last)
-        records = load_traces(path, limit=limit)
+        limit = args.last if args.last is not None else (LIST_LIMIT if args.list else 1)
+        records = load_traces(path, limit=max(1, limit))
 
     if args.list:
         print_index(records)

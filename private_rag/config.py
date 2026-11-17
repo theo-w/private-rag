@@ -93,6 +93,9 @@ AGENT_TOOL_CHARS = _env_int("RAG_AGENT_TOOL_CHARS", 3000)
 AGENT_CONTEXT_CHARS = _env_int("RAG_AGENT_CONTEXT_CHARS", 7000)
 # 运行时 SQL 最多返回多少行
 AGENT_SQL_ROWS = _env_int("RAG_AGENT_SQL_ROWS", 20)
+# 决策 JSON 的输出预算。推理型模型会先输出一段不可见的思考内容，
+# 预算给小了正文就是空的，路由会整段回退到关键词判断。
+AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)
 # 决策模型；默认沿用生成模型
 AGENT_LLM_MODEL = os.getenv("RAG_AGENT_LLM_MODEL", "").strip() or LLM_MODEL
 # 决策轨迹落盘，用于「trace 可回放每条决策」

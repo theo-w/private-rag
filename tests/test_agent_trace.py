@@ -162,3 +162,54 @@ def test_format_trace_survives_minimal_record():
     text = format_trace({"trace_id": "x", "created_at": 0})
     assert "trace_id: x" in text
     assert "决策过程：" in text
+
+
+class TestReplayCli:
+    """回放 CLI 的索引输出：--list 不能只列最近一条。"""
+
+    def load_cli(self):
+        """按路径加载回放 CLI，scripts/ 不是包。"""
+        import importlib.util
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        spec = importlib.util.spec_from_file_location(
+            "replay_trace", root / "scripts" / "replay_trace.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def seed(self, tmp_path, suffix: str, count: int = 3):
+        path = tmp_path / "agent.jsonl"
+        for index in range(count):
+            make_trace(f"id{index}{suffix}", question=f"问题{index}").save(path)
+        return path
+
+    def test_list_shows_every_recent_trace(self, tmp_path, capsys):
+        cli = self.load_cli()
+        path = self.seed(tmp_path, "aaaa")
+
+        assert cli.main(["--list", "--path", str(path)]) == 0
+        out = capsys.readouterr().out
+        # 只列最近一条时，索引等于没有
+        assert "id0aaaa" in out
+        assert "id2aaaa" in out
+
+    def test_last_still_limits_the_index(self, tmp_path, capsys):
+        cli = self.load_cli()
+        path = self.seed(tmp_path, "bbbb")
+
+        assert cli.main(["--list", "--last", "2", "--path", str(path)]) == 0
+        out = capsys.readouterr().out
+        assert "id2bbbb" in out
+        assert "id0bbbb" not in out
+
+    def test_default_without_list_replays_only_the_newest(self, tmp_path, capsys):
+        cli = self.load_cli()
+        path = self.seed(tmp_path, "cccc")
+
+        assert cli.main(["--path", str(path)]) == 0
+        out = capsys.readouterr().out
+        assert "trace_id: id2cccc" in out
+        assert "id1cccc" not in out

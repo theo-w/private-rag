@@ -420,6 +420,7 @@ SQL 返回行数（`AGENT_SQL_ROWS`）。模型不可用时不会整体失败：
 | `AGENT_CONTEXT_CHARS` | 7000 | 已收集证据超过 7000 字符就停止取料，直接作答 |
 | `AGENT_TOOL_CHARS` | 3000 | 单个工具返回的证据最多占 3000 字符，按工具数分摊 |
 | `AGENT_SQL_ROWS` | 20 | 运行时 SQL 最多返回 20 行，同时是 `LIMIT` 的上限 |
+| `AGENT_PLANNER_TOKENS` | 2000 | 决策 JSON 的输出预算；推理型模型会先吐思考内容，预算小了正文就空了 |
 | `AGENT_TRACE_PATH` | storage/traces/agent.jsonl | 决策轨迹落盘位置，一次问答追加一行 |
 
 ## 最需要看懂的七处

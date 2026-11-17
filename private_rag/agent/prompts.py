@@ -12,7 +12,7 @@ from typing import Any, Optional, Sequence
 
 from langchain_ollama import ChatOllama
 
-from private_rag.config import AGENT_LLM_MODEL, MAX_QUESTION_CHARS
+from private_rag.config import AGENT_LLM_MODEL, AGENT_PLANNER_TOKENS, MAX_QUESTION_CHARS
 from private_rag.generation import REFUSAL, History, render_history
 
 # 明确指向「库里精确数据」的线索；LLM 不可用时用它决定首选工具
@@ -152,7 +152,9 @@ def _history_section(history: Optional[History]) -> str:
     return f"{text}\n\n"
 
 
-def ask_json(prompt: str, *, model: str = AGENT_LLM_MODEL, num_predict: int = 700) -> dict:
+def ask_json(
+    prompt: str, *, model: str = AGENT_LLM_MODEL, num_predict: int = AGENT_PLANNER_TOKENS
+) -> dict:
     """向模型要一段 JSON；解析失败抛 PlannerError。"""
     llm = ChatOllama(
         model=model,
