@@ -8,7 +8,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from private_rag.config import MAX_QUESTION_CHARS, TOP_K_RERANK
+from private_rag.config import AGENT_MAX_STEPS, MAX_QUESTION_CHARS, TOP_K_RERANK
 from private_rag.models import Citation
 from private_rag.sessions import SESSION_ID_PATTERN, Session
 
@@ -144,6 +144,105 @@ class ChatResponse(BaseModel):
     citations: list[CitationOut]
     meta: ChatMeta
     request_id: str
+
+
+class AgentChatRequest(ChatRequest):
+    """agentic 问答请求：在同步问答参数之上加循环上限与工具开关。"""
+
+    max_steps: int = Field(
+        default=AGENT_MAX_STEPS, ge=1, le=8, description="最多执行多少次工具调用"
+    )
+    allow_sql: bool = Field(
+        default=True,
+        description="是否允许运行时只读查询业务库（还需在 sources.yaml 里显式授权）",
+    )
+
+    def to_agent_options(self) -> "AgentOptions":
+        # 延迟导入，避免仅为校验就牵出 agent 与检索依赖
+        from private_rag.agent.runtime import AgentOptions
+
+        base = self.to_options()
+        return AgentOptions(
+            max_steps=self.max_steps,
+            allow_sql=self.allow_sql,
+            top_k=base.top_k,
+            source_type=base.source_type,
+            tags=base.tags,
+            use_lexical=base.use_lexical,
+            use_rerank=base.use_rerank,
+            use_parent=base.use_parent,
+            query_rewrite=base.query_rewrite,
+        )
+
+
+class AgentStepOut(BaseModel):
+    """轨迹里的一步决策；与 AgentStep 字段一一对应。"""
+
+    index: int
+    kind: str
+    tool: str = ""
+    args: dict[str, Any] = Field(default_factory=dict)
+    reason: str = ""
+    ok: bool = True
+    observation: str = ""
+    rows: Optional[int] = None
+    evidence_blocks: int = 0
+    elapsed_ms: int = 0
+    error: str = ""
+
+
+class AgentTraceOut(BaseModel):
+    trace_id: str
+    model: str
+    intent: str
+    stop_reason: str
+    tool_calls: int
+    elapsed_ms: int
+    steps: list[AgentStepOut] = Field(default_factory=list)
+
+
+class AgentMeta(BaseModel):
+    intent: str
+    stop_reason: str
+    tool_calls: int
+    steps: int
+    evidence_blocks: int
+    context_chars: int
+    history_turns: int
+    elapsed_ms: int
+    trace_id: str
+
+
+class AgentChatResponse(BaseModel):
+    session_id: str
+    answer: str
+    citations: list[CitationOut]
+    meta: AgentMeta
+    trace: AgentTraceOut
+    request_id: str
+
+
+class TraceSummaryOut(BaseModel):
+    trace_id: str
+    question: str
+    intent: str
+    stop_reason: str
+    tool_calls: int
+    elapsed_ms: int
+    created_at: float
+
+
+class TraceListOut(BaseModel):
+    path: str
+    total: int
+    traces: list[TraceSummaryOut] = Field(default_factory=list)
+
+
+class TraceReplayOut(BaseModel):
+    """按 trace_id 回放：结构化轨迹 + 可直接阅读的渲染文本。"""
+
+    trace: dict[str, Any]
+    formatted: str
 
 
 class MessageOut(BaseModel):

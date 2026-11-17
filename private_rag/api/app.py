@@ -22,8 +22,9 @@ from private_rag.api.errors import (
     unhandled_error_handler,
     validation_error_handler,
 )
+from private_rag.agent.runtime import AgentRuntime, build_agent_runtime
 from private_rag.api.routes import ops_router, router
-from private_rag.config import API_PREFIX, APP_VERSION
+from private_rag.config import AGENT_SOURCES_CONFIG, AGENT_TRACE_PATH, API_PREFIX, APP_VERSION
 from private_rag.eval_report import DEFAULT_EVAL_REPORT_PATH
 from private_rag.qa import RagEngine, build_engine
 from private_rag.sessions import SessionStore
@@ -49,6 +50,20 @@ async def lifespan(app: FastAPI):
     if app.state.session_store is None:
         app.state.session_store = SessionStore()
 
+    # v7 agentic 运行时复用同一个 engine，因此不额外持有 Qdrant 句柄，也无需单独关闭
+    if app.state.agent_runtime is None and app.state.engine is not None:
+        try:
+            app.state.agent_runtime = build_agent_runtime(
+                app.state.engine,
+                sources_path=app.state.agent_sources_path,
+            )
+            app.state.agent_tools = app.state.agent_runtime.registry.names()
+            logger.info("agentic 问答可用，已装配工具：%s", "、".join(app.state.agent_tools) or "无")
+        except Exception:
+            # 装配失败只让 /chat/agent 返回 503，不影响既有 /chat 链路
+            logger.exception("初始化 agentic 运行时失败，/chat/agent 将返回 503")
+            app.state.agent_runtime = None
+
     logger.info("private-rag API 启动，版本 %s", APP_VERSION)
     try:
         yield
@@ -68,13 +83,16 @@ def create_app(
     session_store: Optional[SessionStore] = None,
     use_rerank: Optional[bool] = None,
     eval_report_path: Optional[Path] = None,
+    agent_runtime: Optional[AgentRuntime] = None,
+    agent_sources_path: Optional[Path] = None,
 ) -> FastAPI:
     app = FastAPI(
         title="private-rag API",
         version=APP_VERSION,
         description=(
             "本地知识库 RAG 服务：多源入库、BM25 + 向量混合召回、重排、"
-            "引用溯源、多轮会话与 SSE 流式输出。"
+            "引用溯源、多轮会话与 SSE 流式输出。v7 起支持 agentic 问答："
+            "按问题意图在知识库检索与只读 SQL 之间自动选择，并记录可回放的决策轨迹。"
         ),
         lifespan=lifespan,
     )
@@ -83,6 +101,14 @@ def create_app(
     app.state.session_store = session_store
     app.state.owns_engine = False
     app.state.use_rerank = use_rerank
+    app.state.agent_runtime = agent_runtime
+    app.state.agent_sources_path = (
+        Path(agent_sources_path) if agent_sources_path is not None else Path(AGENT_SOURCES_CONFIG)
+    )
+    app.state.agent_trace_path = AGENT_TRACE_PATH
+    # 注入的运行时可能没有注册表（例如测试替身），这里只做展示用途，不能因此启动失败
+    registry = getattr(agent_runtime, "registry", None)
+    app.state.agent_tools = list(getattr(registry, "names", lambda: [])())
     app.state.eval_report_path = (
         Path(eval_report_path) if eval_report_path is not None else DEFAULT_EVAL_REPORT_PATH
     )
@@ -121,6 +147,8 @@ def create_app(
             "demo": "/demo",
             "health": "/health",
             "ready": "/ready",
+            "agent_chat": f"{API_PREFIX}/chat/agent",
+            "traces": f"{API_PREFIX}/traces",
         }
 
     @app.get("/demo", include_in_schema=False)

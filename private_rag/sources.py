@@ -84,6 +84,11 @@ class SqlSource(BaseModel):
     max_rows: int = 5000
     tags: List[str] = Field(default_factory=list)
 
+    # v7：是否允许 agentic 问答在运行时对本库发起只读查询（默认关闭，需显式开启）
+    allow_runtime_query: bool = False
+    # 允许运行时查询的表；留空时由连接器从 query 的 FROM 子句推导
+    runtime_tables: List[str] = Field(default_factory=list)
+
     @model_validator(mode="after")
     def _check_columns(self) -> "SqlSource":
         if not self.content_columns:

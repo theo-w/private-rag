@@ -366,6 +366,37 @@ def event_stream():
 
 所以在浏览器或前端里，可以先把“引用”显示出来，再看着答案像打字机一样逐字出现。中途断开则不会留下半轮问答。
 
+### 7. v7：先判断「该查文档还是查库」，看完结果再决定要不要继续查
+
+前面几版的流程是固定的：不管问什么都先走一遍召回、精排、生成。v7 在它上面加了一个会做决定的循环——
+模型先看问题决定用哪个工具，看完返回的结果再决定要不要接着查，最后才作答。
+
+```python
+# 简化自 private_rag/agent/runtime.py
+tools = [KnowledgeSearchTool(engine)]                 # kb_search：查知识库（复用第 3、5 节的检索）
+if source.allow_runtime_query:                        # 配置里显式授权才挂上这个工具
+    tools.append(SqlQueryTool(dsn, allowed_tables=["products"]))   # sql_query：只读查业务库
+
+route = planner.route(question, tools)                # 意图：knowledge / database / mixed / none
+while tool_calls < MAX_STEPS and evidence_chars < BUDGET:
+    action = route or planner.decide(question, evidence, observations)
+    if action.kind == "final":
+        break                                         # 模型认为证据够了，直接作答
+    result = registry[action.tool].run(action.args)   # SQL 先过只读护栏才允许执行
+    evidence += result.blocks                         # 两个工具的证据统一编号，[n] 对应引用
+    observations.append(result.observation)           # 失败也当观察回灌，模型可以换一条 SQL 再来
+answer = generate(evidence) if evidence else REFUSAL
+trace.save("storage/traces/agent.jsonl")              # 每步的理由、参数、观察都留在文件里
+```
+
+三条边界防止跑飞：工具调用次数（`AGENT_MAX_STEPS`）、证据字符预算（`AGENT_CONTEXT_CHARS`）、
+SQL 返回行数（`AGENT_SQL_ROWS`）。模型不可用时不会整体失败：路由退回关键词判断，工具没给 SQL 就退化成
+列出白名单表前几行，最终回答仍基于已收集的证据生成，一条证据都没有就按原来的约定返回拒答文本。
+
+只读护栏（`agent/sql_guard.py`）只做四件事：只允许单条 `SELECT`/`WITH`、出现写操作关键字就拒绝、
+表必须在白名单内、强制一个不超过上限的 `LIMIT`。它是纵深防御的一层，不是沙箱——
+给这个 DSN 用的仍然应该是只读数据库账号。
+
 ## 关键变量
 
 | 变量 | 默认值 | 用大白话说 |
@@ -385,8 +416,14 @@ def event_stream():
 | `SESSION_TTL_SECONDS` | 1800 | 会话闲置 30 分钟就自动清理 |
 | `MAX_HISTORY_TURNS` | 6 | 每次最多带最近 6 轮对话给模型 |
 | `MAX_HISTORY_CHARS` | 3000 | 历史总长度预算，超了就从旧到新裁掉 |
+| `AGENT_MAX_STEPS` | 4 | 一次提问最多让模型调 4 次工具，防止停不下来 |
+| `AGENT_CONTEXT_CHARS` | 7000 | 已收集证据超过 7000 字符就停止取料，直接作答 |
+| `AGENT_TOOL_CHARS` | 3000 | 单个工具返回的证据最多占 3000 字符，按工具数分摊 |
+| `AGENT_SQL_ROWS` | 20 | 运行时 SQL 最多返回 20 行，同时是 `LIMIT` 的上限 |
+| `AGENT_PLANNER_TOKENS` | 2000 | 决策 JSON 的输出预算；推理型模型会先吐思考内容，预算小了正文就空了 |
+| `AGENT_TRACE_PATH` | storage/traces/agent.jsonl | 决策轨迹落盘位置，一次问答追加一行 |
 
-## 最需要看懂的六处
+## 最需要看懂的七处
 
 1. **建库和问答是两条时间线**：建库慢，负责把资料整理好；问答快，只做查找和生成。两者通过 Qdrant 和 BM25 索引交接。
 2. **两份索引各管一种“相关性”**：向量管“意思像不像”，BM25 管“词对不对得上”，RRF 负责把两个排行榜合成一个。
@@ -394,5 +431,6 @@ def event_stream():
 4. **引用来自元数据，不是模型自由发挥**：每张卡片入库时就带着来源、页码、表名，返回时直接组装成引用。
 5. **会话只是“理解指代的记事本”**：历史帮助模型知道“它”指橙子，但提示词明确规定历史不能当事实依据；会话在内存里，服务重启就清空。
 6. **v5 是两级阅读**：子块负责找得准，父块负责读得全；查询改写只是多找几条路，最后仍按原问题精排，失败就退回原问题。
+7. **v7 把“查什么”交给模型，把“能跑多远”留给人**：模型只能在 `kb_search` 与只读 `sql_query` 之间选，步数、证据字符、SQL 行数都是硬上限；每一步决策写进 trace，事后能逐条回放它当时为什么这么选。
 
 当前版本还有两个使用边界：服务默认只监听本机、没有鉴权，不要直接暴露公网；Qdrant 用本地磁盘模式，所以 `serve.py` 固定单进程单 worker，需要横向扩展时要换 Qdrant server 模式并把会话搬到 Redis 之类的外部存储。
