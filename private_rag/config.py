@@ -83,3 +83,22 @@ MAX_HISTORY_TURNS = _env_int("RAG_MAX_HISTORY_TURNS", 6)
 MAX_HISTORY_CHARS = _env_int("RAG_MAX_HISTORY_CHARS", 3000)
 HISTORY_MESSAGE_CHARS = _env_int("RAG_MAX_HISTORY_MESSAGE_CHARS", 800)
 RERANK_ENABLED = not _env_flag("RAG_DISABLE_RERANK")
+
+# v7 Agentic RAG
+# 行动循环的最大步数；每一步是一次工具调用或最终结论。
+AGENT_MAX_STEPS = _env_int("RAG_AGENT_MAX_STEPS", 4)
+# 单个工具结果回灌给模型的字符预算，避免多轮观察把上下文撑爆。
+AGENT_TOOL_CHARS = _env_int("RAG_AGENT_TOOL_CHARS", 3000)
+# 单次工具调用的总字符预算（所有观察加起来），超限后停止调用新工具。
+AGENT_CONTEXT_CHARS = _env_int("RAG_AGENT_CONTEXT_CHARS", 7000)
+# 运行时 SQL 最多返回多少行
+AGENT_SQL_ROWS = _env_int("RAG_AGENT_SQL_ROWS", 20)
+# 决策模型；默认沿用生成模型
+AGENT_LLM_MODEL = os.getenv("RAG_AGENT_LLM_MODEL", "").strip() or LLM_MODEL
+# 决策轨迹落盘，用于「trace 可回放每条决策」
+AGENT_TRACE_ENABLED = not _env_flag("RAG_DISABLE_AGENT_TRACE")
+AGENT_TRACE_PATH = _env_path("RAG_AGENT_TRACE_PATH", ROOT / "storage" / "traces" / "agent.jsonl")
+# 单条观察/理由写入轨迹的字符上限
+AGENT_TRACE_FIELD_CHARS = _env_int("RAG_AGENT_TRACE_FIELD_CHARS", 1200)
+# 运行时 SQL 的授权来源：只有这里声明了 allow_runtime_query 的 sql 源才可被查询
+AGENT_SOURCES_CONFIG = _env_path("RAG_AGENT_SOURCES_CONFIG", DEFAULT_SOURCES_CONFIG)

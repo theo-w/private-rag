@@ -14,3 +14,6 @@ sources:
     updated_at_column: updated_at
     label: demo.products
     tags: [business, demo]
+    # v7 agentic 问答的运行时只读查询：演示库是本机 SQLite，直接开；换成真库请改用只读账号
+    allow_runtime_query: true
+    runtime_tables: [products]

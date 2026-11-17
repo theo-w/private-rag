@@ -4,14 +4,23 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
+from pathlib import Path
 from typing import Iterator, Optional, Sequence
 
-from fastapi import APIRouter, Body, Depends, Request, Response
+from fastapi import APIRouter, Body, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from private_rag.agent.runtime import AgentRuntime
+from private_rag.agent.trace import AgentTrace, format_trace, load_traces
 from private_rag.api.errors import ApiError, request_id_of
 from private_rag.api.schemas import (
+    AgentChatRequest,
+    AgentChatResponse,
+    AgentMeta,
+    AgentStepOut,
+    AgentTraceOut,
     ChatMeta,
     ChatRequest,
     ChatResponse,
@@ -22,11 +31,14 @@ from private_rag.api.schemas import (
     SessionCreateRequest,
     SessionDetailOut,
     SessionOut,
+    TraceListOut,
+    TraceReplayOut,
+    TraceSummaryOut,
     citation_out,
     session_detail,
     session_summary,
 )
-from private_rag.config import API_PREFIX, APP_VERSION
+from private_rag.config import AGENT_TRACE_PATH, API_PREFIX, APP_VERSION
 from private_rag.eval_report import DEFAULT_EVAL_REPORT_PATH, load_eval_summary
 from private_rag.models import Citation
 from private_rag.qa import RagEngine
@@ -36,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix=API_PREFIX)
 ops_router = APIRouter()
+_TRACE_ID_PATTERN = re.compile(r"^[A-Za-z0-9]{6,32}$")
 
 
 def get_engine(request: Request) -> RagEngine:
@@ -50,6 +63,30 @@ def get_sessions(request: Request) -> SessionStore:
     if sessions is None:
         raise ApiError(503, "service_unavailable", "会话服务尚未初始化，请稍后重试")
     return sessions
+
+
+def get_agent(request: Request) -> AgentRuntime:
+    agent = getattr(request.app.state, "agent_runtime", None)
+    if agent is None:
+        raise ApiError(503, "agent_unavailable", "agentic 问答尚未初始化，请稍后重试")
+    return agent
+
+
+def _trace_path_of(request: Request) -> Path:
+    return Path(getattr(request.app.state, "agent_trace_path", AGENT_TRACE_PATH))
+
+
+def _agent_trace_out(trace: AgentTrace) -> AgentTraceOut:
+    """把运行时轨迹转换成接口模型。"""
+    return AgentTraceOut(
+        trace_id=trace.trace_id,
+        model=trace.model,
+        intent=trace.intent,
+        stop_reason=trace.stop_reason,
+        tool_calls=trace.tool_calls,
+        elapsed_ms=trace.elapsed_ms,
+        steps=[AgentStepOut(**step.to_dict()) for step in trace.steps],
+    )
 
 
 def _require_ready(engine: RagEngine) -> None:
@@ -342,3 +379,82 @@ def chat_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/chat/agent", response_model=AgentChatResponse, summary="Agentic 问答（意图路由 + 工具调用 + 决策轨迹）")
+def chat_agent(
+    payload: AgentChatRequest,
+    request: Request,
+    engine: RagEngine = Depends(get_engine),
+    sessions: SessionStore = Depends(get_sessions),
+    agent: AgentRuntime = Depends(get_agent),
+) -> AgentChatResponse:
+    _require_ready(engine)
+    session = _resolve_session(payload.session_id, sessions)
+    options = payload.to_agent_options()
+    request_id = request_id_of(request)
+
+    with session.lock:
+        history = session.history_for_prompt()
+        history_turns = len(history) // 2
+        # 计时在循环内部完成（含工具调用），这里不再重复计算
+        result = agent.run(
+            payload.question,
+            options=options,
+            history=history,
+            request_id=request_id,
+            session_id=session.session_id,
+        )
+        session.add_exchange(payload.question, result.answer, result.citations)
+
+    return AgentChatResponse(
+        session_id=session.session_id,
+        answer=result.answer,
+        citations=[citation_out(citation) for citation in result.citations],
+        meta=AgentMeta(
+            intent=result.intent,
+            stop_reason=result.stop_reason,
+            tool_calls=result.tool_calls,
+            steps=len(result.steps),
+            evidence_blocks=result.evidence_blocks,
+            context_chars=result.context_chars,
+            history_turns=history_turns,
+            elapsed_ms=result.elapsed_ms,
+            trace_id=result.trace_id,
+        ),
+        trace=_agent_trace_out(result.trace),
+        request_id=request_id,
+    )
+
+
+@router.get("/traces", response_model=TraceListOut, summary="最近的 agentic 决策轨迹")
+def list_traces(
+    request: Request,
+    limit: int = Query(default=10, ge=1, le=50, description="返回最近多少条"),
+) -> TraceListOut:
+    records = load_traces(_trace_path_of(request), limit=limit)
+    summaries = [
+        TraceSummaryOut(
+            trace_id=str(record.get("trace_id") or ""),
+            question=str(record.get("question") or ""),
+            intent=str(record.get("intent") or ""),
+            stop_reason=str(record.get("stop_reason") or ""),
+            tool_calls=int(record.get("tool_calls") or 0),
+            elapsed_ms=int(record.get("elapsed_ms") or 0),
+            created_at=float(record.get("created_at") or 0.0),
+        )
+        # 轨迹文件是追加写入，展示时让最新的排在前面
+        for record in reversed(records)
+    ]
+    return TraceListOut(path=str(_trace_path_of(request)), total=len(summaries), traces=summaries)
+
+
+@router.get("/traces/{trace_id}", response_model=TraceReplayOut, summary="回放一条决策轨迹")
+def replay_trace(trace_id: str, request: Request) -> TraceReplayOut:
+    if not _TRACE_ID_PATTERN.fullmatch(trace_id):
+        raise ApiError(422, "invalid_trace_id", "trace_id 只能是 6-32 位字母或数字")
+    records = load_traces(_trace_path_of(request), trace_id=trace_id)
+    if not records:
+        raise ApiError(404, "trace_not_found", "轨迹不存在，可能已被清理或换过存储路径")
+    record = records[-1]
+    return TraceReplayOut(trace=record, formatted=format_trace(record))

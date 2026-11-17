@@ -1,6 +1,6 @@
 # private-rag
 
-完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Parent-Document 父子块上下文**与**查询改写（多查询 / HyDE）**：子块负责召回，父块负责给模型完整上下文。Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储。
+完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Parent-Document 父子块上下文**与**查询改写（多查询 / HyDE）**：子块负责召回，父块负责给模型完整上下文。Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储。v7 起额外提供 **agentic 问答**：模型按问题意图在知识库检索与只读 SQL 之间自动选择，边看结果边决定要不要继续查，并把每条决策写成可回放的 trace。
 
 ## 架构
 
@@ -13,13 +13,14 @@ SQL 数据库 ─────────────┘                        
      ─→ 每个查询各跑 dense top20 + BM25 top20 → RRF 融合 top10（跨查询再融合）
      ─→ bge-reranker 用原问题精排 top3 → 父块去重/扩展（预算 6000 字符）→ Ollama 生成 [n] 引用
                                    ↑
-                     CLI（chat_cli.py）/ HTTP API（serve.py，同步 + SSE 流式）/ Web 演示页（/demo）
+                     CLI（chat_cli.py / chat_agent.py）/ HTTP API（serve.py，同步 + SSE + agentic）/ Web 演示页（/demo）
 ```
 
 - 入库与问答彻底分离：`ingest.py` 是唯一写入入口，`chat_cli.py` 与 `serve.py` 只读。
 - CLI 与 HTTP API 共用 `private_rag/qa.py` 的 `RagEngine`，检索、精排、生成与引用链路完全一致。
 - 每个子块都带 `doc_id / source_type / source_uri / title / page / table / tags / content_hash`，另带父块 `parent_id / parent_index` 与父块原文，可直接生成引用；旧库没有父块字段时自动回退子块。
 - 父块默认开启、查询改写默认关闭：日常问答默认不额外调用改写 LLM；需要时可通过 API 或演示页单独打开（CLI 使用默认值）。
+- 前面的检索链路是固定流程：不问什么都先召回再回答。v7 在其上加一层循环（`agent/runtime.py`）：先判意图，再调 `kb_search` 或只读 `sql_query`，读完观察决定继续查还是作答，最后仍用统一编号的证据生成带引用回答。
 - 阶段路线与验收标准见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 - 想先从零理解“建库 → 检索 → 生成”的完整流程，可读 [docs/beginner-guide.md](docs/beginner-guide.md)（小白版流程导读 + 示意代码）。
 
@@ -119,6 +120,9 @@ python3 scripts/serve.py --reload         # 开发模式，代码变更自动重
 | DELETE | `/api/v1/sessions/{id}` | 删除会话，204 |
 | POST | `/api/v1/chat` | 同步问答，JSON |
 | POST | `/api/v1/chat/stream` | SSE 流式问答 |
+| POST | `/api/v1/chat/agent` | agentic 问答：意图路由 + 工具调用，返回回答与决策轨迹 |
+| GET | `/api/v1/traces` | 最近的 agentic 决策轨迹索引 |
+| GET | `/api/v1/traces/{trace_id}` | 回放一条决策轨迹（结构化 + 可读文本） |
 
 ### 多轮会话与 curl 示例
 
@@ -401,6 +405,80 @@ pip install pdfplumber rapidocr-onnxruntime
 - **表格需要有边框线**：只是靠文字对齐排版的表格，`extract_tables` 默认策略识别不出来（实测返回 0 张）；这类内容仍会以整页正文的形式被检索到。
 - **OCR 精度**：清晰印刷体效果好，手写体、低分辨率、倾斜页面识别率下降；200 dpi 渲染可缓解低分辨率这一类。
 
+## v7 Agentic RAG（意图路由 + 工具调用 + 决策轨迹）
+
+前面几版的流程是固定的：任何问题都先召回、精排、再生成。v7 在它上面加一层循环——模型先看问题决定用哪个工具，读完返回结果再决定要不要继续查，最后仍基于统一编号的证据生成带引用回答。
+
+```text
+问题 → 判意图 → 调工具 → 读观察 → 再决定：继续查还是作答
+                  ↑__________|
+       边界：工具步数、证据字符预算、SQL 返回行数
+```
+
+模型只有两个工具可选：
+
+- `kb_search`：走 v2–v6 的完整检索链路（dense + BM25 + RRF + rerank + 父子块），入参 `query`。
+- `sql_query`：运行时只读查询业务库，入参 `sql`。默认不挂这个工具，需要在 `sources.yaml` 里按 sql 源逐个显式授权：
+
+```yaml
+  - type: sql
+    # ……入库字段同上……
+    allow_runtime_query: true       # 开启运行时查询
+    runtime_tables: [products]      # 留空则由入库 query 的 FROM 子句推导
+```
+
+`sql_query` 执行前先过只读护栏（`private_rag/agent/sql_guard.py`）：只允许单条 `SELECT`/`WITH`，出现写操作或元数据关键字直接拒绝，表必须在白名单内（`WITH` 定义的临时视图名不算表），并强制一个不超过 `AGENT_SQL_ROWS` 的 `LIMIT`；护栏改写后的 SQL 与实际行数都会写进轨迹。**护栏是纵深防御的一层，不是沙箱**：这个 DSN 仍然应该使用只读数据库账号，`allow_runtime_query` 默认关闭也是这个原因。
+
+意图分成 `knowledge` / `database` / `mixed` / `none` 四类。`none` 表示与知识库无关，直接按既有约定返回拒答文本，不做任何检索。
+
+### 命令行
+
+```bash
+# 前提与 chat_cli.py 相同：本机 Ollama 在跑，且已 ingest 过知识库
+python3 scripts/chat_agent.py "最便宜的香蕉多少钱，应该怎么保存？"
+
+# 只用知识库检索，不让模型碰数据库
+python3 scripts/chat_agent.py --no-sql "增量入库怎么做"
+
+# 限定标签与来源类型，并且只打印回答与引用（默认会打印每步决策）
+python3 scripts/chat_agent.py --compact --tag business --source-type sql "库存里最便宜的香蕉多少钱"
+
+# 交互模式，多轮追问会带上会话历史
+python3 scripts/chat_agent.py -i
+```
+
+```bash
+# 回放：先列最近的轨迹索引，再看某一条的完整决策过程
+python3 scripts/replay_trace.py --list
+python3 scripts/replay_trace.py --last 3
+python3 scripts/replay_trace.py --trace-id <trace_id>
+python3 scripts/replay_trace.py --trace-id <trace_id> --json
+```
+
+### HTTP 接口
+
+```bash
+# agentic 问答：比 /chat 多 max_steps（1–8）与 allow_sql 两个字段，其余同 /chat
+curl -s -X POST http://127.0.0.1:8000/api/v1/chat/agent \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"最便宜的香蕉多少钱？","max_steps":4,"allow_sql":true}' | python3 -m json.tool
+
+# 最近的轨迹索引（limit 1–50，默认 10），以及回放某一条
+curl -s 'http://127.0.0.1:8000/api/v1/traces?limit=5' | python3 -m json.tool
+curl -s http://127.0.0.1:8000/api/v1/traces/<trace_id> | python3 -m json.tool
+```
+
+响应在 `/chat` 的 `session_id / answer / citations / meta / request_id` 之外多一个 `trace`（完整步骤）；`meta` 里给出 `intent / stop_reason / tool_calls / steps / evidence_blocks / context_chars / history_turns / trace_id`。`citations` 与回答里的 `[n]` 仍是一一对应，SQL 结果的引用复用 `table` 字段。`stop_reason` 取值：`final`（模型认为证据够了）、`max_steps`（步数用尽）、`context_budget`（证据字符预算用完）、`no_retrieval`（判定与知识库无关）、`generation_failed`（生成失败）。
+
+降级行为（任何一层挂掉都不会让整个请求 500）：
+
+- 决策模型不可用 → 路由退回关键词判断，循环按启发式继续。
+- 工具执行失败（含被护栏拒绝） → 失败原因作为观察回灌给模型，它可以换个 SQL 或改用知识库。
+- 一条证据都没收集到 → 返回既有拒答文本，不编造答案。
+- agentic 运行时装配失败（例如 `sources.yaml` 写坏了） → 只有 `/api/v1/chat/agent` 返回 503 `agent_unavailable`，`/chat` 与 `/chat/stream` 不受影响。
+
+每一次 agentic 问答追加一行 JSON 到 `storage/traces/agent.jsonl`（已 gitignore），记录意图、每步的工具与参数、观察、返回行数与耗时，以及最终引用。`trace_id` 同时出现在 `meta` 与响应头之外，可据此逐条回放。
+
 ## 只读公网演示（Render）
 
 完整问答依赖本机 Ollama（`bge-m3` 嵌入 + `qwen3.8:27b-mlx` 生成）与 `bge-reranker`，
@@ -511,11 +589,14 @@ sources:
     label: demo.products
     max_rows: 5000
     tags: [business]
+    allow_runtime_query: true       # 可选：允许 v7 agentic 问答运行时只读查询本库（默认 false）
+    runtime_tables: [products]      # 可选：可查表白名单；留空则由 query 的 FROM 子句推导
 ```
 
 - `${VAR}` / `${VAR:-default}` 会在加载配置时替换，数据库密码不要写进仓库。
 - 相对路径（文件路径、SQLite DSN）统一按项目根目录解析，脚本可在任意目录执行。
 - 不传 `--config` 时默认只扫描 `data/docs`；`--path` 仍可指定单个文件或目录。
+- `allow_runtime_query` 只管 v7 的运行时查询，与入库用的固定 `query` 是两件事：入库仍按 `query` 抽行建索引，运行时查询则由模型自己写 SQL，且只允许单条 `SELECT`、只查白名单表、自动限制行数。
 
 ### 数据库接入
 
@@ -564,7 +645,7 @@ python3 scripts/ingest.py --recreate                               # 清空集�
 python3 -m pytest tests -q
 ```
 
-覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、OCR 与表格提取、PDF 加载器（文本/扫描件/表格/降级）、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4/v5 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。
+覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、OCR 与表格提取、PDF 加载器（文本/扫描件/表格/降级）、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4/v5 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。v7 agentic 部分另覆盖只读 SQL 护栏（写操作、多语句、越权表必须被拒，CTE 与子查询不能误拒）、工具层证据与引用统一编号、检索-行动循环（意图路由、步数与字符预算、无效工具名、模型不可用降级）、轨迹落盘与回放、`/chat/agent` 与 `/traces` 接口；决策器与工具都是注入的替身，同样不依赖 Ollama 与 Qdrant。
 
 冒烟测试需要已入库并启动 Ollama：
 
@@ -599,6 +680,13 @@ private_rag/
 │   ├── schemas.py        Pydantic 请求/响应模型
 │   ├── errors.py         统一错误响应与异常处理器
 │   └── static/demo.html  单文件 Web 演示页（/demo）
+├── agent/
+│   ├── planner.py        决策器接口与 LLM 实现（可注入替身，测试不打模型）
+│   ├── prompts.py        路由 / 步进 / 最终回答提示词与关键词回退
+│   ├── tools.py          kb_search 与只读 sql_query 工具、证据统一编号
+│   ├── sql_guard.py      运行时 SQL 只读护栏（单条 SELECT、表白名单、强制 LIMIT）
+│   ├── runtime.py        检索-行动循环，按 sources 配置装配可用工具
+│   └── trace.py          决策轨迹落盘（JSONL）与回放渲染
 ├── qa.py                 共享问答引擎（CLI/API 同一条链路，含检索 trace）
 ├── query_rewrite.py      多查询 / HyDE 改写与失败回退
 ├── sessions.py           内存多轮会话、TTL/容量/历史裁剪
@@ -609,6 +697,8 @@ config/settings.py        兼容入口（re-export private_rag.config）
 config/sources.example.yaml / sources.demo.yaml / sources.eval.yaml
 scripts/ingest.py         多源入库 CLI
 scripts/chat_cli.py       混合检索问答 CLI
+scripts/chat_agent.py     agentic 问答 CLI（意图路由 + 工具调用 + 决策轨迹）
+scripts/replay_trace.py   决策轨迹回放 CLI
 scripts/serve.py          HTTP 服务入口（单 worker）
 scripts/init_demo_db.py   生成演示 SQLite 库
 scripts/prepare_eval_kb.py 构建评估专用知识库
@@ -620,6 +710,7 @@ tests/                    pytest 单测 + smoke_test.py
 docs/ROADMAP.md           v1–v7 路线与验收标准
 data/docs/                本地文档
 storage/                  向量库与 BM25 索引（已 gitignore，可由 ingest 重建）
+storage/traces/           agentic 决策轨迹 agent.jsonl（已 gitignore，每请求追加一行）
 requirements-eval.txt     可选评估依赖（Ragas）
 legacy/                   v1 FAISS 单脚本版，仅作演进参考
 ```
