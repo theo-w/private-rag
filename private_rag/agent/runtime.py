@@ -38,6 +38,7 @@ from private_rag.config import (
     AGENT_CONTEXT_CHARS,
     AGENT_LLM_MODEL,
     AGENT_MAX_STEPS,
+    AGENT_NONE_PROBE,
     AGENT_SQL_ROWS,
     AGENT_TRACE_ENABLED,
     AGENT_TRACE_PATH,
@@ -219,6 +220,7 @@ class AgentRuntime:
         trace_path: Path = AGENT_TRACE_PATH,
         trace_enabled: bool = AGENT_TRACE_ENABLED,
         max_context_chars: int = AGENT_CONTEXT_CHARS,
+        none_probe: bool = AGENT_NONE_PROBE,
     ):
         self.registry = registry
         self.planner = planner
@@ -226,6 +228,8 @@ class AgentRuntime:
         self.trace_path = Path(trace_path)
         self.trace_enabled = trace_enabled
         self.max_context_chars = max(1000, max_context_chars)
+        # 路由器判 none 时是否先做一次验证检索（关掉就退回判 none 直接拒答）
+        self.none_probe = bool(none_probe)
 
     def _available(self, allow_sql: bool) -> ToolRegistry:
         """按选项过滤工具；关掉 SQL 时模型根本看不到这个工具。"""
@@ -244,6 +248,25 @@ class AgentRuntime:
                 if text_term and text_term not in hints:
                     hints.append(text_term)
         return hints
+
+    def _none_probe(
+        self, registry: ToolRegistry, question: str, intent: str
+    ) -> Optional[RouteDecision]:
+        """把路由器判成的 none 变成一次待验证检索。
+
+        none 只是模型「猜查不到」，而拒答的正当理由只有「查过了，证据里没有」。所以知识库可用时
+        先拿原问题检索一次：查到东西照常作答，查不到再拒答，`stop_reason` 也从 `no_retrieval`
+        变成 `no_evidence`。知识库不可用或显式关掉探测时，仍走原来的直接拒答。
+        """
+        if not self.none_probe or not str(question or "").strip():
+            return None
+        if registry.get(KnowledgeSearchTool.name) is None:
+            return None
+        return RouteDecision(
+            intent=intent,
+            action={"tool": KnowledgeSearchTool.name, "args": {"query": str(question).strip()}},
+            reason="路由判 none，先检索验证一次再决定是否拒答",
+        )
 
     def run(
         self,
@@ -281,6 +304,8 @@ class AgentRuntime:
         # 规划器宣布作答时的充分性判断：insufficient 直接拒答，partial 把缺口带进最终提示词
         sufficient = True
         missing_part = ""
+        # 是否由 none 探测检索带出来的证据，用于如实回报最终按哪条路作答
+        probed_none = False
 
         def add_step(**kwargs: Any) -> AgentStep:
             nonlocal step_index
@@ -322,10 +347,17 @@ class AgentRuntime:
             intent, action, reason = heuristic_route(question, registry.names(), extra_hints=route_hints)
             route = RouteDecision(intent=intent, action=action, reason=reason, fallback=True)
             add_step(kind="stop", reason=reason, observation=f"改用 {route.tool or '无'}")
-        if intent == "none" or not route.tool:
+        unverified = intent == "none" or not route.tool
+        probe = self._none_probe(registry, question, intent) if unverified else None
+        if probe is not None:
+            # 不采信没查过的 none：先按探测动作检索一轮，拒答要建立在证据上
+            probed_none = True
+            pending = probe
+        elif unverified:
             stop_reason = "no_retrieval"
-
-        pending: Optional[RouteDecision] = route if (intent != "none" and route.tool) else None
+            pending = None
+        else:
+            pending = route
 
         # 行动循环：每一步要么执行工具，要么宣布可以作答。
         # 工具调用次数受 max_steps 约束；guard 兜住「反复给出无效工具名」的空转。
@@ -413,6 +445,9 @@ class AgentRuntime:
                 break
 
         evidence_text, citations = render_evidence(blocks)
+        if probed_none and citations:
+            # none 只是路由那一刻的判断：查到了东西就按实际作答依据报意图
+            intent = "knowledge"
         if not sufficient:
             # 问题要的那项事实不在证据里：按既有约定拒答，不再让模型补一段看着像的答案
             answer = _refusal_text(missing_part)
@@ -421,7 +456,11 @@ class AgentRuntime:
             answer = forced_answer
         elif not citations:
             answer = REFUSAL
-            stop_reason = stop_reason or "no_evidence"
+            if probed_none:
+                # none 探测查过了仍没有证据：这是有据的拒答，与压根没检索的 no_retrieval 区分开
+                stop_reason = "no_evidence"
+            else:
+                stop_reason = stop_reason or "no_evidence"
         else:
             try:
                 answer = generate_final_answer(
@@ -507,6 +546,8 @@ class AgentRuntime:
         # 规划器宣布作答时的充分性判断：insufficient 直接拒答，partial 把缺口带进最终提示词
         sufficient = True
         missing_part = ""
+        # 是否由 none 探测检索带出来的证据，用于如实回报最终按哪条路作答
+        probed_none = False
 
         def add_step(**kwargs: Any) -> AgentStep:
             nonlocal step_index
@@ -564,10 +605,17 @@ class AgentRuntime:
             intent, action, reason = heuristic_route(question, registry.names(), extra_hints=route_hints)
             route = RouteDecision(intent=intent, action=action, reason=reason, fallback=True)
             add_step(kind="stop", reason=reason, observation=f"改用 {route.tool or '无'}")
-        if intent == "none" or not route.tool:
+        unverified = intent == "none" or not route.tool
+        probe = self._none_probe(registry, question, intent) if unverified else None
+        if probe is not None:
+            # 不采信没查过的 none：先按探测动作检索一轮，拒答要建立在证据上
+            probed_none = True
+            pending = probe
+        elif unverified:
             stop_reason = "no_retrieval"
-
-        pending: Optional[RouteDecision] = route if (intent != "none" and route.tool) else None
+            pending = None
+        else:
+            pending = route
 
         # 行动循环
         guard = 0
@@ -674,6 +722,9 @@ class AgentRuntime:
             "context_chars": _evidence_chars(blocks),
         })
 
+        if probed_none and citations:
+            # none 只是路由那一刻的判断：查到了东西就按实际作答依据报意图
+            intent = "knowledge"
         if not sufficient:
             answer = _refusal_text(missing_part)
             stop_reason = "insufficient_evidence"
@@ -681,7 +732,11 @@ class AgentRuntime:
             answer = forced_answer
         elif not citations:
             answer = REFUSAL
-            stop_reason = stop_reason or "no_evidence"
+            if probed_none:
+                # none 探测查过了仍没有证据：这是有据的拒答，与压根没检索的 no_retrieval 区分开
+                stop_reason = "no_evidence"
+            else:
+                stop_reason = stop_reason or "no_evidence"
         else:
             try:
                 # 流式生成最终回答

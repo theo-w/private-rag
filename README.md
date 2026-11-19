@@ -220,6 +220,7 @@ event: error      data: {"code":"generation_failed","message":"...","request_id"
 | `RAG_MAX_HISTORY_CHARS` | 3000 | 历史总字符预算 |
 | `RAG_MAX_HISTORY_MESSAGE_CHARS` | 800 | 历史中单条消息截断长度 |
 | `RAG_DISABLE_RERANK` | 未设置 | 设为 `1/true/yes/on` 时跳过 reranker |
+| `RAG_DISABLE_AGENT_NONE_PROBE` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：路由判 `none` 就跳过检索直接拒答（默认先用原问题做一次验证检索） |
 
 ## v4 自动评估（Ragas）
 
@@ -435,6 +436,8 @@ pip install pdfplumber rapidocr-onnxruntime
 
 证据够不够用由步进决策自己声明（`sufficient` / `missing`），不额外加一次判断调用：判不足时不进生成，直接返回拒答哨兵并写明缺少的信息，`stop_reason` 为 `insufficient_evidence`。生成侧同样写死「资料里没提到不等于不存在」，禁止用通用常识补全有据无据都行的事实；确实有缺口时回答第一行必须是拒答哨兵，好让「没查到」不被读成「不存在」。
 
+`none` 不再是一张免检通行证：路由器判 `none` 只说明它「猜两侧都查不到」，而拒答的正当理由只有「查过了，证据里没有」。所以判成 `none` 时不再直接拒答，而是先用原问题做一次知识库验证检索——查到东西就照常作答，并把意图按实际作答依据报成 `knowledge`；查不到才返回拒答哨兵，`stop_reason` 记 `no_evidence`。代价是一条真正无关的问题多花一次 `kb_search`（仍受 `RAG_AGENT_MAX_STEPS` 约束）；`RAG_DISABLE_AGENT_NONE_PROBE=1` 退回「判 none 就直接拒答」的旧行为，知识库工具不可用时同样走旧行为。路由提示词同步收紧准入：`none` 只留给实时信息、天气、新闻、外部网站内容、主观偏好这类明确在本系统之外的事实，问到某条业务记录、某个字段或本系统自身的文档时一律先取证——字段里到底有没有，要查过才知道。v7 评估集 26 条复跑（`eval/reports/v7_2_nonegate_report.md`）：路由判 `none` 的样本从 1 条变成 0 条、`no_retrieval` 也从 1 条降到 0 条，4 条应拒答样本仍全部拒答（`refusal_accuracy` 1.000 持平），`citation_rate` 0.955→1.000，平均工具调用 1.31→1.42。
+
 决策走 JSON 模式，路由与步进两次调用共用 `RAG_AGENT_PLANNER_TOKENS`（默认 2000）输出预算。本机默认模型是推理型，会先输出一段不可见的思考内容：预算给小了（实跑时用的 400）模型只吐思考、正文为空，路由就会整段回退到关键词判断。轨迹里会写明回退原因，看到「模型输出中没有 JSON 对象」就先怀疑这个预算。
 
 ### 命令行
@@ -474,7 +477,7 @@ curl -s 'http://127.0.0.1:8000/api/v1/traces?limit=5' | python3 -m json.tool
 curl -s http://127.0.0.1:8000/api/v1/traces/<trace_id> | python3 -m json.tool
 ```
 
-响应在 `/chat` 的 `session_id / answer / citations / meta / request_id` 之外多一个 `trace`（完整步骤）；`meta` 里给出 `intent / stop_reason / tool_calls / steps / evidence_blocks / context_chars / history_turns / trace_id`。`citations` 与回答里的 `[n]` 仍是一一对应，SQL 结果的引用复用 `table` 字段。`stop_reason` 取值：`final`（模型认为证据够了）、`max_steps`（步数用尽）、`context_budget`（证据字符预算用完）、`no_retrieval`（判定与知识库无关）、`insufficient_evidence`（判定证据不足，直接拒答）、`generation_failed`（生成失败）。
+响应在 `/chat` 的 `session_id / answer / citations / meta / request_id` 之外多一个 `trace`（完整步骤）；`meta` 里给出 `intent / stop_reason / tool_calls / steps / evidence_blocks / context_chars / history_turns / trace_id`。`citations` 与回答里的 `[n]` 仍是一一对应，SQL 结果的引用复用 `table` 字段。`stop_reason` 取值：`final`（模型认为证据够了）、`max_steps`（步数用尽）、`context_budget`（证据字符预算用完）、`no_retrieval`（判定与两侧都无关且没做验证检索，只在知识库工具不可用或显式关掉探测时出现）、`no_evidence`（检索过但没有可用证据，含路由判 `none` 后验证检索仍空手）、`insufficient_evidence`（判定证据不足，直接拒答）、`generation_failed`（生成失败）。
 
 降级行为（任何一层挂掉都不会让整个请求 500）：
 

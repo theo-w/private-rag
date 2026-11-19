@@ -121,6 +121,14 @@ class TestRouterPromptDataAvailability:
 
         assert "既不在知识库文档里，也不在业务表中" in prompt
 
+    def test_none_is_not_an_i_guess_we_cannot_find_it_verdict(self):
+        # 收紧 none 准入：印象里没有数据不构成 none，这正是「判 none 就不检索」那条捷径的来源
+        prompt = build_route_prompt("问题", "工具清单", None)
+
+        assert "none 不等于「我猜查不到」" in prompt
+        assert "有没有要查过才知道" in prompt
+        assert "明确在本系统之外" in prompt
+
 
 class TestSufficiencyParsing:
     def test_missing_field_defaults_to_sufficient(self):
