@@ -234,6 +234,27 @@ def generate_final_answer(
     return text or REFUSAL
 
 
+def stream_final_answer(
+    question: str,
+    evidence: str,
+    *,
+    model: str = AGENT_LLM_MODEL,
+    history: Optional[History] = None,
+) -> "Iterator[str]":
+    """基于已收集的证据流式生成最终回答；没有证据时直接 yield 拒答。"""
+    from typing import Iterator
+
+    if not evidence.strip():
+        yield REFUSAL
+        return
+    llm = ChatOllama(model=model, num_ctx=8192, keep_alive="10m")
+    prompt = build_final_prompt(question, evidence, history)
+    for response in llm.stream(prompt):
+        text = _content_text(response.content).strip()
+        if text:
+            yield text
+
+
 def _clean_args(value: Any) -> dict:
     if not isinstance(value, dict):
         return {}

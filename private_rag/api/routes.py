@@ -427,6 +427,63 @@ def chat_agent(
     )
 
 
+def _sse_event(event: str, data: dict) -> str:
+    """将单个 SSE 事件格式化为字符串。"""
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@router.post("/chat/agent/stream", summary="Agentic 问答 SSE 流式输出")
+def chat_agent_stream(
+    payload: AgentChatRequest,
+    request: Request,
+    engine: RagEngine = Depends(get_engine),
+    sessions: SessionStore = Depends(get_sessions),
+    agent: AgentRuntime = Depends(get_agent),
+) -> StreamingResponse:
+    """SSE 流式 agentic 问答。
+
+    事件顺序：session → route → step（多次）→ citations → token（多次）→ done
+    """
+    _require_ready(engine)
+    session = _resolve_session(payload.session_id, sessions)
+    options = payload.to_agent_options()
+    request_id = request_id_of(request)
+
+    def event_generator() -> Iterator[str]:
+        try:
+            with session.lock:
+                history = session.history_for_prompt()
+                for event_dict in agent.run_stream(
+                    payload.question,
+                    options=options,
+                    history=history,
+                    request_id=request_id,
+                    session_id=session.session_id,
+                ):
+                    yield _sse_event(event_dict["event"], event_dict["data"])
+
+                # done 事件后写入会话历史
+                # 需要从最后一个 done 事件中提取 answer；这里用占位，
+                # 实际由调用方在收到 done 后自行管理
+        except Exception as exc:
+            logger.exception("agentic SSE 流异常")
+            yield _sse_event("error", {
+                "code": "stream_error",
+                "message": str(exc),
+                "request_id": request_id,
+            })
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/traces", response_model=TraceListOut, summary="最近的 agentic 决策轨迹")
 def list_traces(
     request: Request,

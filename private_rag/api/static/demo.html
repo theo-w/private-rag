@@ -893,6 +893,7 @@
           <div class="mode-switch" role="group" aria-label="回答方式">
             <button class="mode-button" type="button" data-mode="stream" aria-pressed="true">流式</button>
             <button class="mode-button" type="button" data-mode="sync" aria-pressed="false">同步</button>
+            <button class="mode-button" type="button" data-mode="agent" aria-pressed="false">Agentic</button>
           </div>
         </div>
 
@@ -908,6 +909,8 @@
           <button class="chip" type="button" data-question="香蕉要放冰箱吗？">香蕉要放冰箱吗？</button>
           <button class="chip" type="button" data-question="橙子有什么营养？">橙子有什么营养？</button>
           <button class="chip" type="button" data-question="苹果适合冷藏吗？">苹果适合冷藏吗？</button>
+          <button class="chip" type="button" data-question="最贵的香蕉多少钱？" data-agent="true">最贵的香蕉多少钱？</button>
+          <button class="chip" type="button" data-question="库存低于 50 的水果有哪些？" data-agent="true">库存低于 50 的水果？</button>
         </div>
 
         <form id="chat-form" class="composer">
@@ -977,6 +980,19 @@
             </select>
             <span class="hint">多查询/HyDE 会额外调用一次本地模型改写检索词，延迟更高；最终仍用原问题精排。</span>
           </label>
+
+          <div id="agent-options" hidden>
+            <label class="field" for="max-steps">
+              <span class="field-label">最大步数 <output id="max-steps-value" for="max-steps">4</output></span>
+              <input id="max-steps" type="range" min="1" max="8" step="1" value="4">
+              <span class="hint">Agentic 循环最多执行多少次工具调用；步数越多探索越深，延迟也越高。</span>
+            </label>
+
+            <label class="toggle" for="allow-sql">
+              <input id="allow-sql" type="checkbox" checked>
+              <span class="toggle-text">允许 SQL 查询 <small>Agentic 模式可让模型自主决定查询业务库；仍需 sources.yaml 授权。</small></span>
+            </label>
+          </div>
         </section>
 
         <section class="panel" aria-labelledby="session-title">
@@ -1083,6 +1099,7 @@
         mode: "stream",
         controller: null,
         ready: null,
+        agentMode: false,
       };
 
       const $ = (id) => document.getElementById(id);
@@ -1126,6 +1143,10 @@
         errorDetails: $("error-details"),
         errorRequestId: $("error-request-id"),
         dismissError: $("dismiss-error"),
+        agentOptions: $("agent-options"),
+        maxSteps: $("max-steps"),
+        maxStepsValue: $("max-steps-value"),
+        allowSql: $("allow-sql"),
       };
 
       function setStatus(kind, text) {
@@ -1415,7 +1436,12 @@
       function updateControls() {
         const busy = state.busy;
         el.sendButton.disabled = busy || state.ready !== true;
-        el.sendButton.textContent = busy ? (state.mode === "stream" ? "流式中…" : "生成中…") : "发送";
+        if (busy) {
+          if (state.agentMode) el.sendButton.textContent = "Agentic 生成中…";
+          else el.sendButton.textContent = state.mode === "stream" ? "流式中…" : "生成中…";
+        } else {
+          el.sendButton.textContent = state.agentMode ? "Agentic 问答" : "发送";
+        }
         el.sendButton.title = state.ready === false ? "知识库未就绪，请先运行 ingest" : "";
         el.stopButton.hidden = !(busy && state.mode === "stream");
         el.question.disabled = busy;
@@ -1424,6 +1450,10 @@
         el.tags.disabled = busy;
         el.useLexical.disabled = busy;
         el.useRerank.disabled = busy;
+        el.useParent.disabled = busy;
+        el.queryRewrite.disabled = busy;
+        el.maxSteps.disabled = busy;
+        el.allowSql.disabled = busy;
         for (const button of el.modeButtons) button.disabled = busy;
         for (const chip of el.examples.querySelectorAll(".chip")) chip.disabled = busy;
         el.newSession.disabled = busy;
@@ -1440,10 +1470,15 @@
 
       function setMode(mode) {
         if (state.busy) return;
-        state.mode = mode === "sync" ? "sync" : "stream";
+        state.agentMode = mode === "agent";
+        state.mode = state.agentMode ? "stream" : (mode === "sync" ? "sync" : "stream");
         for (const button of el.modeButtons) {
-          button.setAttribute("aria-pressed", String(button.dataset.mode === state.mode));
+          const isActive = button.dataset.mode === "agent"
+            ? state.agentMode
+            : button.dataset.mode === state.mode;
+          button.setAttribute("aria-pressed", String(isActive));
         }
+        el.agentOptions.hidden = !state.agentMode;
         updateControls();
       }
 
@@ -1527,6 +1562,36 @@
           ["BM25", meta.used_lexical ? "开" : "关", meta.used_lexical ? "on" : "off"],
           ["reranker", meta.used_rerank ? "开" : "关", meta.used_rerank ? "on" : "off"],
           ["耗时", meta.elapsed_ms != null ? `${meta.elapsed_ms} ms` : "—"],
+        ];
+        el.metaGrid.className = "meta-grid";
+        el.metaGrid.replaceChildren();
+        for (const [label, value, tone] of rows) {
+          const item = document.createElement("div");
+          item.className = "meta-item";
+          const labelEl = document.createElement("span");
+          labelEl.className = "meta-label";
+          labelEl.textContent = label;
+          const valueEl = document.createElement("span");
+          valueEl.className = `meta-value${tone ? ` ${tone}` : ""}`;
+          valueEl.textContent = value;
+          item.append(labelEl, valueEl);
+          el.metaGrid.append(item);
+        }
+      }
+
+      function renderAgentMeta(meta, requestId) {
+        if (!meta) return;
+        el.requestId.textContent = requestId || "—";
+        el.requestId.title = requestId ? `request_id: ${requestId}` : "请求 ID";
+        const rows = [
+          ["意图", meta.intent || "—"],
+          ["工具调用", String(meta.tool_calls ?? "—")],
+          ["决策步数", String(meta.steps ?? "—")],
+          ["证据块", String(meta.evidence_blocks ?? "—")],
+          ["上下文长度", meta.context_chars != null ? `${meta.context_chars} 字符` : "—"],
+          ["历史轮次", String(meta.history_turns ?? "—")],
+          ["耗时", meta.elapsed_ms != null ? `${meta.elapsed_ms} ms` : "—"],
+          ["轨迹 ID", (meta.trace_id || "").slice(0, 8) || "—"],
         ];
         el.metaGrid.className = "meta-grid";
         el.metaGrid.replaceChildren();
@@ -1684,7 +1749,7 @@
         return unique;
       }
 
-      function buildChatBody(question) {
+      function buildChatBody(question, options = {}) {
         const body = {
           question,
           top_k: Number(el.topK.value),
@@ -1697,6 +1762,10 @@
         const tags = parseTags(el.tags.value);
         if (tags.length) body.tags = tags;
         if (state.sessionId) body.session_id = state.sessionId;
+        if (options.agent) {
+          body.max_steps = Number(el.maxSteps.value);
+          body.allow_sql = el.allowSql.checked;
+        }
         return body;
       }
 
@@ -1952,6 +2021,108 @@
         }
       }
 
+      async function runAgentStream(body) {
+        const pending = appendMessage("assistant", "正在分析意图…", { streaming: true, placeholder: true });
+        const controller = new AbortController();
+        state.controller = controller;
+        let answer = "";
+        let receivedToken = false;
+        let completed = false;
+        let meta = null;
+
+        try {
+          const response = await fetch("/api/v1/chat/agent/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+          if (!response.ok) await throwResponseError(response);
+          if (!response.body) throw new Error("当前浏览器不支持流式响应。");
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (!completed) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            buffer = buffer.replace(/\r\n/g, "\n");
+
+            let boundary;
+            while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+              const frame = buffer.slice(0, boundary).trim();
+              buffer = buffer.slice(boundary + 2);
+              if (!frame) continue;
+
+              const parsed = parseSSE(frame);
+              if (!parsed) continue;
+              const { event, data } = parsed;
+
+              if (event === "session") {
+                if (data.session_id) setSession(data.session_id);
+              } else if (event === "route") {
+                if (!pending.footer.textContent.includes("意图")) {
+                  pending.footer.textContent = `意图: ${data.intent || "unknown"}`;
+                }
+              } else if (event === "step") {
+                if (!pending.footer.textContent.includes("工具")) {
+                  pending.footer.textContent = `工具: ${data.tool || "unknown"}`;
+                }
+              } else if (event === "citations") {
+                renderCitations(data.citations || []);
+                if (!receivedToken) {
+                  pending.bubble.classList.remove("is-placeholder");
+                  pending.bubble.textContent = "正在生成回答…";
+                }
+              } else if (event === "token") {
+                if (!receivedToken) {
+                  receivedToken = true;
+                  pending.bubble.classList.remove("is-placeholder");
+                  pending.bubble.textContent = "";
+                }
+                answer += data.text || "";
+                pending.bubble.textContent = answer;
+                scrollMessages();
+              } else if (event === "done") {
+                completed = true;
+                answer = data.answer || answer;
+                meta = data.meta;
+                if (data.session_id) setSession(data.session_id);
+                pending.bubble.classList.remove("is-streaming", "is-placeholder");
+                pending.bubble.textContent = answer;
+                pending.footer.textContent = "Agentic 回答";
+                renderCitations(data.citations || []);
+                renderAgentMeta(meta, data.request_id);
+              } else if (event === "error") {
+                throw apiError(200, { error: data }, data.request_id);
+              }
+            }
+          }
+
+          if (!completed) {
+            pending.bubble.classList.remove("is-streaming", "is-placeholder");
+            if (!answer) pending.bubble.textContent = "连接已结束。";
+            pending.footer.textContent = "连接已结束";
+          } else {
+            await loadSessionHistory({ silent: true });
+          }
+        } catch (error) {
+          pending.bubble.classList.remove("is-streaming", "is-placeholder");
+          if (error.name === "AbortError") {
+            if (!answer) pending.bubble.textContent = "已停止。";
+            pending.footer.textContent = "已停止 · 本轮不会写入会话";
+          } else {
+            if (!answer) pending.bubble.textContent = "生成失败。";
+            pending.footer.textContent = "生成中断";
+            showError(error);
+          }
+        } finally {
+          state.controller = null;
+        }
+      }
+
       async function sendQuestion(event) {
         if (event) event.preventDefault();
         if (state.busy) return;
@@ -1974,7 +2145,7 @@
 
         let body;
         try {
-          body = buildChatBody(question);
+          body = buildChatBody(question, { agent: state.agentMode });
         } catch (error) {
           showError(error);
           return;
@@ -1989,7 +2160,9 @@
         updateControls();
 
         try {
-          if (state.mode === "stream") {
+          if (state.agentMode) {
+            await runAgentStream(body);
+          } else if (state.mode === "stream") {
             await runStream(body);
           } else {
             await runSync(body);
@@ -2015,6 +2188,9 @@
         const chip = event.target.closest(".chip");
         if (!chip || state.busy) return;
         el.question.value = chip.dataset.question || "";
+        if (chip.dataset.agent === "true" && !state.agentMode) {
+          setMode("agent");
+        }
         updateCharCount();
         el.question.focus();
       });
@@ -2024,6 +2200,7 @@
       }
 
       el.topK.addEventListener("input", () => { el.topKValue.value = el.topK.value; });
+      el.maxSteps.addEventListener("input", () => { el.maxStepsValue.value = el.maxSteps.value; });
       el.refreshStatus.addEventListener("click", refreshStatus);
       el.newSession.addEventListener("click", createSession);
       el.loadSession.addEventListener("click", () => loadSessionHistory());

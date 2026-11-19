@@ -220,6 +220,7 @@ class AgentChatResponse(BaseModel):
     meta: AgentMeta
     trace: AgentTraceOut
     request_id: str
+    contexts: list[str] = Field(default_factory=list, description="原始证据块文本列表")
 
 
 class TraceSummaryOut(BaseModel):

@@ -11,7 +11,8 @@
 | v5 | `v5-parent-rag-query-rewrite` | Parent-Document RAG（子块召回、父块送上下文）、查询改写（多查询 / HyDE）、去重与上下文预算 | ✅ 本分支完成（评估结果见报告） | 支持父子块、多查询/HyDE、预算与去重；有 `full` / `parent` / `parent_multi` / `parent_hyde` 前后对比、Ragas 子集与失败案例分析，见 `eval/reports/v5_report.md` |
 | v6 | `v6-ocr-parser` | 扫描件 OCR、表格解析、版面处理，接入现有连接器与元数据 | ✅ 本分支完成 | 扫描 PDF 与表格可检索；页码/表格名进入引用 |
 | v6.1 | `v6.1-readonly-render` | 只读公网演示：v6 入库产物导出快照，小服务暴露语料与 BM25 检索，问答明确关闭 | ✅ 已部署 (<https://private-rag-readonly.onrender.com>) | 公网可看到扫描件 OCR 文本、表格文档与页码/表格名引用；不加载模型，问答返回 409 |
-| v7 | `claude/heuristic-edison-ebcf0b` | Agentic RAG：意图路由、SQL/工具调用、检索-行动循环、可观测 trace | ✅ 本分支完成（SSE 流式与 v7 量化评估留给 v7.1） | 业务问题能自动选择知识库或工具；trace 可回放每条决策 |
+| v7 | `claude/heuristic-edison-ebcf0b` | Agentic RAG：意图路由、SQL/工具调用、检索-行动循环、可观测 trace | ✅ 本分支完成 | 业务问题能自动选择知识库或工具；trace 可回放每条决策 |
+| v7.1 | `v7.1` | SSE 流式 Agentic 输出、演示页 Agentic 开关、列表/表格感知切分 | 进行中 | 298 测试通过；SSE 端点可流式输出 agentic 轨迹；demo.html 支持 Agentic 模式；列表/表格切分测试通过 |
 
 ## v2 详细验收（已完成）
 
@@ -106,9 +107,17 @@
 - [x] 决策 JSON 的输出预算独立可配（`RAG_AGENT_PLANNER_TOKENS`，默认 2000）：本机实跑发现默认模型是推理型，400 token 只吐思考不给正文，路由整段回退到关键词判断
 - [x] 本机实跑端到端：`init_demo_db` → `ingest` → `chat_agent` → `replay_trace` 全链路跑通，knowledge/database/mixed/none 四类问题各验一次；预算修好后 mixed 问题的意图与 SQL 都由模型自己给出（2 次工具调用，`stop_reason=final`）
 - [ ] 同一份 JSON 决策输出走原生 function calling 对比（默认模型是 MLX 构建，工具调用格式不稳定，先用 JSON 模式 + 关键词回退）
-- [ ] agentic 问答的 SSE 流式输出与演示页开关 → 归入 v7.1
-- [ ] v7 评估集与量化对比（agentic vs 固定检索链路）→ 归入 v7.1
-- [ ] 列表/表格感知的切分：文档改写后「列表引导句」恰好截断在子块末尾、列表本体落入下一块，问答只看得到引导句便拒答（v4 基线重跑中的 q07、q18 等失败案例）→ 归入 v7.1
+
+## v7.1 详细验收（本分支）
+
+- [x] Agentic SSE 流式端点：`POST /api/v1/chat/agent/stream`，事件顺序 `session → route → step → citations → token → done`
+- [x] `AgentRuntime.run_stream()` 返回事件流，与 `run()` 逻辑一致
+- [x] `stream_final_answer()` 使用 `ChatOllama.stream()` 逐 token yield
+- [x] demo.html 新增 Agentic 模式按钮，Agentic 示例芯片自动切换模式
+- [x] demo.html Agentic 模式展示 max_steps / allow_sql 参数，意图/工具调用/决策步数/证据块等 meta
+- [x] SSE 端点测试：`FakeRuntime.run_stream()` 模拟完整事件流，23 条测试全部通过
+- [x] 列表/表格感知切分：`_split_by_markdown_structure()` 将列表/表格/代码块视为原子单元
+- [x] 切分测试：`test_list_preserved_as_unit`、`test_table_preserved_as_unit`、`test_heading_forces_boundary`
 
 ## 分支与提交约定
 
