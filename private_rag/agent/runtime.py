@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, Optional, Sequence
 
-from sqlalchemy import create_engine, inspect as sa_inspect
+from sqlalchemy import create_engine, inspect as sa_inspect, text
 
 from private_rag.agent.planner import LlmPlanner, Planner, RouteDecision
 from private_rag.agent.prompts import generate_final_answer, heuristic_route, stream_final_answer
@@ -33,6 +33,8 @@ from private_rag.agent.tools import (
 )
 from private_rag.agent.trace import AgentStep, AgentTrace, new_trace_id
 from private_rag.config import (
+    AGENT_CATALOG_CHARS,
+    AGENT_CATALOG_SAMPLES,
     AGENT_CONTEXT_CHARS,
     AGENT_LLM_MODEL,
     AGENT_MAX_STEPS,
@@ -99,6 +101,112 @@ def _evidence_chars(blocks: Sequence[ToolBlock]) -> int:
     return sum(len(block.text) + len(block.label) + 8 for block in blocks)
 
 
+def _refusal_text(missing: str = "") -> str:
+    """拒答文本；能定位到缺哪一项就写清缺什么，用户才知道该补什么。"""
+    gap = " ".join(str(missing or "").split())
+    return REFUSAL if not gap else f"{REFUSAL}\n缺少的信息：{gap[:200]}"
+
+
+# 样例值送进模型时的单值长度上限：一整个描述段落塞进工具描述毫无价值
+CATALOG_VALUE_CHARS = 60
+CATALOG_TERM_MAX_CHARS = 24
+CATALOG_TERMS_MAX = 40
+
+
+def _is_textual_column(column: dict) -> bool:
+    type_name = str(column.get("type") or "").lower()
+    return any(word in type_name for word in ("char", "text", "clob", "string"))
+
+
+def _sample_values(connection: Any, table: str, column: str, limit: int) -> list[str]:
+    """取该列前 limit 个非空值。
+
+    刻意不排序、不去重：数据库扫到 limit 行就停，换成真有数据的库也不会
+    把「给路由看一眼」变成一次全表扫描。去重在这里按原顺序做。
+    """
+    sql = text(
+        f'SELECT "{column}" FROM "{table}" WHERE "{column}" IS NOT NULL LIMIT {int(limit)}'
+    )
+    try:
+        rows = list(connection.execute(sql).fetchmany(limit))
+    except Exception:
+        return []
+    values: list[str] = []
+    for row in rows:
+        value = " ".join(str(row[0] or "").split())
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
+def _data_catalog(
+    dsn: str,
+    tables: Sequence[str],
+    *,
+    max_samples: int = AGENT_CATALOG_SAMPLES,
+    max_chars: int = AGENT_CATALOG_CHARS,
+) -> tuple[str, list[str]]:
+    """探测白名单表的列名与少量样例值，用于回答「问题要的事实到底在文档还是在表里」。
+
+    返回值同时给两处用：目录文本进工具描述（模型看得到），短词列表进回退路由
+    （模型不可用时，口语化问题也能靠库内实体名落到 sql_query）。
+    探测失败就返回空，装配不该因为一个源库连不上而整体失败。
+    """
+    try:
+        engine = create_engine(dsn)
+    except Exception:
+        return "", []
+    parts: list[str] = []
+    terms: list[str] = []
+    try:
+        inspector = sa_inspect(engine)
+        with engine.connect() as connection:
+            for table in tables:
+                try:
+                    if not inspector.has_table(table):
+                        continue
+                    columns = list(inspector.get_columns(table))
+                except Exception:
+                    continue
+                names = [str(column.get("name")) for column in columns][:14]
+                if not names:
+                    continue
+                parts.append(f"{table} 列({', '.join(names)})")
+                for name in names:
+                    if name not in terms:
+                        terms.append(name)
+                if max_samples <= 0:
+                    continue
+                for column in columns:
+                    name = str(column.get("name"))
+                    if not name or not _is_textual_column(column):
+                        continue
+                    values = _sample_values(connection, table, name, max_samples)
+                    if not values:
+                        continue
+                    shown = [
+                        value if len(value) <= CATALOG_VALUE_CHARS else value[:CATALOG_VALUE_CHARS] + "…"
+                        for value in values
+                    ]
+                    parts.append(f"{table}.{name} 取值：{' / '.join(shown)}")
+                    for value in values:
+                        if len(value) <= CATALOG_TERM_MAX_CHARS and value not in terms:
+                            terms.append(value)
+                if len(";".join(parts)) >= max_chars:
+                    break
+    except Exception:
+        return "", []
+    finally:
+        engine.dispose()
+
+    kept: list[str] = []
+    for part in parts:
+        if kept and len(";".join(kept + [part])) > max_chars:
+            break
+        kept.append(part)
+    return "；".join(kept), terms[:CATALOG_TERMS_MAX]
+
+
 class AgentRuntime:
     """检索-行动循环的编排者。工具与决策器都可注入，便于测试与替换模型。"""
 
@@ -127,6 +235,16 @@ class AgentRuntime:
         kept = [tool for tool in self.registry.tools() if tool.name != SqlQueryTool.name]
         return ToolRegistry(kept)
 
+    def _route_hints(self, registry: ToolRegistry) -> list[str]:
+        """回退路由可用的库内线索（列名与短实体值）。"""
+        hints: list[str] = []
+        for tool in registry.tools():
+            for term in getattr(tool, "catalog_terms", []) or []:
+                text_term = str(term).strip()
+                if text_term and text_term not in hints:
+                    hints.append(text_term)
+        return hints
+
     def run(
         self,
         question: str,
@@ -142,6 +260,7 @@ class AgentRuntime:
 
         registry = self._available(options.allow_sql)
         specs = registry.describe()
+        route_hints = self._route_hints(registry)
         planner = self.planner or LlmPlanner(self.model)
 
         trace = AgentTrace(
@@ -159,6 +278,9 @@ class AgentRuntime:
         stop_reason = ""
         forced_answer = ""
         final_reason = "基于已收集的证据作答"
+        # 规划器宣布作答时的充分性判断：insufficient 直接拒答，partial 把缺口带进最终提示词
+        sufficient = True
+        missing_part = ""
 
         def add_step(**kwargs: Any) -> AgentStep:
             nonlocal step_index
@@ -180,7 +302,7 @@ class AgentRuntime:
                 elapsed_ms=int((time.perf_counter() - route_started) * 1000),
             )
         except Exception as exc:
-            intent, action, reason = heuristic_route(question, registry.names())
+            intent, action, reason = heuristic_route(question, registry.names(), extra_hints=route_hints)
             route = RouteDecision(intent=intent, action=action, reason=reason, fallback=True)
             add_step(
                 kind="route",
@@ -197,7 +319,7 @@ class AgentRuntime:
 
         # 模型给了意图却没给出可用动作时，用启发式补一个，避免空跑一轮
         if intent != "none" and registry.get(route.tool) is None:
-            intent, action, reason = heuristic_route(question, registry.names())
+            intent, action, reason = heuristic_route(question, registry.names(), extra_hints=route_hints)
             route = RouteDecision(intent=intent, action=action, reason=reason, fallback=True)
             add_step(kind="stop", reason=reason, observation=f"改用 {route.tool or '无'}")
         if intent == "none" or not route.tool:
@@ -241,6 +363,8 @@ class AgentRuntime:
                 if decision.action == "final":
                     forced_answer = decision.answer.strip()
                     final_reason = decision.reason or "模型认为证据已足够"
+                    sufficient = bool(decision.sufficient)
+                    missing_part = decision.missing.strip()
                     stop_reason = "final"
                     break
                 tool_name, args, reason = decision.tool, dict(decision.args), decision.reason
@@ -289,7 +413,11 @@ class AgentRuntime:
                 break
 
         evidence_text, citations = render_evidence(blocks)
-        if forced_answer:
+        if not sufficient:
+            # 问题要的那项事实不在证据里：按既有约定拒答，不再让模型补一段看着像的答案
+            answer = _refusal_text(missing_part)
+            stop_reason = "insufficient_evidence"
+        elif forced_answer:
             answer = forced_answer
         elif not citations:
             answer = REFUSAL
@@ -301,6 +429,7 @@ class AgentRuntime:
                     evidence_text,
                     model=self.model,
                     history=history,
+                    missing=missing_part,
                 )
             except Exception as exc:
                 logger.warning("最终回答生成失败 trace_id=%s：%s", trace.trace_id, exc)
@@ -357,6 +486,7 @@ class AgentRuntime:
 
         registry = self._available(options.allow_sql)
         specs = registry.describe()
+        route_hints = self._route_hints(registry)
         planner = self.planner or LlmPlanner(self.model)
 
         trace = AgentTrace(
@@ -374,6 +504,9 @@ class AgentRuntime:
         stop_reason = ""
         forced_answer = ""
         final_reason = "基于已收集的证据作答"
+        # 规划器宣布作答时的充分性判断：insufficient 直接拒答，partial 把缺口带进最终提示词
+        sufficient = True
+        missing_part = ""
 
         def add_step(**kwargs: Any) -> AgentStep:
             nonlocal step_index
@@ -407,7 +540,7 @@ class AgentRuntime:
                 "elapsed_ms": int((time.perf_counter() - route_started) * 1000),
             })
         except Exception as exc:
-            intent, action, reason = heuristic_route(question, registry.names())
+            intent, action, reason = heuristic_route(question, registry.names(), extra_hints=route_hints)
             route = RouteDecision(intent=intent, action=action, reason=reason, fallback=True)
             add_step(
                 kind="route",
@@ -428,7 +561,7 @@ class AgentRuntime:
         intent = route.intent
 
         if intent != "none" and registry.get(route.tool) is None:
-            intent, action, reason = heuristic_route(question, registry.names())
+            intent, action, reason = heuristic_route(question, registry.names(), extra_hints=route_hints)
             route = RouteDecision(intent=intent, action=action, reason=reason, fallback=True)
             add_step(kind="stop", reason=reason, observation=f"改用 {route.tool or '无'}")
         if intent == "none" or not route.tool:
@@ -476,6 +609,8 @@ class AgentRuntime:
                 if decision.action == "final":
                     forced_answer = decision.answer.strip()
                     final_reason = decision.reason or "模型认为证据已足够"
+                    sufficient = bool(decision.sufficient)
+                    missing_part = decision.missing.strip()
                     stop_reason = "final"
                     break
                 tool_name, args, reason = decision.tool, dict(decision.args), decision.reason
@@ -539,7 +674,10 @@ class AgentRuntime:
             "context_chars": _evidence_chars(blocks),
         })
 
-        if forced_answer:
+        if not sufficient:
+            answer = _refusal_text(missing_part)
+            stop_reason = "insufficient_evidence"
+        elif forced_answer:
             answer = forced_answer
         elif not citations:
             answer = REFUSAL
@@ -553,6 +691,7 @@ class AgentRuntime:
                     evidence_text,
                     model=self.model,
                     history=history,
+                    missing=missing_part,
                 ):
                     answer_parts.append(token_text)
                     yield from yield_event("token", {"text": token_text})
@@ -653,6 +792,7 @@ def build_agent_runtime(
                     logger.warning("跳过 SQL 源 %s：无法确定可查表", source.label or redact_dsn(source.dsn))
                     continue
                 label = source.label or redact_dsn(source.dsn)
+                catalog, catalog_terms = _data_catalog(source.dsn, tables)
                 tools.append(
                     SqlQueryTool(
                         dsn=source.dsn,
@@ -660,6 +800,8 @@ def build_agent_runtime(
                         allowed_tables=tables,
                         max_rows=sql_rows,
                         schema_hint=_schema_hint(source.dsn, tables),
+                        catalog=catalog,
+                        catalog_terms=catalog_terms,
                     )
                 )
 

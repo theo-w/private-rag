@@ -158,6 +158,8 @@ class SqlQueryTool(Tool):
         max_rows: int = AGENT_SQL_ROWS,
         max_chars: int = AGENT_TOOL_CHARS,
         schema_hint: str = "",
+        catalog: str = "",
+        catalog_terms: Sequence[str] = (),
     ):
         self.dsn = dsn
         self.label = label
@@ -165,6 +167,9 @@ class SqlQueryTool(Tool):
         self.max_rows = max_rows
         self.max_chars = max_chars
         self.schema_hint = schema_hint
+        self.catalog = catalog
+        # 路由回退时可当关键词线索的短词（实体值、列名），由装配方给出
+        self.catalog_terms = [str(t).strip() for t in catalog_terms if str(t).strip()]
         self.description = self._build_description()
 
     def _build_description(self) -> str:
@@ -174,6 +179,9 @@ class SqlQueryTool(Tool):
         )
         if self.schema_hint:
             base += f"。可查列：{self.schema_hint}"
+        if self.catalog:
+            # 路由器只看得到工具描述：库里到底存着什么，得写在这里才可能判准意图
+            base += f"。库内数据：{self.catalog}"
         return base
 
     def fallback_sql(self) -> str:

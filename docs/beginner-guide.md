@@ -381,17 +381,24 @@ route = planner.route(question, tools)                # 意图：knowledge / dat
 while tool_calls < MAX_STEPS and evidence_chars < BUDGET:
     action = route or planner.decide(question, evidence, observations)
     if action.kind == "final":
-        break                                         # 模型认为证据够了，直接作答
+        break                                         # 模型认为证据够了（或明确说不足）就收手
     result = registry[action.tool].run(action.args)   # SQL 先过只读护栏才允许执行
     evidence += result.blocks                         # 两个工具的证据统一编号，[n] 对应引用
     observations.append(result.observation)           # 失败也当观察回灌，模型可以换一条 SQL 再来
-answer = generate(evidence) if evidence else REFUSAL
+# 判据是「问题要的那项事实有没有落在证据里」；没落在就拒答，不用通用常识补
+answer = REFUSAL if not action.sufficient else (generate(evidence) if evidence else REFUSAL)
 trace.save("storage/traces/agent.jsonl")              # 每步的理由、参数、观察都留在文件里
 ```
 
 三条边界防止跑飞：工具调用次数（`AGENT_MAX_STEPS`）、证据字符预算（`AGENT_CONTEXT_CHARS`）、
 SQL 返回行数（`AGENT_SQL_ROWS`）。模型不可用时不会整体失败：路由退回关键词判断，工具没给 SQL 就退化成
 列出白名单表前几行，最终回答仍基于已收集的证据生成，一条证据都没有就按原来的约定返回拒答文本。
+
+判准「该查文档还是查库」靠两件小事：路由器只看得懂工具的 `description`，所以装配 `sql_query` 时会先给
+白名单表做一次**有界采样**（列名 + 每个文本列少量样例值）写进描述，「香蕉到底能不能放冰箱」这种问法才有机会
+被认成「问的是 `products.description` 里那条记录」；采样出来的词同时喂给关键词回退路由。另一件是答不答由模型
+在宣布作答时一并声明充分性（`sufficient` / `missing`），问题要的那项事实不在证据里就直接返回拒答哨兵并写明
+缺哪一项——「资料里没提到」不等于「不存在」，宁可拒答也不要拿通用常识补出一段看着像的答案。
 
 只读护栏（`agent/sql_guard.py`）只做四件事：只允许单条 `SELECT`/`WITH`、出现写操作关键字就拒绝、
 表必须在白名单内、强制一个不超过上限的 `LIMIT`。它是纵深防御的一层，不是沙箱——

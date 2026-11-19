@@ -287,3 +287,29 @@ class TestRenderEvidence:
         table = Citation(2, "库", "sql", "b#sql", "s", table="demo.products")
         assert "第 12 页" in citation_label(page)
         assert "表 demo.products" in citation_label(table)
+
+
+class TestCatalogInDescription:
+    """库内数据目录只有写进工具描述，路由器才可能判准意图。"""
+
+    def make(self, **kwargs):
+        return SqlQueryTool(
+            dsn="sqlite:///x.db", label="demo.products", allowed_tables=["products"], **kwargs
+        )
+
+    def test_description_shows_the_catalog(self):
+        tool = self.make(catalog="products 列(name, price)；products.name 取值：香蕉 / 橙子")
+
+        assert "库内数据：products 列(name, price)" in tool.description
+
+    def test_description_without_catalog_is_unchanged(self):
+        assert "库内数据" not in self.make().description
+
+    def test_catalog_terms_are_trimmed_and_kept_in_order(self):
+        tool = self.make(catalog_terms=[" 香蕉 ", "", "橙子"])
+
+        assert tool.catalog_terms == ["香蕉", "橙子"]
+
+    def test_other_tools_need_no_terms(self):
+        # 回退路由用 getattr 取线索，没有该属性的工具不应报错
+        assert getattr(self.make(), "catalog_terms", None) == []
