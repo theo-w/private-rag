@@ -9,7 +9,10 @@ on:
 jobs:
   tests:
     name: 单元测试（不装模型依赖）
-    runs-on: ubuntu-latest
+    # 不能用 ubuntu-latest：它已切到 Ubuntu 26.04，而 actions/python-versions 只为
+    # Python 3.9 提供 linux-22.04 与 linux-24.04 构建，setup-python 会直接失败
+    # （首跑实测：The version '3.9' with architecture 'x64' was not found for Ubuntu 26.04）
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -59,7 +62,10 @@ jobs:
 
   readonly:
     name: 只读演示依赖清单
-    runs-on: ubuntu-latest
+    # 不能用 ubuntu-latest：它已切到 Ubuntu 26.04，而 actions/python-versions 只为
+    # Python 3.9 提供 linux-22.04 与 linux-24.04 构建，setup-python 会直接失败
+    # （首跑实测：The version '3.9' with architecture 'x64' was not found for Ubuntu 26.04）
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
