@@ -523,6 +523,24 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --n
 
 量出来的两条真实短板：一是路由受问法影响——像「香蕉能不能放冰箱」这种读起来像生活常识的问题，决策模型判成 `knowledge` 去查文档（保存方法其实在 `products.description` 里），6 条样本因此没查到库；二是证据不足时 agentic 倾向作答而不是拒答，`refusal_accuracy` 从 1.000 掉到 0.250，其中 d06、r04 在没有知识库依据的情况下补了通用知识（苹果氧化、商业版定价），属于该拒答却作答。
 
+**Ragas 子集复核**（2026-11-19，26 条里的 6 条可回答样本 `k01`/`d01`/`d03`/`m03`/`s02`/`s04` ×
+`agent`/`full`，judge `qwen3.8:27b-mlx`，`git_commit = 9147bd3`，总耗时 3965 秒，
+完整报告 `eval/reports/v7_agent_ragas_report.md`）：
+
+| Ragas 指标 | agentic | `full`（v4 基线） |
+|---|---:|---:|
+| `faithfulness` | 0.659 | 0.600 |
+| `answer_relevancy` | 0.853 | 0.138 |
+| `context_precision` | 0.492 | 0.306 |
+| `context_recall` | 0.750 | 0.250 |
+
+四项 agentic 都更高，差距最大的是 `answer_relevancy` 与 `context_recall`。但 `full` 组在这 6 条里
+拒答了 5 条（子集 `answer_rate` 0.167），所以这两项的低分主要复述了「没作答」，不是同等条件下的
+答案质量差值；能读的是 `faithfulness` 0.659 vs 0.600：两边都只在有据可依时作答，agentic 多带了
+SQL 证据却没有更容易编。子集不是全量，样本量不足以当结论；judge 走本机 Ollama，跑动中 3 个评测
+任务被 `RemoteProtocolError` 断连打断，对应 `m03`/`full` 的 `faithfulness`+`answer_relevancy` 与
+`d01`/`agent` 的 `answer_relevancy` 记为 NaN，平均分只基于有效样本。
+
 ## 只读公网演示（Render）
 
 完整问答依赖本机 Ollama（`bge-m3` 嵌入 + `qwen3.8:27b-mlx` 生成）与 `bge-reranker`，
