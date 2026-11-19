@@ -1,0 +1,94 @@
+name: CI
+
+# 每次 push 与 PR 都跑；也可以手动触发排查依赖漂移
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: 单元测试（不装模型依赖）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: 安装测试依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: 打印环境（便于复现）
+        run: |
+          python --version
+          pip list
+
+      # rapidocr-onnxruntime 依赖 opencv-python（不是 headless 版），Linux 上导入 cv2 需要 libGL。
+      # 镜像里已有就跳过，缺了才补装，最后硬断言 cv2 可导入，别让原因埋在单测报错里
+      - name: 确认 OCR 后端的系统库齐全
+        run: |
+          if python -c "import cv2" 2>/dev/null; then
+            echo "cv2 可直接导入，跳过系统库安装"
+          else
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends libgl1
+            python -c "import cv2; print('cv2', cv2.__version__)"
+          fi
+
+      # 307 条单测全部不碰 Ollama / Qdrant / 网络：API 测试注入 fake engine，
+      # 决策器与工具用注入的替身，向量库路径走 tmp_path
+      - name: 运行单元测试
+        run: python -m pytest tests -q
+
+      # 评估集的 evidence 逐字校验不需要模型，跑模型之前先兜住标注漂移
+      - name: 校验三份评估集
+        run: |
+          python scripts/evaluate.py --validate-only
+          python scripts/evaluate.py --dataset eval/v5_paraphrase_qa.jsonl --validate-only
+          python scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --validate-only
+
+  readonly:
+    name: 只读演示依赖清单
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+          cache: pip
+          cache-dependency-path: requirements-readonly.txt
+
+      # 这份清单就是 Render 上装的包：少一个本机不会暴露，只会在部署时炸
+      - name: 安装只读演示依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-readonly.txt pytest==8.4.2 httpx==0.28.1
+
+      # test_readonly_index_ranks_like_lexical_index 要 import LexicalIndex，
+      # 而 lexical.py 模块级 import qdrant_client —— 只读部署按设计不装它。
+      # 该条在 tests 作业（装了 qdrant-client）里照常跑，覆盖没有丢
+      - name: 运行只读接口测试
+        run: |
+          python -m pytest tests/test_readonly_api.py -q -k "not ranks_like_lexical_index"
+
+      - name: 确认只读链路没有加载模型依赖
+        run: |
+          python -c "
+          import sys
+          import private_rag.api.readonly
+          forbidden = {'torch', 'transformers', 'FlagEmbedding', 'sentence_transformers', 'qdrant_client'}
+          loaded = sorted(forbidden & set(sys.modules))
+          assert not loaded, '只读链路引入了模型依赖：' + str(loaded)
+          print('只读链路未加载模型依赖')
+          "

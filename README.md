@@ -707,6 +707,18 @@ python3 scripts/ingest.py --recreate                               # 清空集�
 python3 -m pytest tests -q
 ```
 
+CI（`.github/workflows/ci.yml`）在每次 push 与 PR 上跑两个作业：
+
+- `tests`：只装 `requirements-ci.txt`（**不含** `torch` / `transformers` / `sentence-transformers` /
+  `FlagEmbedding` / `faiss-cpu`——单测不加载任何模型，精排在 `retrieval/rerank.py` 里是函数内懒加载；
+  但 `pdfplumber` 与 `rapidocr-onnxruntime` 必须装，`test_ocr.py` 会断言这两个后端可导入），跑全量单测，
+  再用 `evaluate.py --validate-only` 校验 v4 / v5 / v7 三份评估集的证据逐字校验与结构——标注漂移在打模型之前就会被拦住。
+  `rapidocr-onnxruntime` 带的是非 headless 的 opencv，所以作业会先试 `import cv2`，缺 libGL 才补装 `libgl1`。
+- `readonly`：只装 `requirements-readonly.txt`（Render 上实际安装的那份），验证只读演示的依赖清单真的够用，
+  并断言导入 `private_rag.api.readonly` 后 `sys.modules` 里没有 `torch` / `FlagEmbedding` / `qdrant_client`。
+  其中 `test_readonly_index_ranks_like_lexical_index` 被排除：它要 `import LexicalIndex`，
+  而 `retrieval/lexical.py` 模块级导入 `qdrant_client`；该条在 `tests` 作业里照常执行，覆盖没有丢。
+
 覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、OCR 与表格提取、PDF 加载器（文本/扫描件/表格/降级）、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4/v5 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。v7 agentic 部分另覆盖只读 SQL 护栏（写操作、多语句、越权表必须被拒，CTE 与子查询不能误拒）、工具层证据与引用统一编号、检索-行动循环（意图路由、步数与字符预算、无效工具名、模型不可用降级、决策 JSON 的输出预算与解析回退）、轨迹落盘与 `--list`/单条回放 CLI、`/chat/agent` 与 `/traces` 接口；决策器与工具都是注入的替身，同样不依赖 Ollama 与 Qdrant。
 
 冒烟测试需要已入库并启动 Ollama：
