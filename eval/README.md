@@ -215,7 +215,7 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --n
   答案可以完全正确但证据判 0。
 - **路由受问法影响**：像“香蕉能不能放冰箱”这种读起来像生活常识的问题，决策模型会判成 `knowledge`
   而去查文档（保存方法其实在 `products.description` 里）；措辞带“价格/表/记录”的问题才会走 SQL。
-  这是本数据集量出来的真实短板，不是评估脚本的问题。
+  这是本数据集量出来的真实短板，不是评估脚本的问题。（v7.2 已按“库内数据可得性”重做路由，见本文末小节）
 - **单轮**：评估不传会话历史，指代消解类能力未覆盖。
 - 评估运行设置 `RAG_DISABLE_AGENT_TRACE=1`，不写 `storage/traces/agent.jsonl`，
   所以报告里的 `trace_id` 不能在演示轨迹里回放。
@@ -224,6 +224,7 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --n
   d05 落在第 7 块，回答里引用编号正确），因此这两条在 `evidence_hit@3` 上判 0——是窗口口径，不是没查到。
 - **拒答判定只看哨兵文本**：`is_refusal()` 判断答案里是否含生成侧的 `【资料中没有相关信息】`。
   agentic 组在证据不足时倾向给“带引用的否定回答”，本口径下算未拒答，因此 `refusal_accuracy` 反而低于固定链路。
+  下表的 0.250 记录的是 v7.1 的行为；v7.2 起判定证据不足会直接以哨兵文本作答，本口径下 `refusal_accuracy` 复跑为 1.000。
 
 ### 结果摘要（2026-11-19，26 条 × `agent`/`full`，确定性指标，Ragas 关闭）
 
@@ -284,3 +285,83 @@ SELECT 列口径吃掉，所以这两类的收益要看 `answer_rate` 与引用�
 - **子集的确定性指标与全量那份不可混读**：本 6 条上 agent `answer_rate` 1.000 / `source_hit` 0.667 /
   `evidence_hit@3` 0.333，full 0.167 / 0.167 / 0.167；单条平均耗时 agent 71.9 秒、`full` 17.2 秒，
   与全量 26 条的方向一致。
+
+## v7.2 路由与拒答复跑（2026-11-19）
+
+v7.1 报告里那 6 条没查到库的样本（d01/d04/d06/m01/m04/s01）与 3 条该拒答却作答的样本
+（r01/r02/r04）单独重跑，命令与产物：
+
+```bash
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
+  --agent-sources config/sources.eval.agent.yaml \
+  --ids d01,d04,d06,m01,m04,s01,r01,r02,r04 --skip-ragas --skip-distribution --max-workers 1 \
+  --output eval/reports/v7_2_routing_report.md --json-output eval/reports/v7_2_routing_report.json
+```
+
+`--ids` 只跑指定样本（与 `--limit` 互斥，同时给会报错）；`--output` / `--json-output` 必须显式给，
+否则默认写到 `eval/reports/v4_report.*`。类别分布校验只作用于默认的 v4 数据集（`--skip-distribution`
+也只对它生效），跑这份 v7 子集时加不加都一样，命令里留着它只是换数据集时不必改参数。
+
+结果（9 条子集，模型 `qwen3.8:27b-mlx`，与 v7.1 全量同一生成模型，口径可比）：
+
+| 样本 | 问题 | 意图（旧→新） | 结果 |
+|---|---|---|---|
+| d01 | 香蕉到底能不能放冰箱保存？ | `knowledge`→`database` | 引用 `demo.products#sql_query`，给出「不适合放冰箱」 |
+| d04 | 橙子常温下大概能放多久？ | `knowledge`→`database` | 引用业务库，「常温一周左右」 |
+| d06 | 苹果切开后为什么建议尽快吃完？ | `knowledge`→`database` | 引用业务库 `description`，不再补通用氧化知识 |
+| m01 | 香蕉能不能放冰箱 + 引用列表从哪来 | `knowledge`→`mixed` | 库里那一半答对并引用；文档那一半仍答「查不到」 |
+| m04 | 苹果怎么保存 + 支持哪几种意图 | `knowledge`→`mixed` | 库 + 文档两处证据（4 条引用） |
+| s01 | 单价高于平均价的水果有哪些 | `none`→`database` | 算出橙子 12.5 / 猕猴桃，并带保存方式 |
+| r01 | 橙子的产地和供应商联系方式 | `knowledge`→`none` | 哨兵文本拒答 |
+| r02 | 这个项目有 iOS 客户端吗 | `knowledge`→`none` | 哨兵文本拒答 |
+| r04 | private-rag 商业版的定价 | `knowledge`→`knowledge` | `insufficient_evidence`，哨兵文本 + 缺少的信息 |
+
+子集均值（同样本前后对比，**不能**与上表 26 条的整体值直接比）：`evidence_hit@3` 0.000→1.000、
+`source_hit` 0.000→1.000、`context_precision@3` 0.000→0.889、`citation_rate`/`citation_validity`
+0.500→1.000；单条平均耗时 51.4 秒。
+
+一条要如实记下的口径问题：r01 与 r02 是靠 `none` 路由拒答的，也就是根本没检索——r01（库里没有的列）
+判 `none` 还算合理，r02「这个项目有 iOS 客户端吗」本应先查文档再依据证据拒答。结果对但拒答的理由不对，
+9 条里只有 r04 走的是证据不足判定（`insufficient_evidence`）。评估集本身没有为这次改动调整，报告按原口径出。
+
+再记一条口径限制：写进工具描述的样例值来自 `scripts/init_demo_db.py` 的种子数据，而这份评估集的
+`evidence` 也从同一份种子逐字校验——所以 d01/d04/d06 的改判里，有一部分等于「把标注答案搬到路由器眼前」。
+真实业务库的样例值不会刚好是用户要问的那项事实，因此这 9 条的提升幅度在本数据集上偏乐观：能确定的是
+机制本身（让路由器看见库里存着什么）有效，不是提升的具体数字。
+`none` 判据偏松是下一步要收的地方。另外 m01 的文档那一半仍然没查出来——模型把「这个项目」当成缺少对话上下文，而评估按单轮执行、本来就没覆盖指代消解。
+
+### 全量 26 条复跑（2026-11-19，v7.2）
+
+```bash
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
+  --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 \
+  --output eval/reports/v7_2_agent_report.md --json-output eval/reports/v7_2_agent_report.json
+```
+
+同一份评估集、同一生成模型（`qwen3.8:27b-mlx`）、同一确定性指标口径，只改代码不改数据；总耗时 1348.6 秒。
+
+| 指标 | v7.1 `agent` | v7.2 `agent` | 差值 |
+|---|---:|---:|---:|
+| `answer_rate` | 0.909 | 1.000 | +0.091 |
+| `refusal_accuracy` | 0.250 | 1.000 | +0.750 |
+| `source_hit` | 0.591 | 1.000 | +0.409 |
+| `evidence_hit@3` / `evidence_recall@3` | 0.409 | 0.864 | +0.455 |
+| `context_precision@3` | 0.197 | 0.621 | +0.424 |
+| `mrr@3` | 0.348 | 0.811 | +0.462 |
+| `citation_rate` / `citation_validity` | 0.864 | 0.955 | +0.091 |
+| `avg_context_chars` | 1676 | 1358 | -318 |
+| `avg_tool_calls` / `avg_tool_steps` | 1.50 / 3.73 | 1.31 / 3.38 | -0.19 / -0.35 |
+| 单条平均耗时 | 71.2 秒 | 51.9 秒 | -19.3 秒 |
+
+回归检查（这一轮真正要看的部分）：`knowledge` 类 7 条的 `source_hit` 与 `evidence_hit@3` 两轮均为 1.000，
+且这 7 条都没有引用业务库。分类别 `source_hit`：`database` 0.167→1.000、`mixed` 0.400→1.000、
+`multi_step` 0.750→1.000；15 条业务库类样本引用 `demo.products` 的从 9 条升到 15 条。
+
+`stop_reason` 分布：v7.1 `final`18 / `no_retrieval`2 / `planner_unavailable`6 → v7.2 `final`21 /
+`insufficient_evidence`2 / `no_retrieval`1 / `context_budget`1 / `planner_unavailable`1（JSON 解析失败
+变少只作观察，不归因）。4 条应拒答样本都以哨兵文本开头，但 r03/r04 是 `insufficient_evidence`、
+r02 是 `context_budget`（12 段证据后用尽字符预算）、r01 是 `none`（未检索）。
+
+两点读数限制：`mixed` 类 `evidence_hit@3` 仍只有 0.400，原因还是上面写的 `@3` 窗口与 SELECT 列口径；
+模型有随机性，9 条子集那次与全量这轮的逐条路由不完全一致（r02 一次判 `none`、一次判 `knowledge`），
+所以逐条路径不要当稳定行为引用，整体指标才是可比的。

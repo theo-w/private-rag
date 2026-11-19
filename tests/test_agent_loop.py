@@ -28,15 +28,19 @@ from private_rag.models import Citation
 # 记录最终回答生成被调用的次数与证据。用模块级列表而不是 fixture 的返回值，
 # 本项目的 pytest 不会把 autouse fixture 的返回值注入到测试参数里。
 final_calls: list[str] = []
+# 每次生成收到的「已判定缺失项」，用于断言充分性判断真的传到了生成侧
+final_missing: list[str] = []
 
 
 @pytest.fixture(autouse=True)
 def stub_final_answer(monkeypatch):
     """把最终回答生成换成替身，避免测试打到本机模型。"""
     final_calls.clear()
+    final_missing.clear()
 
-    def fake_final_answer(question, evidence, *, model=None, history=None):
+    def fake_final_answer(question, evidence, *, model=None, history=None, missing=""):
         final_calls.append(evidence)
+        final_missing.append(missing)
         return "基于证据的答案[1]"
 
     monkeypatch.setattr(runtime_module, "generate_final_answer", fake_final_answer)
@@ -513,3 +517,116 @@ class TestRuntimeAssembly:
         agent = build_agent_runtime(object(), sources_path=tmp_path / "none.yaml", model="自定义模型")
         assert agent.model == "自定义模型"
         assert agent.planner is None  # 留空表示运行时按 LlmPlanner 走
+
+
+class TestEvidenceSufficiency:
+    """拒答策略：证据撑不起问题要的结论时，宁可不答。"""
+
+    def _runtime(self, tmp_path, decision: StepDecision):
+        planner = ScriptedPlanner(decisions=[decision])
+        return make_runtime(tmp_path, [RecordingTool("kb_search")], planner), planner
+
+    def test_insufficient_decision_refuses_without_generating(self, tmp_path):
+        runtime, _ = self._runtime(
+            tmp_path,
+            StepDecision(
+                action="final",
+                sufficient=False,
+                missing="products 表没有产地与联系方式字段",
+                answer="根据现有数据，无法提供橙子的产地",
+                reason="查过了，库里没这一列",
+            ),
+        )
+        result = runtime.run("橙子的产地和供应商联系方式是什么？")
+
+        assert result.answer.startswith(REFUSAL)
+        # 缺什么都要写出来，否则用户不知道下一步该补什么
+        assert "products 表没有产地与联系方式字段" in result.answer
+        assert result.stop_reason == "insufficient_evidence"
+        # 关键是没再打最终生成：模型拿不到「补一段」的机会
+        assert final_calls == []
+
+    def test_declared_gap_is_passed_into_final_generation(self, tmp_path):
+        runtime, _ = self._runtime(
+            tmp_path,
+            StepDecision(action="final", sufficient=True, missing="保存方式", reason="价格有了"),
+        )
+        result = runtime.run("橙子多少钱，该怎么保存？")
+
+        assert result.stop_reason == "final"
+        assert final_missing == ["保存方式"]
+
+    def test_no_gap_means_plain_final_prompt(self, tmp_path):
+        # answer 留空才会走最终生成；此时没有缺口，传过去的 missing 就是空串
+        runtime, _ = self._runtime(tmp_path, StepDecision(action="final", answer=""))
+
+        assert runtime.run("问题").stop_reason == "final"
+        assert final_missing == [""]
+
+    def test_loop_without_final_decision_keeps_generating(self, tmp_path):
+        # 步数耗尽时不该被充分性判断牵连，仍按原口径基于已有证据作答
+        sql = RecordingTool("sql_query", data={"sql": "SELECT 1"})
+        planner = ScriptedPlanner(
+            route=RouteDecision(
+                intent="database", action={"tool": "sql_query", "args": {"sql": "SELECT 1"}}, reason="要数值"
+            ),
+            decisions=[
+                StepDecision(action="tool", tool="sql_query", args={"sql": "SELECT 1"}, reason="再查"),
+                StepDecision(action="tool", tool="sql_query", args={"sql": "SELECT 1"}, reason="还查"),
+            ],
+        )
+        runtime = make_runtime(tmp_path, [sql], planner, max_steps=1) if False else make_runtime(
+            tmp_path, [sql], planner
+        )
+        result = runtime.run("水果价格", options=AgentOptions(max_steps=1))
+
+        assert result.stop_reason == "max_steps"
+        assert len(final_calls) == 1
+
+    def test_stream_uses_the_same_refusal_rule(self, tmp_path):
+        planner = ScriptedPlanner(
+            decisions=[StepDecision(action="final", sufficient=False, missing="没有供应商表", reason="查不到")]
+        )
+        runtime = make_runtime(tmp_path, [RecordingTool("kb_search")], planner)
+
+        events = list(runtime.run_stream("供应商电话是多少？"))
+        done = [event for event in events if event["event"] == "done"][-1]
+
+        assert done["data"]["answer"].startswith(REFUSAL)
+        assert "没有供应商表" in done["data"]["answer"]
+        assert done["data"]["meta"]["stop_reason"] == "insufficient_evidence"
+        # 拒答不伪装成流式生成：没有 token 事件
+        assert [event for event in events if event["event"] == "token"] == []
+
+
+class TestDataDrivenFallbackRoute:
+    """模型不可用时的回退路由也要看得见库里有什么。"""
+
+    def test_route_hints_come_from_the_sql_catalog(self, tmp_path):
+        sql = RecordingTool("sql_query")
+        sql.catalog_terms = ["香蕉", "description"]
+        runtime = make_runtime(tmp_path, [RecordingTool("kb_search"), sql], ScriptedPlanner())
+
+        assert runtime._route_hints(runtime.registry) == ["香蕉", "description"]
+
+    def test_fallback_route_uses_catalog_entities(self, tmp_path):
+        sql = RecordingTool("sql_query")
+        sql.catalog_terms = ["香蕉"]
+        planner = ScriptedPlanner(route_error=RuntimeError("模型不可用"))
+        runtime = make_runtime(tmp_path, [RecordingTool("kb_search"), sql], planner)
+
+        result = runtime.run("香蕉到底能不能放冰箱保存？")
+
+        assert result.intent == "database"
+        assert [step.tool for step in tool_steps(result)] == ["sql_query"]
+
+    def test_doc_question_still_falls_back_to_kb(self, tmp_path):
+        sql = RecordingTool("sql_query")
+        sql.catalog_terms = ["香蕉"]
+        planner = ScriptedPlanner(route_error=RuntimeError("模型不可用"))
+        runtime = make_runtime(tmp_path, [RecordingTool("kb_search"), sql], planner)
+
+        result = runtime.run("精排为什么始终用原问题？")
+
+        assert result.intent == "knowledge"
+        assert [step.tool for step in tool_steps(result)] == ["kb_search"]

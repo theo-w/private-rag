@@ -48,6 +48,10 @@ class StepDecision:
     args: dict[str, Any] = field(default_factory=dict)
     reason: str = ""
     answer: str = ""
+    # 宣布可以作答时对「证据能否支撑问题要的结论」的判断：
+    # sufficient=False 表示问题要的那项事实证据里没有，应当拒答而不是硬凑
+    sufficient: bool = True
+    missing: str = ""
 
 
 class Planner:
@@ -113,7 +117,13 @@ class LlmPlanner(Planner):
         data = ask_json(prompt, model=self.model, num_predict=AGENT_PLANNER_TOKENS)
         action, payload, reason, answer = parse_decision(data)
         if action == "final":
-            return StepDecision(action="final", reason=reason, answer=answer)
+            return StepDecision(
+                action="final",
+                reason=reason,
+                answer=answer,
+                sufficient=bool(payload.get("sufficient", True)),
+                missing=str(payload.get("missing") or ""),
+            )
         return StepDecision(
             action="tool",
             tool=str(payload.get("tool") or ""),

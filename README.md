@@ -431,6 +431,10 @@ pip install pdfplumber rapidocr-onnxruntime
 
 意图分成 `knowledge` / `database` / `mixed` / `none` 四类。`none` 表示与知识库无关，直接按既有约定返回拒答文本，不做任何检索。
 
+路由器只看得到工具的 `description`，所以库里存着什么必须写进描述才可能判准意图：装配 `sql_query` 时会对白名单表做一次**有界采样**（列名 + 每个文本列少量样例值，总长受 `RAG_AGENT_CATALOG_CHARS` 限制，`RAG_AGENT_CATALOG_SAMPLES=0` 则只列列名不取样例），采样出的词同时作为关键词回退的补充线索。判意图的标准是「回答所需的事实住在哪一侧」，不是问法像不像技术查询：问一条业务记录自身的描述、备注、状态、时间，即使一个数字词都没有也算 `database`；只要有一侧被漏掉就选 `mixed`。代价是**样例值会进入 prompt**：业务数据敏感的库请把 `RAG_AGENT_CATALOG_SAMPLES` 设为 0，只让路由器看列名。
+
+证据够不够用由步进决策自己声明（`sufficient` / `missing`），不额外加一次判断调用：判不足时不进生成，直接返回拒答哨兵并写明缺少的信息，`stop_reason` 为 `insufficient_evidence`。生成侧同样写死「资料里没提到不等于不存在」，禁止用通用常识补全有据无据都行的事实；确实有缺口时回答第一行必须是拒答哨兵，好让「没查到」不被读成「不存在」。
+
 决策走 JSON 模式，路由与步进两次调用共用 `RAG_AGENT_PLANNER_TOKENS`（默认 2000）输出预算。本机默认模型是推理型，会先输出一段不可见的思考内容：预算给小了（实跑时用的 400）模型只吐思考、正文为空，路由就会整段回退到关键词判断。轨迹里会写明回退原因，看到「模型输出中没有 JSON 对象」就先怀疑这个预算。
 
 ### 命令行
@@ -470,7 +474,7 @@ curl -s 'http://127.0.0.1:8000/api/v1/traces?limit=5' | python3 -m json.tool
 curl -s http://127.0.0.1:8000/api/v1/traces/<trace_id> | python3 -m json.tool
 ```
 
-响应在 `/chat` 的 `session_id / answer / citations / meta / request_id` 之外多一个 `trace`（完整步骤）；`meta` 里给出 `intent / stop_reason / tool_calls / steps / evidence_blocks / context_chars / history_turns / trace_id`。`citations` 与回答里的 `[n]` 仍是一一对应，SQL 结果的引用复用 `table` 字段。`stop_reason` 取值：`final`（模型认为证据够了）、`max_steps`（步数用尽）、`context_budget`（证据字符预算用完）、`no_retrieval`（判定与知识库无关）、`generation_failed`（生成失败）。
+响应在 `/chat` 的 `session_id / answer / citations / meta / request_id` 之外多一个 `trace`（完整步骤）；`meta` 里给出 `intent / stop_reason / tool_calls / steps / evidence_blocks / context_chars / history_turns / trace_id`。`citations` 与回答里的 `[n]` 仍是一一对应，SQL 结果的引用复用 `table` 字段。`stop_reason` 取值：`final`（模型认为证据够了）、`max_steps`（步数用尽）、`context_budget`（证据字符预算用完）、`no_retrieval`（判定与知识库无关）、`insufficient_evidence`（判定证据不足，直接拒答）、`generation_failed`（生成失败）。
 
 降级行为（任何一层挂掉都不会让整个请求 500）：
 
@@ -522,6 +526,30 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --n
 15 条需要业务库的样本里 agentic 有 9 条真的引用 `demo.products#sql_query` 给出正确数据（单价、价格排序、维 C 对比、比平均价再筛），`full` 组 26 条一条都没碰过业务数据；`knowledge` 类 7 条两组逐项持平，工具循环没把纯文档问答做坏。代价是单条耗时约 4.2 倍（多次决策调用的模型开销占 68.8 秒，工具执行只占 2.4 秒）。
 
 量出来的两条真实短板：一是路由受问法影响——像「香蕉能不能放冰箱」这种读起来像生活常识的问题，决策模型判成 `knowledge` 去查文档（保存方法其实在 `products.description` 里），6 条样本因此没查到库；二是证据不足时 agentic 倾向作答而不是拒答，`refusal_accuracy` 从 1.000 掉到 0.250，其中 d06、r04 在没有知识库依据的情况下补了通用知识（苹果氧化、商业版定价），属于该拒答却作答。
+
+**v7.2 对这两条的改法与复跑**：路由判据换成「回答所需的事实住在哪一侧」，并在装配 `sql_query` 时把白名单表的
+列名与少量样例值有界采样进工具描述——库里到底存着什么，模型看不见就判不准，这不是问法的错；答与不答改由步进
+决策声明充分性，判不足就不进生成、直接返回拒答哨兵并写明缺哪一项（`stop_reason` 新增 `insufficient_evidence`），
+生成侧同时禁掉「用通用常识补全」和「资料没提到就等于不存在」两条偷懒路径。把判错的 9 条单独重跑
+（`eval/reports/v7_2_routing_report.md`）：6 条业务库样本全部改判 `database`/`mixed` 并真的引用
+`demo.products#sql_query`，3 条应拒答样本输出哨兵文本；同样子集均值 `source_hit` 0.000→1.000、
+`citation_rate` 0.500→1.000。全量 26 条复跑（同生成模型、同确定性口径，`eval/reports/v7_2_agent_report.md`）确认这不是子集效应：
+
+| 指标（`agent` 组） | v7.1 | v7.2 |
+|---|---:|---:|
+| `answer_rate` | 0.909 | 1.000 |
+| `refusal_accuracy` | 0.250 | 1.000 |
+| `source_hit` | 0.591 | 1.000 |
+| `evidence_hit@3` | 0.409 | 0.864 |
+| `mrr@3` | 0.348 | 0.811 |
+| `citation_rate` | 0.864 | 0.955 |
+| 单条平均耗时 | 71.2 秒 | 51.9 秒 |
+
+回归检查是这一轮最要紧的一条：`knowledge` 类 7 条的 `source_hit` 与 `evidence_hit@3` 两轮都是 1.000，
+并且这 7 条一次都没引用业务库，说明路由改动没有把纯文档问答带向查库。15 条需要业务库的样本里真的引用
+`demo.products` 的从 9 条升到 15 条，意图分布里第一次出现了 `database`（10 条）。仍未解决的两条：
+`mixed` 类的 `evidence_hit@3` 只到 0.400（还是 `@3` 窗口与 SELECT 列的口径吃掉），`none` 判据偏松——
+r01 直接判 `none` 拒答，绕过了「先检索再据证据拒答」这条正路。
 
 **Ragas 子集复核**（2026-11-19，26 条里的 6 条可回答样本 `k01`/`d01`/`d03`/`m03`/`s02`/`s04` ×
 `agent`/`full`，judge `qwen3.8:27b-mlx`，`git_commit = 9147bd3`，总耗时 3965 秒，
@@ -719,7 +747,7 @@ CI（`.github/workflows/ci.yml`）在每次 push 与 PR 上跑两个作业：
   其中 `test_readonly_index_ranks_like_lexical_index` 被排除：它要 `import LexicalIndex`，
   而 `retrieval/lexical.py` 模块级导入 `qdrant_client`；该条在 `tests` 作业里照常执行，覆盖没有丢。
 
-覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、OCR 与表格提取、PDF 加载器（文本/扫描件/表格/降级）、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4/v5 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。v7 agentic 部分另覆盖只读 SQL 护栏（写操作、多语句、越权表必须被拒，CTE 与子查询不能误拒）、工具层证据与引用统一编号、检索-行动循环（意图路由、步数与字符预算、无效工具名、模型不可用降级、决策 JSON 的输出预算与解析回退）、轨迹落盘与 `--list`/单条回放 CLI、`/chat/agent` 与 `/traces` 接口；决策器与工具都是注入的替身，同样不依赖 Ollama 与 Qdrant。
+覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、OCR 与表格提取、PDF 加载器（文本/扫描件/表格/降级）、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4/v5 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。v7 agentic 部分另覆盖只读 SQL 护栏（写操作、多语句、越权表必须被拒，CTE 与子查询不能误拒）、工具层证据与引用统一编号、检索-行动循环（意图路由、步数与字符预算、无效工具名、模型不可用降级、决策 JSON 的输出预算与解析回退）、轨迹落盘与 `--list`/单条回放 CLI、`/chat/agent` 与 `/traces` 接口；v7.2 另覆盖库内数据目录写进工具描述、采样词驱动关键词回退路由、证据充分性解析与拒答短路、缺口透传进最终提示词、路由提示词不含评估集实体；决策器与工具都是注入的替身，同样不依赖 Ollama 与 Qdrant。
 
 冒烟测试需要已入库并启动 Ollama：
 

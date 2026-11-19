@@ -93,6 +93,10 @@ AGENT_TOOL_CHARS = _env_int("RAG_AGENT_TOOL_CHARS", 3000)
 AGENT_CONTEXT_CHARS = _env_int("RAG_AGENT_CONTEXT_CHARS", 7000)
 # 运行时 SQL 最多返回多少行
 AGENT_SQL_ROWS = _env_int("RAG_AGENT_SQL_ROWS", 20)
+# 写进工具描述的「库内数据目录」字符上限：列名加少量样例值，路由器靠它判断事实是否在表里
+AGENT_CATALOG_CHARS = _env_int("RAG_AGENT_CATALOG_CHARS", 420)
+# 每个文本列最多取几个样例值；0 表示只列列名不取样例（换成大表时用它关掉取样）
+AGENT_CATALOG_SAMPLES = _env_int("RAG_AGENT_CATALOG_SAMPLES", 4)
 # 决策 JSON 的输出预算。推理型模型会先输出一段不可见的思考内容，
 # 预算给小了正文就是空的，路由会整段回退到关键词判断。
 AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)

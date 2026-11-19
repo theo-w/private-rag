@@ -49,24 +49,35 @@ DATABASE_HINTS: tuple[str, ...] = (
     "select",
 )
 
-ROUTER_PROMPT = """你是检索路由器。判断下面这个问题该用哪个工具来取证，不要直接回答。
+ROUTER_PROMPT = """你是检索路由器。判断下面这个问题该用哪个工具取证，不要直接回答。
 
 可用工具：
 {tool_specs}
 
-意图取值：
-- knowledge：答案在知识库文档里（概念、流程、说明、结论）
-- database：需要业务库里的精确数值（数量、价格、排名、统计）
-- mixed：既要文档说明，也要库里的数值
-- none：与知识库和数据库都无关，或信息不足以取证
+判意图只看「回答所需的事实住在哪一侧」，不看问法像不像技术查询：
+- knowledge：答案在知识库文档里（概念、流程、架构、说明、结论）
+- database：答案在业务表的字段里——不只是数值，描述、备注、状态、时间这类文本字段同样算
+- mixed：问题里有多个子问题，分别需要文档与业务表
+- none：与知识库和业务表都无关，两侧都不可能取证
 
-只输出 JSON，格式为：
-{{"intent": "knowledge", "reason": "一句话说明为什么", "action": {{"tool": "工具名", "args": {{"参数": "值"}}}}}}
+硬性规则：
+1. 问题问的是某条业务记录自身的属性（价格、库存、描述、备注、更新时间等），即使问得很口语、一个数字词都没有，也选 database。
+2. 工具描述里的「库内数据」出现了问题指名的实体或字段时，先怀疑事实在表里，不要在文档里找。
+3. 多个子问题逐个核对：只要有一侧被漏掉就选 mixed，并把缺口更大的一侧作为首个动作。
+4. 拿不准且 sql_query 可用时选 mixed——多查一次的代价远小于漏查。
+5. action 必须是上面列出的工具之一，参数按该工具示例填写；检索类查询保留问题里的关键实体与限定条件；选 sql_query 时给出一条可执行的单条 SELECT。
+6. intent 为 none 时 action 留空对象 {{}}。
+7. reason 用一句中文说明判断依据，不要复述问题。
 
-要求：
-1. action 必须是上面列出的工具之一，参数按该工具的示例填写；检索类查询要保留问题里的关键实体与限定条件。
-2. intent 为 none 时 action 留空对象 {{}}。
-3. reason 用一句中文说明判断依据，不要复述问题。
+判断示例（下面出现的表与实体都是虚构的，只用来示范判断方法）：
+问题：这批订单里的加急件都发货了吗？
+{{"intent": "database", "reason": "问的是订单记录自身的状态字段，与文档无关", "action": {{"tool": "sql_query", "args": {{"sql": "SELECT id, status FROM orders WHERE level = '加急' LIMIT 20"}}}}}}
+问题：系统的库位编号规则是什么？
+{{"intent": "knowledge", "reason": "编号规则属于系统文档说明", "action": {{"tool": "kb_search", "args": {{"query": "库位编号规则"}}}}}}
+问题：职级最高的员工是谁？公司的考勤制度又是怎么规定的？
+{{"intent": "mixed", "reason": "职级要查员工表，考勤制度在制度文档，缺一不可", "action": {{"tool": "sql_query", "args": {{"sql": "SELECT name, level FROM employees ORDER BY level DESC LIMIT 5"}}}}}}
+问题：明天上午北京会下雨吗？
+{{"intent": "none", "reason": "天气既不在知识库文档里，也不在业务表中", "action": {{}}}}
 
 对话历史（仅用于理解指代）：
 {history_section}用户问题：
@@ -87,23 +98,32 @@ STEP_PROMPT = """你是检索行动规划器。基于已有证据决定「再调
 只输出 JSON，格式为：
 {{"action": "tool", "tool": "工具名", "args": {{"参数": "值"}}, "reason": "一句话说明为什么还要再查"}}
 或：
-{{"action": "final", "answer": "最终回答"}}
+{{"action": "final", "sufficient": true, "missing": "", "answer": "最终回答"}}
 
 要求：
-1. 证据已足够回答就选 final，answer 用中文，并在相关句子后用 [编号] 标注依据；没有依据的部分不要编造。
-2. 只有当缺少关键数据时才选 tool，并且必须换一个新角度（换查询词、换 SQL 条件），不要重复已做过的调用。
-3. 只能使用上面列出的工具。
-4. 这是第 {steps_used} 步，最多 {max_steps} 步；步数将尽时优先给出结论。
+1. sufficient 表示现有证据能否支撑问题要的那项事实。不能支撑就填 false，并在 missing 里一句话写清缺哪一项，此时 answer 留空字符串——宁可拒答，不要硬凑。
+2. 只缺问题的某一部分时 sufficient 填 true，把缺的那部分写进 missing，其余部分照常作答。
+3. 「资料里没提到」不等于「不存在」：不得根据查不到就断言某事物不存在、没有或不可能，这类结论必须有明确写着它的证据。
+4. 不要用通用常识补全证据里没有的事实。
+5. 证据足够就选 final，answer 用中文，在相关句子后用 [编号] 标注依据。
+6. 只有当缺少关键数据时才选 tool，并且必须换一个新角度（换查询词、换 SQL 条件），不要重复已做过的调用。
+7. 只能使用上面列出的工具。
+8. 这是第 {steps_used} 步，最多 {max_steps} 步；步数将尽时也要守住第 1 条——证据不足就选 final 并把 sufficient 填 false。
 
 对话历史（仅用于理解指代）：
 {history_section}用户问题：
 {question}
 """
 
-FINAL_PROMPT = """你是知识库问答助手，只根据下面带编号的证据回答，证据之外的事实一律不要写。
-请在相关句子后用 [编号] 标注依据，例如 [1]；不同来源矛盾时说明矛盾，不要自行取舍。
-如果证据不足以回答，直接回复【资料中没有相关信息】，并说明还缺什么。
-{history_section}证据：
+FINAL_PROMPT = """你是知识库问答助手，只根据下面带编号的证据回答。
+
+接地与拒答规则（必须遵守）：
+1. 证据之外的事实一句都不要写，包括通用常识、行业惯例、你自己掌握的背景知识。
+2. 「证据里没提到」不等于「不存在」；除非证据明确写了，不要断言某事物不存在、没有或做不到。
+3. 问题要的那项事实证据里没有，就把【资料中没有相关信息】放在回答第一行，再用一句话说明已查到什么、还缺什么。
+4. 问题包含多个子问题时逐个处理：有证据的部分照常作答并标注 [编号]，缺证据的那一部分以【资料中没有相关信息】开头说明。
+5. 相关句子后用 [编号] 标注依据，例如 [1]；不同来源矛盾时说明矛盾，不要自行取舍。
+{missing_rule}{history_section}证据：
 {evidence}
 
 用户问题：
@@ -210,8 +230,20 @@ def build_final_prompt(
     question: str,
     evidence: str,
     history: Optional[History] = None,
+    *,
+    missing: str = "",
 ) -> str:
+    # 规划器已判定某一子问题缺证据时，把缺口写进提示词：哨兵从「可选」变成硬要求
+    missing_rule = ""
+    gap = " ".join(str(missing or "").split())
+    if gap:
+        missing_rule = (
+            f"本轮已判定证据不足的部分：{gap[:200]}\n"
+            "上面第 3、4 条对这一部分是硬要求：回答第一行必须是【资料中没有相关信息】，"
+            "说明该项缺失，不得用别的内容替代。\n"
+        )
     return FINAL_PROMPT.format(
+        missing_rule=missing_rule,
         history_section=_history_section(history),
         evidence=evidence or "（没有收集到任何证据）",
         question=question[:MAX_QUESTION_CHARS],
@@ -224,12 +256,13 @@ def generate_final_answer(
     *,
     model: str = AGENT_LLM_MODEL,
     history: Optional[History] = None,
+    missing: str = "",
 ) -> str:
     """基于已收集的证据生成最终回答；没有证据时不调用模型，直接拒答。"""
     if not evidence.strip():
         return REFUSAL
     llm = ChatOllama(model=model, num_ctx=8192, keep_alive="10m")
-    response = llm.invoke(build_final_prompt(question, evidence, history))
+    response = llm.invoke(build_final_prompt(question, evidence, history, missing=missing))
     text = _content_text(response.content).strip()
     return text or REFUSAL
 
@@ -240,6 +273,7 @@ def stream_final_answer(
     *,
     model: str = AGENT_LLM_MODEL,
     history: Optional[History] = None,
+    missing: str = "",
 ) -> "Iterator[str]":
     """基于已收集的证据流式生成最终回答；没有证据时直接 yield 拒答。"""
     from typing import Iterator
@@ -248,7 +282,7 @@ def stream_final_answer(
         yield REFUSAL
         return
     llm = ChatOllama(model=model, num_ctx=8192, keep_alive="10m")
-    prompt = build_final_prompt(question, evidence, history)
+    prompt = build_final_prompt(question, evidence, history, missing=missing)
     for response in llm.stream(prompt):
         text = _content_text(response.content).strip()
         if text:
@@ -279,27 +313,59 @@ def parse_route(data: dict) -> tuple[str, dict, str]:
     return intent, {"tool": tool, "args": args}, reason
 
 
+# 模型把 sufficient 写成字符串时的假值写法；缺字段一律按「足够」处理，
+# 被截断的 JSON 与老格式因此维持原有行为，不会因为读不到字段就整段拒答。
+_FALSE_WORDS = {"false", "no", "0", "off", "否", "假", "不足", "不够"}
+
+
+def _sufficiency(data: dict) -> dict:
+    """取 (sufficient, missing)：证据是否足以支撑问题要的结论，以及缺哪一项。"""
+    raw = data.get("sufficient")
+    if raw is None:
+        sufficient = True
+    elif isinstance(raw, str):
+        sufficient = raw.strip().lower() not in _FALSE_WORDS
+    else:
+        sufficient = bool(raw)
+    missing = " ".join(str(data.get("missing") or "").split())[:200]
+    return {"sufficient": sufficient, "missing": missing}
+
+
 def parse_decision(data: dict) -> tuple[str, dict, str, str]:
     """从步进 JSON 中取 (action, payload, reason, answer)。"""
     action = str(data.get("action") or "").strip().lower()
     if action not in {"tool", "final"}:
         # 有的模型会直接回一段文本，当成最终回答处理
         answer = " ".join(str(data.get("answer") or "").split())
-        return ("final", {}, "", answer) if answer else ("final", {}, "", "")
+        return (
+            ("final", {"sufficient": True, "missing": ""}, "", answer)
+            if answer
+            else ("final", {"sufficient": True, "missing": ""}, "", "")
+        )
     if action == "final":
         answer = str(data.get("answer") or "").strip()
         reason = " ".join(str(data.get("reason") or "").split())[:300]
-        return "final", {}, reason, answer
+        return "final", _sufficiency(data), reason, answer
     tool = str(data.get("tool") or "").strip()
     args = _clean_args(data.get("args"))
     reason = " ".join(str(data.get("reason") or "").split())[:300]
     return "tool", {"tool": tool, "args": args}, reason, ""
 
 
-def heuristic_route(question: str, tool_names: Sequence[str]) -> tuple[str, dict, str]:
-    """模型不可用时的回退路由：靠关键词在知识库与数据库之间选一条路。"""
+def heuristic_route(
+    question: str,
+    tool_names: Sequence[str],
+    *,
+    extra_hints: Sequence[str] = (),
+) -> tuple[str, dict, str]:
+    """模型不可用时的回退路由：靠关键词在知识库与数据库之间选一条路。
+
+    `extra_hints` 传库内数据目录里的实体与列名，口语化问题（「香蕉能不能放冰箱」）
+    也能落到 sql_query，不再依赖「多少/排名」这类数字词。
+    """
     text = (question or "").lower()
-    hits = [hint for hint in DATABASE_HINTS if hint in text]
+    hints = list(DATABASE_HINTS) + [str(hint).lower() for hint in extra_hints if str(hint).strip()]
+    hits = [hint for hint in hints if hint and hint in text]
     names = list(tool_names)
     sql_available = "sql_query" in names
 
