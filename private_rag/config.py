@@ -97,6 +97,10 @@ AGENT_SQL_ROWS = _env_int("RAG_AGENT_SQL_ROWS", 20)
 AGENT_CATALOG_CHARS = _env_int("RAG_AGENT_CATALOG_CHARS", 420)
 # 每个文本列最多取几个样例值；0 表示只列列名不取样例（换成大表时用它关掉取样）
 AGENT_CATALOG_SAMPLES = _env_int("RAG_AGENT_CATALOG_SAMPLES", 4)
+
+# 路由器判 none 时不再直接拒答：先做一次知识库检索验证，拒答必须建立在证据上。
+# 置 1 退回旧行为（判成 none 就跳过检索直接拒答）。
+AGENT_NONE_PROBE = not _env_flag("RAG_DISABLE_AGENT_NONE_PROBE")
 # 决策 JSON 的输出预算。推理型模型会先输出一段不可见的思考内容，
 # 预算给小了正文就是空的，路由会整段回退到关键词判断。
 AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)

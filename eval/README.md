@@ -328,7 +328,7 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
 `evidence` 也从同一份种子逐字校验——所以 d01/d04/d06 的改判里，有一部分等于「把标注答案搬到路由器眼前」。
 真实业务库的样例值不会刚好是用户要问的那项事实，因此这 9 条的提升幅度在本数据集上偏乐观：能确定的是
 机制本身（让路由器看见库里存着什么）有效，不是提升的具体数字。
-`none` 判据偏松是下一步要收的地方。另外 m01 的文档那一半仍然没查出来——模型把「这个项目」当成缺少对话上下文，而评估按单轮执行、本来就没覆盖指代消解。
+`none` 判据偏松的问题同日已经收紧，机制与复跑见下一节。另外 m01 的文档那一半仍然没查出来——模型把「这个项目」当成缺少对话上下文，而评估按单轮执行、本来就没覆盖指代消解。
 
 ### 全量 26 条复跑（2026-11-19，v7.2）
 
@@ -365,3 +365,47 @@ r02 是 `context_budget`（12 段证据后用尽字符预算）、r01 是 `none`
 两点读数限制：`mixed` 类 `evidence_hit@3` 仍只有 0.400，原因还是上面写的 `@3` 窗口与 SELECT 列口径；
 模型有随机性，9 条子集那次与全量这轮的逐条路由不完全一致（r02 一次判 `none`、一次判 `knowledge`），
 所以逐条路径不要当稳定行为引用，整体指标才是可比的。
+
+### `none` 判据收紧复跑（2026-11-20，`v7.2-none-gate`）
+
+只改了一处机制加一段提示词：路由判成 `none` 时不再直接拒答，而是先用原问题做一次知识库验证检索——查到证据就照常作答、并把上报意图改写成 `knowledge`，查不到才返回拒答哨兵、`stop_reason` 记 `no_evidence`（与压根没检索的 `no_retrieval` 区分开）；提示词把 `none` 的准入收紧到「明确在本系统之外」的实时信息、天气、新闻、外部网站内容、主观偏好。同一份评估集、同一生成模型（`qwen3.8:27b-mlx`）、同一确定性指标口径，只改代码不改数据，26 条 `n_errors` 0。
+
+```bash
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
+  --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 \
+  --output eval/reports/v7_2_nonegate_report.md --json-output eval/reports/v7_2_nonegate_report.json
+```
+
+| 指标 | v7.2 | none 收紧后 | 差值 |
+|---|---:|---:|---:|
+| `answer_rate` | 1.000 | 0.955 | -0.045 |
+| `refusal_accuracy` | 1.000 | 1.000 | 0 |
+| `source_hit` | 1.000 | 0.955 | -0.045 |
+| `evidence_hit@3` / `evidence_recall@3` | 0.864 | 0.818 | -0.045 |
+| `context_precision@3` | 0.621 | 0.576 | -0.045 |
+| `mrr@3` | 0.811 | 0.765 | -0.046 |
+| `citation_rate` / `citation_validity` | 0.955 | 1.000 | +0.045 |
+| `avg_context_chars` | 1358 | 1432 | +74 |
+| `avg_tool_calls` / `avg_tool_steps` | 1.31 / 3.38 | 1.42 / 3.62 | +0.11 / +0.23 |
+| 检索均值 / 生成均值 | 2.4 秒 / 49.4 秒 | 1.9 秒 / 60.9 秒 | -0.5 / +11.5 秒 |
+| 单条平均耗时 | 51.9 秒 | 62.8 秒 | +10.9 秒 |
+
+这一轮真正要验收的是路径而不是分数，26 条里 20 条逐条完全没变，变了 6 条：
+
+| 样本 | 意图 | `stop_reason` | 工具调用 | 是否拒答 |
+|---|---|---|---|---|
+| r01 橙子的产地和供应商联系方式 | `none`→`knowledge` | `no_retrieval`→`insufficient_evidence` | 0→2 | 仍拒答，但改为有据拒答 |
+| m03 最便宜的水果 + 精排给几条 | `mixed` | `final`→`planner_unavailable` | 2 | 否→是（本轮唯一退化） |
+| m01 | `database`→`mixed` | `final` | 1→2 | 否 |
+| d02 | `mixed`→`database` | `final` | 1 | 否 |
+| k02 | `knowledge` | `final`→`planner_unavailable` | 1 | 否，答案与基线一致 |
+| r03 | `mixed` | `insufficient_evidence`→`planner_unavailable` | 1→2 | 仍拒答 |
+
+分布：意图 `knowledge`9 / `database`10 / `mixed`6 / `none`1 → `knowledge`10 / `database`10 / `mixed`6 / `none`0；`stop_reason` `final`21 / `no_retrieval`1 / `insufficient_evidence`2 / `context_budget`1 / `planner_unavailable`1 → `final`19 / `insufficient_evidence`2 / `context_budget`1 / `planner_unavailable`4。改动要达到的效果到位了：`none` 与 `no_retrieval` 双双归零，也就是「一次都没检索就拒答」这条路径在全量评估里不再出现，4 条应拒答样本仍全部以哨兵文本开头。r01 从「判 `none`、零检索、闷头拒答」变成「查了两次、按缺口拒答并写明缺什么」（回答里点出 `demo.products` 只有六列、不含产地与供应商字段）。
+
+四条读数限制，引用这轮数字时一并带上：
+
+- 整体指标的回落恰好等于 m03 一条的分量（可答样本 22 条，1/22≈0.045，与四项 -0.045 对得上），不是普遍退化。
+- m03 判的是 `mixed`，`none` 探测在这条上不会触发；它的退化发生在 JSON 解析失败那次运行里，SQL 只回了一条记录（香蕉 6.5）后模型按 v7.2 的充分性判定拒答「最便宜」这一半。与本轮改动没有因果路径，但也不把「无关」写成结论。
+- `planner_unavailable` 1→4 只作观察记录，不作归因（模型随机性与提示词改动同时在里面）；其中 k02 解析失败仍给出了与基线一致的答案，说明解析失败本身不必然导致退化。
+- 耗时上升同样含生成侧随机性（检索均值反而从 2.4 秒降到 1.9 秒），机制上的成本只有「真正无关的问题多一次 `kb_search`」，全局体现为平均工具调用 1.31→1.42。`no_evidence` 这个新增取值由单测覆盖，这一轮 26 条没有触发（r01 的验证检索有命中）。

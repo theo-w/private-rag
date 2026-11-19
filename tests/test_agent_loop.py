@@ -184,18 +184,70 @@ class TestRouting:
         assert [c.index for c in result.citations] == [1, 2]
         assert result.evidence_blocks == 2
 
-    def test_intent_none_skips_retrieval(self, tmp_path):
+    def test_intent_none_probes_kb_before_refusing(self, tmp_path):
+        """none 不是终局判定：先做一次知识库检索，拒答必须建立在证据上。"""
+        kb = RecordingTool(blocks=[], summary="没有匹配材料")
+        planner = ScriptedPlanner(
+            route=RouteDecision(intent="none", action={}, reason="与知识库无关"),
+            decisions=[StepDecision(action="final", reason="查过了，材料里没有", answer="")],
+        )
+        result = make_runtime(tmp_path, [kb], planner).run("本月采购成本是多少")
+
+        assert kb.calls == [{"query": "本月采购成本是多少"}]
+        assert result.tool_calls == 1
+        # 拒答理由从「根本没检索」变成「查过了没有证据」
+        assert result.stop_reason == "no_evidence"
+        assert result.answer == REFUSAL
+        assert result.intent == "none"
+        assert final_calls == []
+
+    def test_none_probe_that_finds_evidence_answers_as_knowledge(self, tmp_path):
         kb = RecordingTool()
         planner = ScriptedPlanner(
-            route=RouteDecision(intent="none", action={}, reason="与知识库无关")
+            route=RouteDecision(intent="none", action={}, reason="误判成与两侧都无关"),
+            decisions=[StepDecision(action="final", reason="证据够了", answer="脚本答案")],
         )
-        result = make_runtime(tmp_path, [kb], planner).run("今天天气怎么样")
+        result = make_runtime(tmp_path, [kb], planner).run("这个项目有 iOS 客户端吗")
+
+        assert len(kb.calls) == 1
+        # 查到了东西就按实际作答依据报意图，none 只是路由那一刻的判断
+        assert result.intent == "knowledge"
+        assert result.stop_reason == "final"
+        assert result.answer == "脚本答案"
+
+    def test_stream_probes_kb_before_refusing_too(self, tmp_path):
+        kb = RecordingTool(blocks=[], summary="没有匹配材料")
+        planner = ScriptedPlanner(
+            route=RouteDecision(intent="none", action={}, reason="与知识库无关"),
+            decisions=[StepDecision(action="final", reason="查过了，材料里没有", answer="")],
+        )
+        events = list(make_runtime(tmp_path, [kb], planner).run_stream("本月采购成本是多少"))
+        done = [event for event in events if event["event"] == "done"][-1]
+
+        assert kb.calls == [{"query": "本月采购成本是多少"}]
+        assert done["data"]["meta"]["stop_reason"] == "no_evidence"
+        assert done["data"]["answer"].startswith(REFUSAL)
+        assert [event for event in events if event["event"] == "token"] == []
+
+    def test_none_probe_can_be_turned_off(self, tmp_path):
+        kb = RecordingTool()
+        planner = ScriptedPlanner(route=RouteDecision(intent="none", action={}, reason="与知识库无关"))
+        result = make_runtime(tmp_path, [kb], planner, none_probe=False).run("今天天气怎么样")
 
         assert kb.calls == []
         assert result.tool_calls == 0
         assert result.stop_reason == "no_retrieval"
         assert result.answer == REFUSAL
-        assert final_calls == []
+
+    def test_none_probe_needs_the_kb_tool(self, tmp_path):
+        """只有 sql_query 时探测做不了（写不出可靠的问题查询），仍按直接拒答处理。"""
+        sql = RecordingTool("sql_query")
+        planner = ScriptedPlanner(route=RouteDecision(intent="none", action={}, reason="外部事实"))
+        result = make_runtime(tmp_path, [sql], planner).run("明天会下雨吗")
+
+        assert sql.calls == []
+        assert result.stop_reason == "no_retrieval"
+        assert result.answer == REFUSAL
 
     def test_planner_failure_falls_back_to_heuristic(self, tmp_path):
         kb = RecordingTool()
