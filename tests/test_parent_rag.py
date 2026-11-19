@@ -215,3 +215,78 @@ def test_retrieved_chunk_from_payload_supports_legacy_and_parent():
     assert current.parent_text == "父块"
     assert current.parent_index == 0
     assert current.dense_score == 0.9
+
+
+def test_list_preserved_as_unit():
+    """列表引导句与列表本体不应被截断到不同父块。"""
+    intro = "这里有五个关键角色：\n"
+    items = "\n".join(f"- 角色{i}：描述{i}" for i in range(1, 6))
+    text = intro + items
+
+    document = _document(text)
+    children = split_parent_child(
+        document,
+        parent_splitter=build_splitter(200, 0),
+        child_splitter=build_splitter(70, 10),
+    )
+
+    assert children
+    # 整个列表应落在同一个父块内（不超过 200 字符）
+    parent_texts = {child.parent_text for child in children}
+    assert len(parent_texts) == 1
+    parent_text = list(parent_texts)[0]
+    # 父块应包含引导句和所有列表项
+    assert "关键角色" in parent_text
+    assert "角色5" in parent_text
+
+
+def test_table_preserved_as_unit():
+    """Markdown 表格应整体保留，不跨行截断。"""
+    text = (
+        "以下是产品列表：\n"
+        "| 名称 | 价格 |\n"
+        "|------|------|\n"
+        "| 苹果 | 5 元 |\n"
+        "| 香蕉 | 3 元 |\n"
+        "| 橙子 | 8 元 |\n"
+    )
+
+    document = _document(text)
+    children = split_parent_child(
+        document,
+        parent_splitter=build_splitter(200, 0),
+        child_splitter=build_splitter(70, 10),
+    )
+
+    assert children
+    parent_texts = {child.parent_text for child in children}
+    assert len(parent_texts) == 1
+    parent_text = list(parent_texts)[0]
+    assert "苹果" in parent_text
+    assert "橙子" in parent_text
+
+
+def test_heading_forces_boundary():
+    """标题应作为硬边界，切分点在标题处。"""
+    text = (
+        "# 第一章\n"
+        "第一章内容。" * 20 + "\n\n"
+        "# 第二章\n"
+        "第二章内容。" * 20
+    )
+
+    document = _document(text)
+    children = split_parent_child(
+        document,
+        parent_splitter=build_splitter(200, 0),
+        child_splitter=build_splitter(70, 10),
+    )
+
+    assert children
+    parent_texts = [child.parent_text for child in children]
+    # 应至少有两个父块，分别以不同标题开头
+    headings_found = set()
+    for pt in parent_texts:
+        if pt.startswith("# "):
+            headings_found.add(pt.split("\n")[0])
+    assert len(headings_found) >= 2

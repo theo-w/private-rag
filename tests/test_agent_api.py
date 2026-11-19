@@ -116,6 +116,16 @@ class FakeRuntime:
             trace=trace,
         )
 
+    def run_stream(self, question, *, options=None, history=None, request_id="", session_id=""):
+        """模拟 run_stream 的 SSE 事件流。"""
+        yield {"event": "session", "data": {"session_id": session_id, "request_id": request_id}}
+        yield {"event": "route", "data": {"intent": "database", "tool": "sql_query", "reason": "问的是价格", "elapsed_ms": 2}}
+        yield {"event": "step", "data": {"index": 1, "tool": "sql_query", "args": {"sql": "SELECT 1"}, "reason": "取数值", "ok": True, "rows": 1, "evidence_blocks": 1, "elapsed_ms": 3}}
+        yield {"event": "citations", "data": {"citations": [{"index": 1, "title": "demo", "source_type": "sql", "source_uri": "demo#sql_query", "snippet": "banana | 3.5", "table": "demo"}], "retrieved": 1, "context_chars": 30}}
+        yield {"event": "token", "data": {"text": "香蕉"}}
+        yield {"event": "token", "data": {"text": " 3.5 元[1]"}}
+        yield {"event": "done", "data": {"answer": "香蕉 3.5 元[1]", "citations": [], "meta": {"intent": "database", "stop_reason": "final", "tool_calls": 1, "steps": 1, "evidence_blocks": 1, "context_chars": 30, "elapsed_ms": 5, "trace_id": "trace0001"}, "request_id": request_id}}
+
 
 def build_client(tmp_path=None, *, ready=True, with_agent=True):
     app = create_app(
