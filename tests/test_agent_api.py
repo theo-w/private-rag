@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 
 from fastapi.testclient import TestClient
@@ -46,6 +47,7 @@ class FakeRuntime:
 
     def __init__(self):
         self.calls: list[dict] = []
+        self.stream_calls: list[dict] = []
 
     def run(self, question, *, options=None, history=None, request_id="", session_id=""):
         self.calls.append(
@@ -118,6 +120,15 @@ class FakeRuntime:
 
     def run_stream(self, question, *, options=None, history=None, request_id="", session_id=""):
         """模拟 run_stream 的 SSE 事件流。"""
+        self.stream_calls.append(
+            {
+                "question": question,
+                "options": options,
+                "history": list(history or []),
+                "request_id": request_id,
+                "session_id": session_id,
+            }
+        )
         yield {"event": "session", "data": {"session_id": session_id, "request_id": request_id}}
         yield {"event": "route", "data": {"intent": "database", "tool": "sql_query", "reason": "问的是价格", "elapsed_ms": 2}}
         yield {"event": "step", "data": {"index": 1, "tool": "sql_query", "args": {"sql": "SELECT 1"}, "reason": "取数值", "ok": True, "rows": 1, "evidence_blocks": 1, "elapsed_ms": 3}}
@@ -232,6 +243,108 @@ class TestAgentChat:
             session_id = client.post("/api/v1/sessions", json={"title": "采购"}).json()["session_id"]
             body = chat(client, session_id=session_id).json()
         assert body["session_id"] == session_id
+
+
+def parse_sse(body: str) -> list[tuple[str, dict]]:
+    """把 SSE 响应体解析成 (事件名, data) 列表。"""
+    events: list[tuple[str, dict]] = []
+    for block in body.split("\n\n"):
+        name = ""
+        data: dict = {}
+        for line in block.splitlines():
+            if line.startswith("event: "):
+                name = line[len("event: "):]
+            elif line.startswith("data: "):
+                data = json.loads(line[len("data: "):])
+        if name:
+            events.append((name, data))
+    return events
+
+
+def stream_chat(client, question="最便宜的香蕉多少钱", **extra):
+    return client.post("/api/v1/chat/agent/stream", json={"question": question, **extra})
+
+
+class TestAgentChatStream:
+    """`/chat/agent/stream` 的事件顺序与会话写入。"""
+
+    def test_event_order_and_done_answer(self, tmp_path):
+        client, _ = build_client(tmp_path)
+        with client:
+            response = stream_chat(client)
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+
+        events = parse_sse(response.text)
+        assert [name for name, _ in events] == [
+            "session",
+            "route",
+            "step",
+            "citations",
+            "token",
+            "token",
+            "done",
+        ]
+        done = events[-1][1]
+        assert done["answer"] == "香蕉 3.5 元[1]"
+        assert done["meta"]["intent"] == "database"
+        assert done["meta"]["history_turns"] == 0
+
+    def test_turn_saved_to_session(self, tmp_path):
+        """假运行时的 done 事件里 citations 是空的，写回的引用只能来自 citations 事件。"""
+        client, _ = build_client(tmp_path)
+        with client:
+            session_id = parse_sse(stream_chat(client).text)[0][1]["session_id"]
+            detail = client.get(f"/api/v1/sessions/{session_id}").json()
+
+        messages = detail["messages"]
+        assert [m["role"] for m in messages] == ["user", "assistant"]
+        assert messages[0]["content"] == "最便宜的香蕉多少钱"
+        assert messages[1]["content"] == "香蕉 3.5 元[1]"
+        citations = messages[1]["citations"]
+        assert len(citations) == 1
+        assert citations[0]["source_uri"] == "demo#sql_query"
+        assert citations[0]["table"] == "demo"
+
+    def test_history_forwarded_on_next_turn(self, tmp_path):
+        client, app = build_client(tmp_path)
+        with client:
+            session_id = parse_sse(stream_chat(client).text)[0][1]["session_id"]
+            second_resp = stream_chat(client, "那应该怎么保存", session_id=session_id)
+
+        first, second = app.state.agent_runtime.stream_calls
+        assert parse_sse(second_resp.text)[-1][1]["meta"]["history_turns"] == 1
+        assert first["history"] == []
+        assert second["history"] == [
+            ("user", "最便宜的香蕉多少钱"),
+            ("assistant", "香蕉 3.5 元[1]"),
+        ]
+        assert second["session_id"] == session_id
+
+    def test_stream_failure_writes_no_history(self, tmp_path):
+        """异常那一轮不写会话，免得半截答案污染下一轮。"""
+
+        class BrokenRuntime(FakeRuntime):
+            def run_stream(
+                self, question, *, options=None, history=None, request_id="", session_id=""
+            ):
+                yield {
+                    "event": "session",
+                    "data": {"session_id": session_id, "request_id": request_id},
+                }
+                raise RuntimeError("模型中途断开")
+
+        client, app = build_client(tmp_path)
+        app.state.agent_runtime = BrokenRuntime()
+        with client:
+            response = stream_chat(client)
+            events = parse_sse(response.text)
+            session_id = events[0][1]["session_id"]
+            detail = client.get(f"/api/v1/sessions/{session_id}").json()
+
+        assert events[-1][0] == "error"
+        assert events[-1][1]["message"] == "模型中途断开"
+        assert detail["messages"] == []
 
 
 class TestAgentChatValidation:

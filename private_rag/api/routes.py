@@ -432,6 +432,20 @@ def _sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _citation_from_payload(data: dict) -> Citation:
+    """把 SSE 里 `asdict` 过的引用还原成 `Citation`；会话历史要存原对象。"""
+    return Citation(
+        index=int(data.get("index") or 0),
+        title=str(data.get("title") or ""),
+        source_type=str(data.get("source_type") or ""),
+        source_uri=str(data.get("source_uri") or ""),
+        snippet=str(data.get("snippet") or ""),
+        page=data.get("page"),
+        table=data.get("table"),
+        score=data.get("score"),
+    )
+
+
 @router.post("/chat/agent/stream", summary="Agentic 问答 SSE 流式输出")
 def chat_agent_stream(
     payload: AgentChatRequest,
@@ -450,9 +464,14 @@ def chat_agent_stream(
     request_id = request_id_of(request)
 
     def event_generator() -> Iterator[str]:
+        # 边转发边攒最终回答与引用：done 缺字段时用 token 事件兜底
+        answer_parts: list[str] = []
+        answer = ""
+        citation_payloads: list[dict] = []
         try:
             with session.lock:
                 history = session.history_for_prompt()
+                history_turns = len(history) // 2
                 for event_dict in agent.run_stream(
                     payload.question,
                     options=options,
@@ -460,11 +479,31 @@ def chat_agent_stream(
                     request_id=request_id,
                     session_id=session.session_id,
                 ):
-                    yield _sse_event(event_dict["event"], event_dict["data"])
+                    name = str(event_dict["event"])
+                    data = event_dict["data"]
+                    if name == "token":
+                        answer_parts.append(str(data.get("text") or ""))
+                    elif name == "citations":
+                        citation_payloads = list(data.get("citations") or [])
+                    elif name == "done":
+                        answer = str(data.get("answer") or "") or "".join(answer_parts).strip()
+                        citation_payloads = (
+                            list(data.get("citations") or []) or citation_payloads
+                        )
+                        # 与非流式端点一样回报历史轮数，演示页的「历史轮次」才有值
+                        meta = data.get("meta")
+                        if isinstance(meta, dict):
+                            meta.setdefault("history_turns", history_turns)
+                    yield _sse_event(name, data)
 
-                # done 事件后写入会话历史
-                # 需要从最后一个 done 事件中提取 answer；这里用占位，
-                # 实际由调用方在收到 done 后自行管理
+                # 与非流式 /chat/agent 对齐：本轮问答写回会话，下一轮才看得到历史。
+                # 客户端中途断流时生成器提前结束，这一轮就不写，与 /chat/stream 一致。
+                if answer:
+                    session.add_exchange(
+                        payload.question,
+                        answer,
+                        [_citation_from_payload(item) for item in citation_payloads],
+                    )
         except Exception as exc:
             logger.exception("agentic SSE 流异常")
             yield _sse_event("error", {
