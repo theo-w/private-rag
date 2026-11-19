@@ -523,6 +523,24 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --n
 
 量出来的两条真实短板：一是路由受问法影响——像「香蕉能不能放冰箱」这种读起来像生活常识的问题，决策模型判成 `knowledge` 去查文档（保存方法其实在 `products.description` 里），6 条样本因此没查到库；二是证据不足时 agentic 倾向作答而不是拒答，`refusal_accuracy` 从 1.000 掉到 0.250，其中 d06、r04 在没有知识库依据的情况下补了通用知识（苹果氧化、商业版定价），属于该拒答却作答。
 
+**Ragas 子集复核**（2026-11-19，26 条里的 6 条可回答样本 `k01`/`d01`/`d03`/`m03`/`s02`/`s04` ×
+`agent`/`full`，judge `qwen3.8:27b-mlx`，`git_commit = 9147bd3`，总耗时 3965 秒，
+完整报告 `eval/reports/v7_agent_ragas_report.md`）：
+
+| Ragas 指标 | agentic | `full`（v4 基线） |
+|---|---:|---:|
+| `faithfulness` | 0.659 | 0.600 |
+| `answer_relevancy` | 0.853 | 0.138 |
+| `context_precision` | 0.492 | 0.306 |
+| `context_recall` | 0.750 | 0.250 |
+
+四项 agentic 都更高，差距最大的是 `answer_relevancy` 与 `context_recall`。但 `full` 组在这 6 条里
+拒答了 5 条（子集 `answer_rate` 0.167），所以这两项的低分主要复述了「没作答」，不是同等条件下的
+答案质量差值；能读的是 `faithfulness` 0.659 vs 0.600：两边都只在有据可依时作答，agentic 多带了
+SQL 证据却没有更容易编。子集不是全量，样本量不足以当结论；judge 走本机 Ollama，跑动中 3 个评测
+任务被 `RemoteProtocolError` 断连打断，对应 `m03`/`full` 的 `faithfulness`+`answer_relevancy` 与
+`d01`/`agent` 的 `answer_relevancy` 记为 NaN，平均分只基于有效样本。
+
 ## 只读公网演示（Render）
 
 完整问答依赖本机 Ollama（`bge-m3` 嵌入 + `qwen3.8:27b-mlx` 生成）与 `bge-reranker`，
@@ -688,6 +706,18 @@ python3 scripts/ingest.py --recreate                               # 清空集�
 ```bash
 python3 -m pytest tests -q
 ```
+
+CI（`.github/workflows/ci.yml`）在每次 push 与 PR 上跑两个作业：
+
+- `tests`：只装 `requirements-ci.txt`（**不含** `torch` / `transformers` / `sentence-transformers` /
+  `FlagEmbedding` / `faiss-cpu`——单测不加载任何模型，精排在 `retrieval/rerank.py` 里是函数内懒加载；
+  但 `pdfplumber` 与 `rapidocr-onnxruntime` 必须装，`test_ocr.py` 会断言这两个后端可导入），跑全量单测，
+  再用 `evaluate.py --validate-only` 校验 v4 / v5 / v7 三份评估集的证据逐字校验与结构——标注漂移在打模型之前就会被拦住。
+  `rapidocr-onnxruntime` 带的是非 headless 的 opencv，所以作业会先试 `import cv2`，缺 libGL 才补装 `libgl1`。
+- `readonly`：只装 `requirements-readonly.txt`（Render 上实际安装的那份），验证只读演示的依赖清单真的够用，
+  并断言导入 `private_rag.api.readonly` 后 `sys.modules` 里没有 `torch` / `FlagEmbedding` / `qdrant_client`。
+  其中 `test_readonly_index_ranks_like_lexical_index` 被排除：它要 `import LexicalIndex`，
+  而 `retrieval/lexical.py` 模块级导入 `qdrant_client`；该条在 `tests` 作业里照常执行，覆盖没有丢。
 
 覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、OCR 与表格提取、PDF 加载器（文本/扫描件/表格/降级）、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4/v5 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。v7 agentic 部分另覆盖只读 SQL 护栏（写操作、多语句、越权表必须被拒，CTE 与子查询不能误拒）、工具层证据与引用统一编号、检索-行动循环（意图路由、步数与字符预算、无效工具名、模型不可用降级、决策 JSON 的输出预算与解析回退）、轨迹落盘与 `--list`/单条回放 CLI、`/chat/agent` 与 `/traces` 接口；决策器与工具都是注入的替身，同样不依赖 Ollama 与 Qdrant。
 

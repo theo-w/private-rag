@@ -1,0 +1,30 @@
+# CI 跑单元测试所需的最小依赖（Python 3.9）
+# 刻意不装 torch / transformers / sentence-transformers / FlagEmbedding / faiss-cpu：
+# 307 条单测不加载任何模型，嵌入与精排在 CI 里都不被调用
+# （FlagEmbedding 在 retrieval/rerank.py 里是函数内懒加载）。
+# 但 pdfplumber 与 rapidocr-onnxruntime 必须装：test_ocr.py / test_pdf_ocr_loader.py
+# 会断言这两个后端确实可导入（它们只带 onnxruntime / opencv / Pillow，不带 torch）。
+# 需要验证完整依赖时用 requirements-dev.txt（会拉 torch 等大包）。
+pytest==8.4.2
+httpx==0.28.1        # FastAPI TestClient 依赖
+fastapi==0.128.8
+uvicorn[standard]==0.39.0
+pydantic==2.13.5
+langchain-core==0.3.86
+langchain-community==0.3.31
+langchain-text-splitters==0.3.11
+langchain-ollama==0.3.10
+qdrant-client==1.16.1
+jieba==0.42.1
+rank-bm25==0.2.2
+trafilatura==2.0.0
+lxml_html_clean==0.4.6   # trafilatura 2.0 在新版 lxml 下需要这个拆出去的包
+SQLAlchemy==2.0.57
+PyYAML==6.0.3
+requests==2.32.5
+pypdf==6.21.4
+
+# PDF / OCR 测试需要（test_ocr.py、test_pdf_ocr_loader.py 会断言后端可导入）：
+# rapidocr-onnxruntime 会带 onnxruntime / opencv / Pillow / numpy，但仍不含 torch 与 transformers
+pdfplumber==0.11.7
+rapidocr-onnxruntime==1.4.4

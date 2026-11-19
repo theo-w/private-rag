@@ -227,6 +227,8 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --n
 
 ### 结果摘要（2026-11-19，26 条 × `agent`/`full`，确定性指标，Ragas 关闭）
 
+> 全量 26 条这次没跑 Ragas，只另外跑了 6 条子集，见本文最后一小节。
+
 单条平均耗时 agentic 71.2 秒（工具执行 2.4 秒 + 路由与作答 68.8 秒）、`full` 17.0 秒；
 总耗时 2291.6 秒，`git_commit = a6e2bd8`，报告见 `eval/reports/v7_agent_report.md`。
 
@@ -257,3 +259,28 @@ SELECT 列口径吃掉，所以这两类的收益要看 `answer_rate` 与引用�
   1 条判成 `none`；d06 与 r04 在没有知识库依据的情况下补了通用知识（苹果氧化），属于该拒答却作答。
 - **代价明确**：单条耗时约 4.2 倍（71.2 秒 vs 17.0 秒），其中大部分是多次决策调用的模型开销，
   工具本身只占 2.4 秒。
+
+### Ragas 子集（2026-11-19，26 条里的 6 条可回答样本 × `agent`/`full`，`git_commit = 9147bd3`）
+
+样本 `k01`/`d01`/`d03`/`m03`/`s02`/`s04`，judge 与生成模型同为 `qwen3.8:27b-mlx`，
+`strictness=3`、`max_workers=1`、总耗时 3965.1 秒，报告见 `eval/reports/v7_agent_ragas_report.md`。
+括号内是「有效样本数 / 该配置实际尝试数」，平均分只基于有效样本。
+
+| 指标 | agent | full |
+|---|---:|---:|
+| `faithfulness` | 0.659（6/6） | 0.600（5/6） |
+| `answer_relevancy` | 0.853（5/6） | 0.138（5/6） |
+| `context_precision` | 0.492（6/6） | 0.306（6/6） |
+| `context_recall` | 0.750（6/6） | 0.250（6/6） |
+
+- **只是子集**：6 条 / 26 条，且这 6 条都是可回答样本（应拒答的 4 条一条都没进来），
+  `refusal_accuracy` 无法在此评估；报告头与运行信息里都印了「不能当作全量结论」。
+- **`full` 的低分主要复述「没作答」**：它在这 6 条里拒答了 5 条（子集 `answer_rate` 0.167），
+  空答会让 `answer_relevancy` 与 `context_recall` 一起塌下去，不能读成同等条件下的答案质量差值。
+  两边都能作答时，可读的是 `faithfulness` 0.659 vs 0.600：agentic 多带了 SQL 证据但没有更容易编造。
+- **judge 稳定性**：跑动中有 3 个评测任务被 `RemoteProtocolError`（服务端断连）打断，
+  对应 `m03`/`full` 的 `faithfulness`+`answer_relevancy` 与 `d01`/`agent` 的 `answer_relevancy`
+  记为 NaN 并单列在报告的缺失指标小节，`ragas_errors` 为空。重跑一次即可补齐，缓存会复用有效结果。
+- **子集的确定性指标与全量那份不可混读**：本 6 条上 agent `answer_rate` 1.000 / `source_hit` 0.667 /
+  `evidence_hit@3` 0.333，full 0.167 / 0.167 / 0.167；单条平均耗时 agent 71.9 秒、`full` 17.2 秒，
+  与全量 26 条的方向一致。
