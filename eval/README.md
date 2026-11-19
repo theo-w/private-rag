@@ -152,3 +152,108 @@ python3 scripts/evaluate.py --configs dense,hybrid,full --ragas-configs dense,fu
 - 生成与判分默认使用同一个本地模型 `qwen3.8:27b-mlx`，存在自评偏差；分数主要用于同一模型下的相对比较。用 `--judge-model` 换 judge 后（例如官方 `qwen2.5:7b-instruct`），分数只能在该 judge 下比较，不能与 27B 的分数直接混比。
 - Ragas 0.4.4 的 `evaluate` 与 LangChain wrapper 属于 legacy API，已固定版本并屏蔽弃用警告。
 - Ragas 判分调用本地 27B 模型较慢；7B judge 更快但能力较弱。可用 `--ragas-limit` 跑子集，但报告中会标注样本数，不能把子集结果写成全量结论。换 judge 后应关闭缓存或使用独立缓存目录。
+
+## v7 agentic 评估集（`v7_agent_qa.jsonl`）
+
+v4/v5 的评估集量的是“固定检索链路”的质量；v7 这份量的是**加了 agentic 循环以后到底多出了什么能力**，
+所以按“回答这个问题需要哪个工具”分类，而不是按文档章节分类：
+
+| 类别 | 条数 | 需要 | 固定链路的表现 |
+|---|---:|---|---|
+| `knowledge` | 7 | 只查项目文档 | 应两组的差值接近 0 |
+| `database` | 6 | 只查运行时 SQL（`products` 表） | 必然拒答：评估库不入库业务数据 |
+| `mixed` | 5 | 文档 + SQL 各出一段证据 | 只能答出一半 |
+| `multi_step` | 4 | 先拿结果再决定下一步（比平均价、排序后取保存说明等） | 无法作答 |
+| `refusal` | 4 | 文档和库里都没有 | 两组都应拒答 |
+
+共 26 条：22 可回答 + 4 应拒答。evidence 仍做逐字校验，出处为
+`README.md` / `docs/beginner-guide.md` / `docs/ROADMAP.md` / `scripts/init_demo_db.py`。
+
+### `expected_source`（本数据集新增的可选字段）
+
+SQL 样本的证据权威文件与“引用应该指向谁”不是同一个东西：业务数据的原文逐字写在
+`scripts/init_demo_db.py` 的种子数组里（用它做逐字校验），而 agentic 的引用是
+`demo.products#sql_query`。因此这类样本写：
+
+```json
+{"source": "scripts/init_demo_db.py", "expected_source": "demo.products", "...": "..."}
+```
+
+`source` 只管证据校验，`source_hit` 改按 `expected_source` 判定；比较时会忽略 `#` 之后的片段
+（SQL 入库文档是 `label#主键`，运行时查询引用是 `label#sql_query`，来源身份都是 `label`）。
+省略该字段时行为与 v4/v5 完全一致。
+
+### 为什么评估库不入库业务数据
+
+评估库（`config/sources.eval.yaml`）刻意只入库项目文档，因此 `database` 类问题在固定链路上**必然**查不到——
+这正是本次要量的差值本身，不是数据泄漏。agentic 组仍要能真的读到业务库，所以 SQL 工具由一份
+**只供运行时、不参与入库**的配置单独挂上：`config/sources.eval.agent.yaml`
+（`allow_runtime_query: true`，`runtime_tables: [products]`）。它由 `evaluate.py` 传给
+`build_agent_runtime(sources_path=...)`；`data/sql/demo.db` 不存在时直接报错退出，不会出一份“看起来能跑”的报告。
+
+### 跑法
+
+```bash
+python3 scripts/init_demo_db.py
+python3 scripts/prepare_eval_kb.py --recreate
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --validate-only
+# agentic vs v4 基线（报告差值表以 full 为基线）
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent,full \
+  --output eval/reports/v7_agent_report.md --json-output eval/reports/v7_agent_report.json
+# 只看“会检索但不让查库”的能力上限
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --no-agent-sql --skip-ragas
+```
+
+`--agent-max-steps`（默认 `AGENT_MAX_STEPS`）与 `--agent-sources` 可覆盖循环边界与运行时数据源。
+
+### agentic 组的指标口径与已知短板
+
+- **耗时**：整条循环的墙钟时间。`avg_retrieval_ms` 记工具执行耗时之和，`avg_generation_ms` 记其余开销
+  （意图路由 + 最终作答），两者相加才是总耗时；不要拿固定链路的同名列比快慢。
+- **`avg_tool_calls` / `avg_tool_steps`**：只有 agentic 组有值，固定链路为 `—`（不是 0）。
+- **`evidence_hit` 偏保守**：取决于模型 SELECT 了哪些列——只取 `name`/`price` 而没取 `description` 时，
+  答案可以完全正确但证据判 0。
+- **路由受问法影响**：像“香蕉能不能放冰箱”这种读起来像生活常识的问题，决策模型会判成 `knowledge`
+  而去查文档（保存方法其实在 `products.description` 里）；措辞带“价格/表/记录”的问题才会走 SQL。
+  这是本数据集量出来的真实短板，不是评估脚本的问题。
+- **单轮**：评估不传会话历史，指代消解类能力未覆盖。
+- 评估运行设置 `RAG_DISABLE_AGENT_TRACE=1`，不写 `storage/traces/agent.jsonl`，
+  所以报告里的 `trace_id` 不能在演示轨迹里回放。
+- **`@3` 窗口截断**：`evidence_*@3`、`context_precision@3`、`mrr@3`、`source_hit` 都只看前 3 条上下文，
+  而 agentic 一次可以产出 4–9 条证据块。SQL 证据常排在 `kb_search` 结果之后（本次 d03 落在第 5 块、
+  d05 落在第 7 块，回答里引用编号正确），因此这两条在 `evidence_hit@3` 上判 0——是窗口口径，不是没查到。
+- **拒答判定只看哨兵文本**：`is_refusal()` 判断答案里是否含生成侧的 `【资料中没有相关信息】`。
+  agentic 组在证据不足时倾向给“带引用的否定回答”，本口径下算未拒答，因此 `refusal_accuracy` 反而低于固定链路。
+
+### 结果摘要（2026-11-19，26 条 × `agent`/`full`，确定性指标，Ragas 关闭）
+
+单条平均耗时 agentic 71.2 秒（工具执行 2.4 秒 + 路由与作答 68.8 秒）、`full` 17.0 秒；
+总耗时 2291.6 秒，`git_commit = a6e2bd8`，报告见 `eval/reports/v7_agent_report.md`。
+
+| 指标 | agent | full | 差值 |
+|---|---:|---:|---:|
+| `answer_rate` | 0.909 | 0.318 | +0.591 |
+| `source_hit` | 0.591 | 0.318 | +0.273 |
+| `citation_rate` / `citation_validity` | 0.864 | 0.591 | +0.273 |
+| `evidence_hit@3` | 0.409 | 0.318 | +0.091 |
+| `context_precision@3` | 0.197 | 0.106 | +0.091 |
+| `mrr@3` | 0.348 | 0.295 | +0.053 |
+| `refusal_accuracy` | 0.250 | 1.000 | -0.750 |
+| `avg_context_chars` | 1676 | 1278 | +398 |
+| `avg_tool_calls` / `avg_tool_steps` | 1.50 / 3.73 | — | — |
+
+分类别 `evidence_hit@3`：`knowledge` 1.000 / 1.000（回归检查通过，agentic 没把纯文档问题做坏）、
+`database` 0.000 / 0.000、`mixed` 0.000 / 0.000、`multi_step` 0.500 / 0.000。
+`database`/`mixed` 两组都是 0：固定链路本来就查不到业务数据，agentic 则是被上面的 `@3` 窗口与
+SELECT 列口径吃掉，所以这两类的收益要看 `answer_rate` 与引用，而不是 `evidence_hit@3`。
+
+按证据是否真的进了上下文（绕开 `@3` 窗口重算）：agentic 22 条可回答样本里 11 条上下文含逐字证据
+（9 条落在前 3 条内、2 条落在第 4 条以后），`full` 只有 7 条。
+
+- **收益是真的**：15 条 DB 类样本里 agentic 有 9 条真的引用了 `demo.products#sql_query` 并给出正确数据
+  （价格、排序、维 C 对比、比平均价）；`full` 组 26 条样本一条都没接触过业务数据，隔离前提成立。
+  `knowledge` 类 7 条两组逐项持平（`evidence_hit`、`source_hit`、`citation_*` 全同），说明工具循环没有引入回归。
+- **短板也是真的**：6 条 DB 类样本没查到库（d01/d04/d06/m01/m04/s01），其中 5 条被路由判成 `knowledge`、
+  1 条判成 `none`；d06 与 r04 在没有知识库依据的情况下补了通用知识（苹果氧化），属于该拒答却作答。
+- **代价明确**：单条耗时约 4.2 倍（71.2 秒 vs 17.0 秒），其中大部分是多次决策调用的模型开销，
+  工具本身只占 2.4 秒。

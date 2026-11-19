@@ -18,11 +18,32 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
-from private_rag.config import CONTEXT_MAX_CHARS, EMB_MODEL, LLM_MODEL, TOP_K_RERANK, ROOT
+from private_rag.config import (
+    AGENT_MAX_STEPS,
+    CONTEXT_MAX_CHARS,
+    EMB_MODEL,
+    LLM_MODEL,
+    TOP_K_RERANK,
+    ROOT,
+)
 from private_rag.generation import REFUSAL, generate_answer
 from private_rag.qa import RetrievalOptions
 
-CATEGORIES = ("architecture", "ingestion", "retrieval", "api", "boundary", "refusal")
+# v7 agentic 评估集新增三类：database 需要运行时 SQL，mixed 需要知识库与 SQL 各出一段证据，
+# multi_step 需要先读观察再追问。既有数据集不含这三类，扩展白名单向后兼容。
+CATEGORIES = (
+    "architecture",
+    "ingestion",
+    "retrieval",
+    "api",
+    "boundary",
+    # v7 集改用「需要哪个工具」这一维度分类，文档类问题单独成组
+    "knowledge",
+    "database",
+    "mixed",
+    "multi_step",
+    "refusal",
+)
 EXPECTED_TOTAL = 40
 EXPECTED_ANSWERABLE = 36
 EXPECTED_REFUSAL = 4
@@ -107,6 +128,10 @@ class EvalSample:
     source: str
     category: str
     answerable: bool
+    # 期望引用指向的来源；留空表示与 source 相同。SQL 样本的 source 是证据权威文件
+    # （种子脚本里逐字含业务数据），而引用指向 SQL 源标签，两者必须能分开表达，
+    # 否则 source_hit 会恒为 0 —— 那是口径缺陷，不是检索缺陷。
+    expected_source: str = ""
 
 
 @dataclass(frozen=True)
@@ -119,6 +144,8 @@ class ConfigSpec:
     use_parent: bool = True
     query_rewrite: str = "off"
     context_max_chars: int = CONTEXT_MAX_CHARS
+    # agentic 组不走“一次检索 + 一次生成”，由 collect_agent_results 采集
+    is_agent: bool = False
 
 
 CONFIGS = {
@@ -154,6 +181,14 @@ CONFIGS = {
         use_parent=True,
         query_rewrite="hyde",
     ),
+    "agent": ConfigSpec(
+        "agent",
+        "Agentic：意图路由 + 工具循环（kb_search + 运行时只读 SQL）",
+        True,
+        True,
+        use_parent=True,
+        is_agent=True,
+    ),
 }
 
 
@@ -188,6 +223,12 @@ class SampleResult:
     error: Optional[str] = None
     metrics: dict[str, Optional[float]] = field(default_factory=dict)
     ragas: Optional[dict[str, Optional[float]]] = None
+    # 以下字段只对 agentic 配置有意义；固定链路保持 None/空，报告显示为“—”
+    intent: str = ""
+    stop_reason: str = ""
+    tool_calls: Optional[int] = None
+    tool_steps: Optional[int] = None
+    trace_id: str = ""
 
 
 def normalize_text(text: str) -> str:
@@ -230,7 +271,9 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
         "category",
         "answerable",
     }
-    allowed = required
+    # expected_source 是可选字段：只在证据权威文件与期望引用不是同一个东西时使用
+    optional = {"expected_source"}
+    allowed = required | optional
 
     lines = dataset_path.read_text(encoding="utf-8").splitlines()
     for line_number, line in enumerate(lines, start=1):
@@ -257,6 +300,7 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
         source = data["source"]
         category = data["category"]
         answerable = data["answerable"]
+        expected_source = data.get("expected_source", "")
 
         if not isinstance(sample_id, str) or not sample_id.strip():
             raise DatasetError(f"第 {line_number} 行 id 非法")
@@ -274,6 +318,8 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
             raise DatasetError(f"第 {line_number} 行 reference 必须是字符串")
         if not isinstance(source, str):
             raise DatasetError(f"第 {line_number} 行 source 必须是字符串")
+        if not isinstance(expected_source, str):
+            raise DatasetError(f"第 {line_number} 行 expected_source 必须是字符串")
         if not isinstance(evidence, list) or not all(
             isinstance(item, str) and item.strip() for item in evidence
         ):
@@ -305,9 +351,10 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
         else:
             if category != "refusal":
                 raise DatasetError(f"第 {line_number} 行拒答样本的 category 必须是 refusal")
-            if reference or evidence or source:
+            if reference or evidence or source or expected_source:
                 raise DatasetError(
-                    f"第 {line_number} 行拒答样本的 reference/evidence/source 必须为空"
+                    f"第 {line_number} 行拒答样本的 reference/evidence/source/"
+                    "expected_source 必须为空"
                 )
 
         seen_ids.add(sample_id)
@@ -321,6 +368,7 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
                 source=source,
                 category=category,
                 answerable=answerable,
+                expected_source=expected_source.strip(),
             )
         )
 
@@ -363,9 +411,14 @@ def is_refusal(answer: str) -> bool:
 
 
 def _source_matches(source_uri: str, expected_source: str) -> bool:
-    uri = str(source_uri).replace("\\", "/")
-    expected = expected_source.replace("\\", "/")
-    return uri == expected or uri.endswith("/" + expected)
+    """引用是否指向期望来源。
+
+    `#` 之后是行/查询片段：SQL 入库文档是 `label#主键`，运行时查询引用是
+    `label#sql_query`，两者的来源身份都是 `label`，比较前先去掉片段。
+    """
+    uri = str(source_uri).replace("\\", "/").split("#", 1)[0]
+    expected = expected_source.replace("\\", "/").split("#", 1)[0]
+    return bool(expected) and (uri == expected or uri.endswith("/" + expected))
 
 
 def score_deterministic(
@@ -414,9 +467,10 @@ def score_deterministic(
         if matched:
             mrr = 1.0 / rank
             break
+    expected_source = sample.expected_source or sample.source
     source_hit = (
         1.0
-        if any(_source_matches(uri, sample.source) for uri in source_uris[:3])
+        if any(_source_matches(uri, expected_source) for uri in source_uris[:3])
         else 0.0
     )
 
@@ -475,6 +529,12 @@ def aggregate_results(results: Sequence[SampleResult]) -> dict[str, Any]:
         "avg_retrieved": _mean([float(item.retrieved) for item in results]),
         "avg_context_chars": _mean([float(item.context_chars) for item in results]),
         "avg_query_count": _mean([float(item.query_count) for item in results]),
+        "avg_tool_calls": _mean(
+            [float(item.tool_calls) for item in results if item.tool_calls is not None]
+        ),
+        "avg_tool_steps": _mean(
+            [float(item.tool_steps) for item in results if item.tool_steps is not None]
+        ),
         "used_parent_rate": _mean(
             [1.0 if item.used_parent else 0.0 for item in results]
         ),
@@ -621,6 +681,116 @@ def collect_results(
                     f"[{spec.name}] {index}/{total} {sample.id} {status}"
                     + (" (缓存)" if result.generation_cached else "")
                 )
+    return results
+
+
+def collect_agent_results(
+    agent: Any,
+    samples: Sequence[EvalSample],
+    spec: ConfigSpec,
+    *,
+    max_steps: int = AGENT_MAX_STEPS,
+    allow_sql: bool = True,
+    progress: Optional[Progress] = None,
+) -> list[SampleResult]:
+    """对每个样本跑一次 agentic 链路（意图路由 + 工具循环），复用同一套确定性指标。
+
+    与 `collect_results` 分开，是因为链路口径不同：这里的“检索”是模型自主决定的
+    工具调用，`contexts` 是统一编号后的证据块文本，引用来自各工具而不是一次检索。
+    耗时口径：`retrieval_ms` 记工具执行耗时之和（没有工具步时记整条链路），
+    `generation_ms` 记同一请求里其余开销（意图路由与最终作答）之和；
+    两者相加等于整条链路的墙钟耗时。
+    """
+    # 延迟导入：评估模块本身不应依赖 agent（单测只测纯函数）
+    from private_rag.agent.runtime import AgentOptions
+
+    results: list[SampleResult] = []
+    total = len(samples)
+    for index, sample in enumerate(samples, start=1):
+        result = SampleResult(
+            sample_id=sample.id,
+            config=spec.name,
+            category=sample.category,
+            answerable=sample.answerable,
+            question=sample.question,
+            reference=sample.reference,
+            evidence=list(sample.evidence),
+            expected_source=sample.expected_source or sample.source,
+            requested_rerank=spec.use_rerank,
+            used_lexical=spec.use_lexical,
+            used_rerank=spec.use_rerank,
+            used_parent=spec.use_parent,
+            query_rewrite=spec.query_rewrite,
+        )
+        started = time.perf_counter()
+        try:
+            options = AgentOptions(
+                max_steps=max_steps,
+                allow_sql=allow_sql,
+                top_k=spec.top_k,
+                use_lexical=spec.use_lexical,
+                use_rerank=spec.use_rerank,
+                use_parent=spec.use_parent,
+                query_rewrite=spec.query_rewrite,
+            )
+            agent_result = agent.run(sample.question, options=options)
+            steps = list(getattr(agent_result, "steps", []) or [])
+            elapsed_ms = float(getattr(agent_result, "elapsed_ms", 0) or 0)
+            tool_ms = sum(
+                float(getattr(step, "elapsed_ms", 0) or 0)
+                for step in steps
+                if getattr(step, "kind", "") == "tool"
+            )
+            kb_calls = sum(
+                1
+                for step in steps
+                if getattr(step, "kind", "") == "tool"
+                and getattr(step, "tool", "") == "kb_search"
+            )
+            citations = [
+                _citation_to_dict(item)
+                for item in (getattr(agent_result, "citations", None) or [])
+            ]
+            result.answer = str(getattr(agent_result, "answer", "") or "")
+            result.contexts = [
+                str(text) for text in (getattr(agent_result, "contexts", None) or [])
+            ]
+            result.citations = citations
+            result.source_uris = [
+                str(item.get("source_uri") or "") for item in citations
+            ]
+            result.retrieved = int(getattr(agent_result, "evidence_blocks", 0) or 0)
+            result.context_chars = int(getattr(agent_result, "context_chars", 0) or 0)
+            result.query_count = max(1, kb_calls)
+            result.retrieval_ms = tool_ms if tool_ms else elapsed_ms
+            result.generation_ms = max(0.0, elapsed_ms - result.retrieval_ms)
+            result.intent = str(getattr(agent_result, "intent", "") or "")
+            result.stop_reason = str(getattr(agent_result, "stop_reason", "") or "")
+            result.tool_calls = int(getattr(agent_result, "tool_calls", 0) or 0)
+            result.tool_steps = len(steps)
+            result.trace_id = str(getattr(agent_result, "trace_id", "") or "")
+            result.refusal = is_refusal(result.answer)
+            result.metrics = score_deterministic(
+                sample,
+                result.contexts,
+                result.source_uris,
+                result.citations,
+                result.answer,
+            )
+        except Exception as exc:  # 单条失败不阻断整体评估
+            result.error = f"{type(exc).__name__}: {exc}"
+            result.retrieval_ms = (time.perf_counter() - started) * 1000.0
+            result.metrics = score_deterministic(sample, [], [], [], "")
+
+        results.append(result)
+        if progress:
+            status = (
+                f"ERROR {result.error}"
+                if result.error
+                else f"intent={result.intent or '—'} tools={result.tool_calls}"
+                + (" (拒答)" if result.refusal else "")
+            )
+            progress(f"[{spec.name}] {index}/{total} {sample.id} {status}")
     return results
 
 
@@ -820,6 +990,8 @@ DETERMINISTIC_METRICS = (
     "avg_retrieved",
     "avg_context_chars",
     "avg_query_count",
+    "avg_tool_calls",
+    "avg_tool_steps",
     "used_parent_rate",
     "rewrite_fallbacks",
 )
@@ -864,6 +1036,11 @@ def _result_to_dict(result: SampleResult) -> dict:
         "requested_rerank": result.requested_rerank,
         "retrieved": result.retrieved,
         "refusal": result.refusal,
+        "intent": result.intent,
+        "stop_reason": result.stop_reason,
+        "tool_calls": result.tool_calls,
+        "tool_steps": result.tool_steps,
+        "trace_id": result.trace_id,
         "retrieval_ms": round(result.retrieval_ms, 2),
         "generation_ms": round(result.generation_ms, 2),
         "generation_cached": result.generation_cached,
@@ -936,7 +1113,11 @@ def _cell(text: Any) -> str:
 
 def _category_table(report: dict) -> list[str]:
     config_names = list(report["configs"])
-    categories = [name for name in CATEGORIES if name != "refusal"]
+    # 只列本次样本里实际出现的类别，避免 v7 集在 v4 类别上刷出一排空行
+    present = {item["category"] for item in report["samples"]}
+    categories = [
+        name for name in CATEGORIES if name != "refusal" and name in present
+    ]
     lines = [
         "| 类别 | " + " | ".join(config_names) + " |",
         "|---|" + "|".join("---:" for _ in config_names) + "|",
@@ -1106,7 +1287,8 @@ def render_markdown(report: dict) -> str:
     meta = report["meta"]
     config_names = list(report["configs"])
     lines: list[str] = []
-    lines.append("# private-rag v5 检索策略评估报告")
+    # 标题可由调用方覆盖：v7 agentic 对比报告不该顶着 v5 的标题
+    lines.append(meta.get("report_title") or "# private-rag v5 检索策略评估报告")
     lines.append("")
     lines.append(
         "本报告比较同一评估集上的多组检索策略；`full` 是 v4 基线"
@@ -1115,6 +1297,16 @@ def render_markdown(report: dict) -> str:
         "NaN 表示 judge 失败或输出无法解析，未用 0 替代。"
     )
     lines.append("")
+
+    agent_names = [name for name in config_names if name in CONFIGS and CONFIGS[name].is_agent]
+    if agent_names:
+        lines.append(
+            "> **agentic 组口径不同**：" + "、".join(f"`{n}`" for n in agent_names) +
+            " 不是“一次检索 + 一次生成”，而是模型自己决定调用 `kb_search` 与只读 "
+            "`sql_query` 的循环。同名指标含义相通（都看证据是否进上下文、引用是否指对来源），"
+            "但延迟与查询次数不能与固定链路当同义指标比较。"
+        )
+        lines.append("")
     lines.append("## 运行信息")
     lines.append("")
     lines.append(f"- 生成时间：{meta.get('generated_at', '—')}")
@@ -1160,13 +1352,14 @@ def render_markdown(report: dict) -> str:
     lines.append("## 策略配置")
     lines.append("")
     lines.append(
-        "| 配置 | 说明 | BM25 | 精排 | 父块 | 查询改写 | top_k |"
+        "| 配置 | 链路 | 说明 | BM25 | 精排 | 父块 | 查询改写 | top_k |"
     )
-    lines.append("|---|---|---|---|---|---|---:|")
+    lines.append("|---|---|---|---|---|---|---|---:|")
     for name in config_names:
         spec = asdict(CONFIGS[name]) if name in CONFIGS else {}
         lines.append(
-            f"| `{name}` | {_cell(spec.get('label', '—'))} | "
+            f"| `{name}` | {'agentic' if spec.get('is_agent') else '固定'} | "
+            f"{_cell(spec.get('label', '—'))} | "
             f"{'开' if spec.get('use_lexical') else '关'} | "
             f"{'开' if spec.get('use_rerank') else '关'} | "
             f"{'开' if spec.get('use_parent') else '关'} | "
@@ -1301,6 +1494,11 @@ def render_markdown(report: dict) -> str:
         lines.append(f"  --configs {configs} \\")
     else:
         lines.append(f"python3 scripts/evaluate.py --configs {configs} \\")
+    if agent_names:
+        agent_meta = meta.get("agent") or {}
+        lines.append(
+            f"  --agent-sources {agent_meta.get('sources', 'config/sources.eval.agent.yaml')} \\"
+        )
     if ragas_configs:
         lines.append(f"  --ragas-configs {ragas_configs} \\")
     else:
@@ -1369,5 +1567,34 @@ def render_markdown(report: dict) -> str:
         "同一问题重跑可能得到不同答案；Ragas 磁盘缓存只在 prompt 完全一致时命中，"
         "因此重跑耗时不会归零。"
     )
+    if agent_names:
+        lines.extend(
+            [
+                "- 评估库只入库项目文档，SQL 工具只在运行时挂上"
+                "（`config/sources.eval.agent.yaml`，不参与入库）；"
+                "因此 `database` 类问题在固定链路上必然拒答——这是本次要量的差值本身，"
+                "不是数据泄漏或配置疏漏。",
+                "- agentic 组的 `evidence_hit` 取决于模型 SELECT 出了哪些列："
+                "只查 `name`/`price` 而没取 `description` 时，答案可以完全正确但证据判 0。"
+                "该指标在 agentic 组偏保守，应结合引用与回答文本一起看。",
+                "- `evidence_*@3`、`context_precision@3`、`mrr@3`、`source_hit` 只看前 3 条上下文，"
+                "而 agentic 一次可产出 4–9 条证据块：SQL 证据常排在 `kb_search` 结果之后"
+                "（本机实跑有样本的证据落在第 5 与第 7 块，回答引用正确但指标判 0），"
+                "因此 `database` / `mixed` 类别的低分不能读成“证据没进上下文”。",
+                "- 拒答判定认的是生成侧的 `【资料中没有相关信息】` 哨兵文本：agentic 组在证据不足时"
+                "倾向给“带引用的否定回答”（例如查库后说明 `products` 表没有该字段），"
+                "本口径下算未拒答，`refusal_accuracy` 低于固定链路属于行为差异，需结合答案文本判断。",
+                "- agentic 组的延迟是整条循环的墙钟耗时（含意图路由与多次工具调用）："
+                "`avg_retrieval_ms` 记工具执行耗时之和，`avg_generation_ms` 记其余开销，"
+                "两者相加才是总耗时，不能拿固定链路的同名列来比快慢。",
+                "- `avg_tool_calls` / `avg_tool_steps` 只是旁证："
+                "`multi_step` 类样本没有单独判定模型是否真的分了两次查询"
+                "（单条子查询 SQL 也能一次做对）。",
+                "- 评估按单轮问答执行，不传会话历史，指代消解类能力未覆盖。",
+                "- 评估运行设置 `RAG_DISABLE_AGENT_TRACE=1`，不写 "
+                "`storage/traces/agent.jsonl`，避免把评估样本混进演示轨迹；"
+                "因此报告里的 `trace_id` 不能逐条回放。",
+            ]
+        )
     lines.append("")
     return "\n".join(lines)
