@@ -6,6 +6,8 @@
         --ragas-configs full --ragas-limit 2 \
         --output /tmp/v5_smoke.md --json-output /tmp/v5_smoke.json
     python scripts/evaluate.py --configs dense,hybrid,full,parent,parent_multi,parent_hyde
+    python scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent,full \
+        --output eval/reports/v7_agent_report.md --json-output eval/reports/v7_agent_report.json
 """
 
 from __future__ import annotations
@@ -22,17 +24,30 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # 必须先设置环境变量，再导入 private_rag.config / qa / evaluation
-from private_rag.eval_env import EVAL_CACHE_DIR, configure_eval_env  # noqa: E402
+from private_rag.eval_env import (  # noqa: E402
+    EVAL_AGENT_SOURCES_CONFIG,
+    EVAL_CACHE_DIR,
+    configure_eval_env,
+)
 
 configure_eval_env()
 
-from private_rag.config import EMB_MODEL, LLM_MODEL, ROOT  # noqa: E402
+from private_rag.config import (  # noqa: E402
+    AGENT_MAX_STEPS,
+    AGENT_SQL_ROWS,
+    EMB_MODEL,
+    LLM_MODEL,
+    ROOT,
+)
+from private_rag.sources import ConfigError, load_sources_config  # noqa: E402
+from private_rag.agent.runtime import build_agent_runtime  # noqa: E402
 from private_rag.evaluation import (  # noqa: E402
     CONFIGS,
     DEFAULT_DATASET,
     RAGAS_DISPLAY_NAMES,
     DatasetError,
     build_report,
+    collect_agent_results,
     collect_results,
     dataset_fingerprint,
     load_dataset,
@@ -58,10 +73,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--configs",
         default="dense,hybrid,full",
-        help="逗号分隔的策略配置：dense,hybrid,full,parent,parent_multi,parent_hyde",
+        help="逗号分隔的策略配置：dense,hybrid,full,parent,parent_multi,parent_hyde,agent",
     )
     parser.add_argument("--limit", type=int, help="只跑前 N 条样本（冒烟用）")
     parser.add_argument("--ids", help="只跑指定样本 ID，逗号分隔，例如 q01,q02")
+    parser.add_argument(
+        "--agent-sources",
+        default=str(EVAL_AGENT_SOURCES_CONFIG),
+        help="agentic 组的运行时数据源（只挂只读 SQL 工具，不参与入库）",
+    )
+    parser.add_argument(
+        "--agent-max-steps",
+        type=int,
+        default=AGENT_MAX_STEPS,
+        help="agentic 组每条样本最多调用多少次工具",
+    )
+    parser.add_argument(
+        "--no-agent-sql",
+        action="store_true",
+        help="agentic 组不挂 sql_query 工具（用于量「只检索、不查库」的能力上限）",
+    )
     parser.add_argument("--skip-ragas", action="store_true", help="只跑确定性指标")
     parser.add_argument(
         "--ragas-configs",
@@ -107,6 +138,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--ragas-limit 必须是正整数")
     if args.max_workers <= 0:
         parser.error("--max-workers 必须是正整数")
+    if args.agent_max_steps <= 0:
+        parser.error("--agent-max-steps 必须是正整数")
     if args.limit is not None and args.ids:
         parser.error("--limit 与 --ids 不能同时使用")
     return args
@@ -145,6 +178,41 @@ def git_commit() -> str | None:
         return None
 
 
+def build_agent_for_eval(args: argparse.Namespace, engine):
+    """按 --agent-sources 装配 agentic 运行时；缺库直接失败，不出「看起来能跑」的报告。
+
+    评估库刻意只入库项目文档，所以 SQL 工具必须由这份运行时配置单独挂上：
+    固定链路查不到业务数据是本次对比的前提，不是配置漏了。
+    """
+    sources_path = Path(args.agent_sources)
+    if not sources_path.is_file():
+        raise SystemExit(f"❌ agentic 运行时配置不存在：{sources_path}")
+    try:
+        agent_config = load_sources_config(sources_path)
+    except ConfigError as exc:
+        raise SystemExit(f"❌ agentic 运行时配置错误：{exc}") from exc
+
+    missing = []
+    for source in agent_config.sources:
+        if source.type == "sql" and source.dsn.startswith("sqlite:///"):
+            db_path = Path(source.dsn[len("sqlite:///") :])
+            if not db_path.is_file():
+                missing.append(str(db_path))
+    if missing:
+        raise SystemExit(
+            "❌ agentic 组需要的数据库不存在："
+            + "；".join(missing)
+            + "\n   请先运行：python3 scripts/init_demo_db.py"
+        )
+
+    return build_agent_runtime(
+        engine,
+        sources_path=sources_path,
+        sql_rows=AGENT_SQL_ROWS,
+        allow_sql=not args.no_agent_sql,
+    )
+
+
 def print_summary(report: dict) -> None:
     print("\n=== 汇总 ===")
     for name, config in report["configs"].items():
@@ -161,6 +229,11 @@ def print_summary(report: dict) -> None:
         )
         if metrics["rewrite_fallbacks"]:
             print(f"  查询改写回退：{metrics['rewrite_fallbacks']} 次")
+        if metrics.get("avg_tool_calls") is not None:
+            print(
+                f"  agentic：平均工具调用 {metrics['avg_tool_calls']:.2f} 次，"
+                f"平均轨迹步数 {metrics['avg_tool_steps']:.2f}"
+            )
         ragas = config.get("ragas")
         if ragas:
             values = {
@@ -247,13 +320,50 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"⚠️ {warning}")
 
         started = time.perf_counter()
-        results = collect_results(
-            engine,
-            samples,
-            [CONFIGS[name] for name in config_names],
-            model=LLM_MODEL,
-            progress=lambda message: print(message, flush=True),
-        )
+        agent_names = [name for name in config_names if CONFIGS[name].is_agent]
+        fixed_names = [name for name in config_names if not CONFIGS[name].is_agent]
+        agent = None
+        agent_meta: dict = {"enabled": False, "configs": agent_names}
+        if agent_names:
+            agent = build_agent_for_eval(args, engine)
+            tools = list(agent.registry.names())
+            if not args.no_agent_sql and "sql_query" not in tools:
+                print("❌ agentic 组没挂上 sql_query 工具：检查配置里的 allow_runtime_query")
+                return 2
+            agent_meta = {
+                "enabled": True,
+                "configs": agent_names,
+                "sources": report_path(args.agent_sources),
+                "tools": tools,
+                "max_steps": args.agent_max_steps,
+                "allow_sql": not args.no_agent_sql,
+                "sql_rows": AGENT_SQL_ROWS,
+                "trace_enabled": False,
+            }
+            print(
+                f"🤖 agentic：工具={tools}，"
+                f"max_steps={args.agent_max_steps}，"
+                f"allow_sql={agent_meta['allow_sql']}"
+            )
+
+        results = []
+        if fixed_names:
+            results += collect_results(
+                engine,
+                samples,
+                [CONFIGS[name] for name in fixed_names],
+                model=LLM_MODEL,
+                progress=lambda message: print(message, flush=True),
+            )
+        for name in agent_names:
+            results += collect_agent_results(
+                agent,
+                samples,
+                CONFIGS[name],
+                max_steps=args.agent_max_steps,
+                allow_sql=not args.no_agent_sql,
+                progress=lambda message: print(message, flush=True),
+            )
         ragas_errors: dict[str, str] = {}
         for name in ragas_configs:
             try:
@@ -275,7 +385,11 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         engine.close()
 
+    dataset_stem = Path(args.dataset).stem
     meta = {
+        "report_title": (
+            None if is_default_dataset else f"# private-rag 检索策略评估报告：{dataset_stem}"
+        ),
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "dataset": report_path(args.dataset),
         "dataset_sha256": dataset_fingerprint(args.dataset),
@@ -286,6 +400,7 @@ def main(argv: list[str] | None = None) -> int:
         "sample_ids": [sample.id for sample in samples],
         "categories": dict(Counter(sample.category for sample in samples)),
         "configs": config_names,
+        "agent": agent_meta,
         "dataset_is_default": is_default_dataset,
         "output_markdown": report_path(args.output),
         "output_json": report_path(args.json_output),

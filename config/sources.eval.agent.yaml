@@ -1,0 +1,21 @@
+# v7 agentic 评估专用：只给运行时挂只读 SQL 工具，**不参与评估库入库**。
+#
+# 为什么单独一份：评估库（config/sources.eval.yaml）刻意只入库项目文档，
+# 这样 database / mixed 类问题在固定链路上必然查不到——那正是本次要量的差值，
+# 不是数据泄漏。agentic 组仍需真的读到业务库，所以这里只声明 sql 源，
+# 由 scripts/evaluate.py 传给 build_agent_runtime(sources_path=...)。
+#
+# 先运行：python3 scripts/init_demo_db.py（生成 data/sql/demo.db）
+sources:
+  - type: sql
+    dsn: sqlite:///data/sql/demo.db
+    query: SELECT id, name, category, description, price, updated_at FROM products ORDER BY id
+    id_column: id
+    title_column: name
+    content_columns: [name, category, description, price]
+    updated_at_column: updated_at
+    label: demo.products
+    tags: [eval, agent]
+    # 演示库是本机 SQLite，只读查询直接开；换成真库请改用只读数据库账号
+    allow_runtime_query: true
+    runtime_tables: [products]

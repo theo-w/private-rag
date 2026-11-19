@@ -234,7 +234,7 @@ v4 用固定评估集把“检索策略有没有用”量化。评估知识库�
 
 这些路径通过 `RAG_COLLECTION_NAME`、`RAG_STORAGE_DIR`、`RAG_LEXICAL_INDEX_PATH` 环境变量覆盖，由 `private_rag/eval_env.py` 在导入配置前设置，因此**不会与正在运行的演示服务争抢 Qdrant 本地锁**。
 
-评估集固定 40 条：36 条可回答 + 4 条应拒答，覆盖架构、入库、检索、API、边界与拒答 6 类；标注与字段说明见 [eval/README.md](eval/README.md)。
+评估集固定 40 条：36 条可回答 + 4 条应拒答，覆盖架构、入库、检索、API、边界与拒答 6 类；标注与字段说明见 [eval/README.md](eval/README.md)。v5 另有 18 条口语化问题集，v7 另有按「需要哪个工具」分类的 agentic 评估集（见下文「v7 评估」）。
 
 三组策略：
 
@@ -481,6 +481,48 @@ curl -s http://127.0.0.1:8000/api/v1/traces/<trace_id> | python3 -m json.tool
 
 每一次 agentic 问答追加一行 JSON 到 `storage/traces/agent.jsonl`（已 gitignore），记录意图、每步的工具与参数、观察、返回行数与耗时，以及最终引用。`trace_id` 同时出现在 `meta` 与响应头之外，可据此逐条回放。
 
+### v7 评估（agentic vs 固定链路）
+
+v4/v5 的评估集量的是固定链路的质量；v7 这份 `eval/v7_agent_qa.jsonl`（26 条 = 22 可回答 + 4 应拒答）按**回答需要哪个工具**分类，直接量 agentic 多出了什么：
+
+| 类别 | 条数 | 需要 | 固定链路应该怎样 |
+|---|---:|---|---|
+| `knowledge` | 7 | 只查项目文档 | 与 agentic 组差值接近 0（回归检查） |
+| `database` | 6 | 只查运行时 SQL（`products` 表） | 必然拒答 |
+| `mixed` | 5 | 文档 + SQL 各出一段证据 | 只能答出一半 |
+| `multi_step` | 4 | 先拿结果再决定下一步 | 无法作答 |
+| `refusal` | 4 | 文档与库里都没有 | 两组都应拒答 |
+
+**评估库仍只入库项目文档**，SQL 工具由一份只供运行时、不参与入库的配置单独挂上（`config/sources.eval.agent.yaml`，`allow_runtime_query: true` + `runtime_tables: [products]`）。因此 `database` 类问题在固定链路上必然查不到——这正是要量的差值本身，不是数据泄漏；`data/sql/demo.db` 不存在时评估直接报错退出，不会出一份「看起来能跑」的报告。
+
+```bash
+python3 scripts/init_demo_db.py
+python3 scripts/prepare_eval_kb.py --recreate
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --validate-only
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent,full \
+  --output eval/reports/v7_agent_report.md --json-output eval/reports/v7_agent_report.json
+# 只量「会检索但不让查库」的能力上限
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --no-agent-sql --skip-ragas
+```
+
+`agent` 组的口径与固定链路不同义，报告的限制小节逐条写明：耗时是整条循环的墙钟时间（`avg_retrieval_ms` 只记工具执行耗时，其余归 `avg_generation_ms`）；`avg_tool_calls` / `avg_tool_steps` 只有 agentic 组有值；`evidence_hit` 取决于模型 SELECT 了哪些列（只取 `name`/`price` 时答案可以全对但证据判 0）；评估按单轮执行，不覆盖指代消解。评估运行会设 `RAG_DISABLE_AGENT_TRACE=1`，不把评估样本写进演示轨迹。
+
+**本机实跑结果**（2026-11-19，26 条 × `agent`/`full`，只跑确定性指标，`git_commit = a6e2bd8`，完整报告 `eval/reports/v7_agent_report.md`）：
+
+| 指标 | agentic | `full`（v4 基线） |
+|---|---:|---:|
+| `answer_rate` | 0.909 | 0.318 |
+| `source_hit` | 0.591 | 0.318 |
+| `citation_rate` | 0.864 | 0.591 |
+| `evidence_hit@3` | 0.409 | 0.318 |
+| `mrr@3` | 0.348 | 0.295 |
+| `refusal_accuracy` | 0.250 | 1.000 |
+| 单条平均耗时 | 71.2 秒 | 17.0 秒 |
+
+15 条需要业务库的样本里 agentic 有 9 条真的引用 `demo.products#sql_query` 给出正确数据（单价、价格排序、维 C 对比、比平均价再筛），`full` 组 26 条一条都没碰过业务数据；`knowledge` 类 7 条两组逐项持平，工具循环没把纯文档问答做坏。代价是单条耗时约 4.2 倍（多次决策调用的模型开销占 68.8 秒，工具执行只占 2.4 秒）。
+
+量出来的两条真实短板：一是路由受问法影响——像「香蕉能不能放冰箱」这种读起来像生活常识的问题，决策模型判成 `knowledge` 去查文档（保存方法其实在 `products.description` 里），6 条样本因此没查到库；二是证据不足时 agentic 倾向作答而不是拒答，`refusal_accuracy` 从 1.000 掉到 0.250，其中 d06、r04 在没有知识库依据的情况下补了通用知识（苹果氧化、商业版定价），属于该拒答却作答。
+
 ## 只读公网演示（Render）
 
 完整问答依赖本机 Ollama（`bge-m3` 嵌入 + `qwen3.8:27b-mlx` 生成）与 `bge-reranker`，
@@ -693,10 +735,10 @@ private_rag/
 ├── query_rewrite.py      多查询 / HyDE 改写与失败回退
 ├── sessions.py           内存多轮会话、TTL/容量/历史裁剪
 ├── generation.py         编号上下文、历史、[n] 引用与流式生成
-├── evaluation.py         v4/v5 数据集校验、策略对比、Ragas 与报告渲染
+├── evaluation.py         v4/v5/v7 数据集校验、策略与 agentic 对比、Ragas 与报告渲染
 └── eval_env.py           评估库路径隔离（导入配置前生效）
 config/settings.py        兼容入口（re-export private_rag.config）
-config/sources.example.yaml / sources.demo.yaml / sources.eval.yaml
+config/sources.example.yaml / sources.demo.yaml / sources.eval.yaml / sources.eval.agent.yaml（agentic 运行时只读 SQL，不入库）
 scripts/ingest.py         多源入库 CLI
 scripts/chat_cli.py       混合检索问答 CLI
 scripts/chat_agent.py     agentic 问答 CLI（意图路由 + 工具调用 + 决策轨迹）
@@ -707,7 +749,8 @@ scripts/prepare_eval_kb.py 构建评估专用知识库
 scripts/evaluate.py       策略评估与报告 CLI
 eval/project_rag_qa.jsonl 40 条固定标注问答（v4）
 eval/v5_paraphrase_qa.jsonl 18 条口语化/复杂问题（v5）
-eval/reports/             v4/v5 Markdown / JSON 报告
+eval/v7_agent_qa.jsonl    26 条按工具分类的 agentic 问答（v7）
+eval/reports/             v4/v5/v7 Markdown / JSON 报告
 tests/                    pytest 单测 + smoke_test.py
 docs/ROADMAP.md           v1–v7 路线与验收标准
 data/docs/                本地文档

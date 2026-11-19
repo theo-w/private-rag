@@ -16,10 +16,12 @@ from private_rag.evaluation import (
     DatasetError,
     EvalSample,
     SampleResult,
+    _source_matches,
     aggregate_results,
     build_report,
     build_ragas_inputs,
     citation_numbers,
+    collect_agent_results,
     collect_results,
     dataset_fingerprint,
     extract_ragas_scores,
@@ -683,3 +685,251 @@ def test_env_path_resolves_relative_and_absolute(monkeypatch):
 
     monkeypatch.setenv("TEST_RAG_PATH", "/tmp/rag-eval")
     assert config._env_path("TEST_RAG_PATH", default) == Path("/tmp/rag-eval")
+
+
+# --------------------------------------------------------------------------- #
+# v7 agentic 评估组
+# --------------------------------------------------------------------------- #
+
+
+def test_v7_agent_dataset_is_valid():
+    path = Path(config.ROOT) / "eval" / "v7_agent_qa.jsonl"
+    samples = load_dataset(path)
+    assert len(samples) == 26
+    assert sum(sample.answerable for sample in samples) == 22
+    assert sum(not sample.answerable for sample in samples) == 4
+    assert len({sample.id for sample in samples}) == 26
+    assert {sample.category for sample in samples} == {
+        "knowledge",
+        "database",
+        "mixed",
+        "multi_step",
+        "refusal",
+    }
+    # v7 集不适用 v4 的固定 40 条分布校验
+    assert validate_distribution(samples)
+    # 只有需要运行时 SQL 的样本才声明 expected_source
+    db_samples = [s for s in samples if s.category in ("database", "mixed", "multi_step")]
+    assert len(db_samples) == 15
+    assert all(s.expected_source == "demo.products" for s in db_samples)
+    assert all(s.source == "scripts/init_demo_db.py" for s in db_samples)
+    knowledge = [s for s in samples if s.category == "knowledge"]
+    assert all(s.expected_source == "" for s in knowledge)
+
+
+def test_source_matches_ignores_fragment():
+    # SQL 入库文档是 label#主键，运行时查询引用是 label#sql_query，来源身份都是 label
+    assert _source_matches("demo.products#sql_query", "demo.products")
+    assert _source_matches("demo.products#3", "demo.products")
+    assert _source_matches("docs/beginner-guide.md", "beginner-guide.md")
+    assert not _source_matches("README.md", "docs/beginner-guide.md")
+    assert not _source_matches("README.md", "")
+
+
+def test_expected_source_optional_and_validated(tmp_path: Path):
+    needle = "Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储"
+    base = {
+        "id": "x01",
+        "question": "embedding 由谁负责？",
+        "reference": "Ollama 负责 embedding 与生成。",
+        "evidence": [needle],
+        "source": "README.md",
+        "category": "knowledge",
+        "answerable": True,
+    }
+    path = tmp_path / "qa.jsonl"
+    path.write_text(json.dumps(base, ensure_ascii=False) + "\n", encoding="utf-8")
+    plain = load_dataset(path)[0]
+    # 省略该字段时保持空串：source_hit 才会退回用 source 判定
+    assert plain.expected_source == ""
+
+    path.write_text(
+        json.dumps({**base, "expected_source": "demo.products"}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    assert load_dataset(path)[0].expected_source == "demo.products"
+
+    # 拒答样本所有事实字段都必须为空
+    path.write_text(
+        json.dumps(
+            {
+                "id": "x02",
+                "question": "iOS 客户端有吗",
+                "reference": "",
+                "evidence": [],
+                "source": "",
+                "category": "refusal",
+                "answerable": False,
+                "expected_source": "demo.products",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(DatasetError):
+        load_dataset(path)
+
+
+def test_source_hit_uses_expected_source():
+    sample = EvalSample(
+        id="d99",
+        question="香蕉能放冰箱吗",
+        reference="不适合放冰箱。",
+        evidence=("香蕉不适合放冰箱",),
+        source="scripts/init_demo_db.py",
+        category="database",
+        answerable=True,
+        expected_source="demo.products",
+    )
+    contexts = ["香蕉不适合放冰箱，低温会让表皮变黑、口感变差；建议常温阴凉处保存。"]
+    citations = [{"index": 1, "source_uri": "demo.products#sql_query"}]
+    metrics = score_deterministic(
+        sample, contexts, ["demo.products#sql_query"], citations, "香蕉不适合放冰箱[1]"
+    )
+    assert metrics["evidence_hit@3"] == 1.0
+    # 若仍按 source（种子脚本）判定，SQL 引用会被误判为来源不对
+    assert metrics["source_hit"] == 1.0
+
+
+def test_agent_config_is_flagged():
+    spec = CONFIGS["agent"]
+    assert spec.is_agent is True
+    assert spec.top_k == 3
+    assert all(not other.is_agent for name, other in CONFIGS.items() if name != "agent")
+
+
+def _agent_sample() -> EvalSample:
+    return EvalSample(
+        id="d01",
+        question="香蕉能放冰箱吗",
+        reference="不适合放冰箱。",
+        evidence=("香蕉不适合放冰箱",),
+        source="scripts/init_demo_db.py",
+        category="database",
+        answerable=True,
+        expected_source="demo.products",
+    )
+
+
+def _fake_agent_result(**overrides):
+    from types import SimpleNamespace
+
+    data = {
+        "answer": "香蕉不适合放冰箱[1]",
+        "contexts": ["香蕉不适合放冰箱，低温会让表皮变黑"],
+        "citations": [{"index": 1, "source_uri": "demo.products#sql_query", "title": "t"}],
+        "intent": "database",
+        "stop_reason": "final",
+        "tool_calls": 1,
+        "steps": [
+            SimpleNamespace(kind="route", tool="sql_query", elapsed_ms=0),
+            SimpleNamespace(kind="tool", tool="sql_query", elapsed_ms=12),
+            SimpleNamespace(kind="final", tool="", elapsed_ms=0),
+        ],
+        "trace_id": "abc123",
+        "evidence_blocks": 1,
+        "context_chars": 21,
+        "elapsed_ms": 50,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+class FakeAgent:
+    def __init__(self, result=None, error=None):
+        self.result = result
+        self.error = error
+        self.calls: list[dict] = []
+
+    def run(self, question, *, options=None):
+        self.calls.append({"question": question, "options": options})
+        if self.error:
+            raise self.error
+        return self.result
+
+
+def test_collect_agent_results_records_metrics_and_options():
+    agent = FakeAgent(_fake_agent_result())
+    results = collect_agent_results(agent, [_agent_sample()], CONFIGS["agent"], max_steps=2)
+    assert len(results) == 1
+    result = results[0]
+
+    assert result.error is None
+    assert result.config == "agent"
+    assert result.intent == "database"
+    assert result.stop_reason == "final"
+    assert result.tool_calls == 1
+    assert result.tool_steps == 3
+    assert result.trace_id == "abc123"
+    assert result.retrieved == 1
+    assert result.context_chars == 21
+    assert result.source_uris == ["demo.products#sql_query"]
+    assert result.refusal is False
+    assert result.metrics["evidence_hit@3"] == 1.0
+    assert result.metrics["source_hit"] == 1.0
+
+    # 耗时口径：retrieval_ms 只记工具步耗时，其余归 generation_ms
+    assert result.retrieval_ms == 12.0
+    assert result.generation_ms == 38.0
+    assert result.query_count == 1
+
+    options = agent.calls[0]["options"]
+    assert options.max_steps == 2
+    assert options.top_k == 3
+    assert options.allow_sql is True
+
+
+def test_collect_agent_results_can_disable_sql():
+    agent = FakeAgent(_fake_agent_result())
+    collect_agent_results(
+        agent, [_agent_sample()], CONFIGS["agent"], allow_sql=False
+    )
+    assert agent.calls[0]["options"].allow_sql is False
+
+
+def test_collect_agent_results_keeps_going_after_failure():
+    agent = FakeAgent(error=RuntimeError("决策模型不可用"))
+    results = collect_agent_results(agent, [_agent_sample()], CONFIGS["agent"])
+    result = results[0]
+    assert result.error.startswith("RuntimeError:")
+    assert result.answer == ""
+    assert result.tool_calls is None
+    assert result.metrics["evidence_hit@3"] == 0.0
+
+
+def test_aggregate_and_report_render_agent_metrics():
+    sample = _agent_sample()
+    agent = FakeAgent(_fake_agent_result())
+    results = collect_agent_results(agent, [sample], CONFIGS["agent"])
+    summary = aggregate_results(results)
+    assert summary["avg_tool_calls"] == 1.0
+    assert summary["avg_tool_steps"] == 3.0
+
+    # 固定链路没有工具概念，均值保持 None 而不是伪装成 0
+    fixed = SampleResult(
+        sample_id="k01",
+        config="full",
+        category="knowledge",
+        answerable=True,
+        question="q",
+        reference="",
+        evidence=[],
+        expected_source="README.md",
+    )
+    assert aggregate_results([fixed])["avg_tool_calls"] is None
+
+    report = build_report(
+        {
+            "configs": ["agent"],
+            "agent": {"enabled": True, "sources": "config/sources.eval.agent.yaml"},
+        },
+        [sample],
+        results,
+    )
+    markdown = render_markdown(report)
+    assert "agentic 组口径不同" in markdown
+    assert "| 配置 | 链路 |" in markdown
+    assert "| `agent` | agentic |" in markdown
+    assert "--agent-sources config/sources.eval.agent.yaml" in markdown
+    assert "avg_tool_calls" in markdown
