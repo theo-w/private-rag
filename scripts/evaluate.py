@@ -234,6 +234,9 @@ def print_summary(report: dict) -> None:
                 f"  agentic：平均工具调用 {metrics['avg_tool_calls']:.2f} 次，"
                 f"平均轨迹步数 {metrics['avg_tool_steps']:.2f}"
             )
+        # 双侧取证读数：只有声明了双侧的样本参与，未声明时是 None，就别印成 None 迷惑人
+        if metrics.get("both_sides_hit") is not None:
+            print(f"  双侧取证：both_sides_hit={metrics['both_sides_hit']:.3f}")
         ragas = config.get("ragas")
         if ragas:
             values = {

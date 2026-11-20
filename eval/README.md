@@ -184,6 +184,31 @@ SQL 样本的证据权威文件与“引用应该指向谁”不是同一个东�
 （SQL 入库文档是 `label#主键`，运行时查询引用是 `label#sql_query`，来源身份都是 `label`）。
 省略该字段时行为与 v4/v5 完全一致。
 
+### `expected_sources`（v7.4 新增的可选字段，配 `both_sides_hit` 读数）
+
+`expected_source` 只能标一个来源，于是混合问题「到底查了几侧」在指标里完全隐形：
+c03 只查了文档、SQL 那一半直接抄对话历史，`source_hit` 与 `evidence_hit@3` 却都是 1.000
+（`docs/v7.4-history-as-evidence.md` 把这条列为第三层成因）。样本可以额外声明双侧来源：
+
+```json
+{"expected_source": "demo.products", "expected_sources": ["demo.products", "docs/beginner-guide.md"]}
+```
+
+新读数 `both_sides_hit` 按声明判定：**声明的每一侧都要在引用列表里出现**才记 1.0，否则 0.0。
+口径与 `source_hit` 有三处刻意的差别：
+
+- 它**扫全量引用列表，不套 `@3` 窗口**。`source_hit` 只看前 3 条引用，混合问题常把 SQL 侧排到
+  第 4 条（v7.3 报告的 m04 即如此），那是已知的窗口口径限制，不该让新读数一上手就带上。
+- **只统计声明了 ≥2 侧的样本**（本轮 6 条：m01–m05 + c03）。其余样本该键为 `None`，
+  `_mean` 自动跳过，所以汇总值就是「6 条双侧样本上的命中率」，不会被 23 条单侧样本稀释。
+- 允许出现声明之外的来源（顺带引了 `docs/ROADMAP.md` 不算错），语义是「该取的两侧都取到了」。
+
+加载时校验：必须是字符串数组、每项非空、去重保序（同一侧写两遍不算两侧）；
+应拒答样本该字段必须为空。`expected_source` 与样本的 `evidence` 一字未改，
+所以 `source_hit` / `evidence_hit@3` / `citation_rate` 的逐条取值与 v7、v7.2、v7.3 三轮仍可比。
+只引到一侧的双侧样本会进报告的「失败与关注案例」，现象写「只取到一侧证据」——
+它 `evidence_hit@3` 可能是满分，不进这张表就仍然看不见。
+
 ### `history`（v7.3 新增的可选字段）
 
 指代消解要有真实的前置轮次才量得出来——之前 26 条里 0 条带历史，所以「覆盖指代」只是文档上的说法。
@@ -502,10 +527,77 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
 - **`@3` 窗口这轮反过来咬了两口。** m01 因为 SQL 证据从第 4 块挪到第 1 块而五项全回，m04 因为同一机制从第 1 挪到第 4 而五项判 0，
   k06 的 gold 块实测排第 4——三条都是窗口口径，答案本身都对。这条口径本轮明确不动。
 - **混合样本的 `expected_source` 只标一侧**，c03 标的是文档侧，所以 SQL 那一半没有任何检索指标量得到，
-  它的 `evidence_hit@3` 1.000 不等于两半都查过。
+  它的 `evidence_hit@3` 1.000 不等于两半都查过。（本轮如实记录，不作修订；该口径限制自 v7.4 起由
+  `expected_sources` + `both_sides_hit` 覆盖，见上面字段小节与下面 v7.4 复跑小节）
 - **c03 的时间戳那一半是从对话历史直接抄的**（回答自己写着「对话历史中已给出」），没有回查 SQL——历史被当成事实来源
   而不是指代线索。这是本轮新暴露的行为，v7.3 没修，ROADMAP 上留了一条未勾项。
 - **同子集耗时 +26.3 秒**（62.8→89.1），成本几乎全在生成侧（60.9→87.0 秒），检索均值只 +0.2 秒；提示词变长与模型
   随机性同时在里面，只作观察记录、不作归因。`planner_unavailable` 全量 4 条与基线持平，c01 落在这一档但走关键词回退仍答对。
 - **评估语料就是本仓库文档**（`config/sources.eval.yaml` 只入库 `README.md` + `docs/*.md`），本分支改过 README 与 ROADMAP
   的几行并重建了评估库，所以这轮与基线不是同一份语料快照，检索排名的差异里含这一项——k06/m04 的排名变化不能全部记到提示词改动头上。
+
+### 双侧取证复跑（2026-11-20，`v7.4-two-sided-source`）
+
+只加读数、不改定义的那一轮：新可选字段 `expected_sources` + 新读数 `both_sides_hit`（口径见上面的字段小节）。
+
+```bash
+python3 scripts/init_demo_db.py
+python3 scripts/prepare_eval_kb.py
+```
+
+```bash
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 --ids k01,k02,k03,k04,k05,k06,k07 --output /tmp/v7_4_b1.md --json-output /tmp/v7_4_b1.json
+# 其余三批只换 --ids 与输出名：d01,d02,d03,d04,d05,d06,m01,m02,m03,m04,m05 / s01,s02,s03,s04,c01,c02,c03 / s04 之外的 4 条
+```
+
+Qdrant 磁盘模式独占 `storage/eval/qdrant_storage`，四批只能串行；报告在进程结束时才写，所以四份批次
+JSON 合并后再聚合（合并是一次性脚本，聚合走仓库内 `aggregate_results`/`build_report`/`render_markdown`，
+批次划分记在报告 `meta.run_note`）。全量约 41 分钟。
+
+29 条（25 可答 + 4 应拒答）× `agent`，`n_errors` 0，报告 `eval/reports/v7_4_two_sided_report.md`：
+
+| 指标 | v7.3 | 本轮 |
+|---|---:|---:|
+| `both_sides_hit` | —（本轮新增） | **1.000** |
+| `source_hit` | 0.960 | 0.960 |
+| `evidence_hit@3` | 0.800 | 0.800 |
+| `evidence_recall@3` | 0.800 | 0.800 |
+| `context_precision@3` | 0.560 | 0.560 |
+| `mrr@3` | 0.747 | 0.727 |
+| `citation_rate` / `citation_validity` | 0.960 | 0.960 |
+| `answer_rate` | 0.960 | 0.960 |
+| `refusal_accuracy` | 1.000 | 1.000 |
+| 单条平均耗时 | 89.8 秒 | 82.6 秒 |
+
+双侧取证的 6 条逐条（`工具` = agentic 循环里的工具调用次数；排位指声明的 SQL 侧在那条样本引用列表里的位置）：
+
+| 样本 | 声明的两侧 | `both_sides_hit` | 意图 | 工具 | SQL 侧排位 |
+|---|---|---:|---|---:|---:|
+| m01 | `demo.products` + `docs/beginner-guide.md` | 1.0 | `mixed` | 2 | 1 |
+| m02 | `demo.products` + `README.md` | 1.0 | `mixed` | 2 | 1 |
+| m03 | `demo.products` + `docs/beginner-guide.md` | 1.0 | `mixed` | 2 | 1 |
+| m04 | `demo.products` + `README.md` | 1.0 | `mixed` | 2 | 4 |
+| m05 | `demo.products` + `docs/beginner-guide.md` | 1.0 | `mixed` | 2 | 1 |
+| c03 | `docs/beginner-guide.md` + `demo.products` | 1.0 | `mixed` | 2 | 4 |
+
+六条读数限制，引用这轮数字时一并带上：
+
+- **这轮 c03 回查了 SQL，缺口没复现。** 它 `tool_calls=2`、两侧都引到，所以 `both_sides_hit` 6/6 = 1.000；
+  按同一口径回算 v7.3 那轮的既有引用数据是 5/6 = 0.833（判 0 的正是 c03）。「把对话历史当事实来源、
+  还原指代后不回查」是**间歇行为**，不是每轮都触发；本轮只能说明新读数测得到「有没有回查」，
+  不能说明它已被修好——运行时与提示词那两层成因未动（`docs/v7.4-history-as-evidence.md` 第一、二节）。
+- **c03 与 m04 的 SQL 引用都排在第 4 位**，这轮实测坐实了「新读数不套 `@3` 窗口」这条口径的必要性：
+  若沿用 `source_hit` 的前 3 条窗口，这两条会被误判成只取一侧。
+- **既有指标逐条只有 4 条变化，都不是口径改动造成的**（本轮只加读数，不改任何判定式）：
+  k05 `mrr@3` 1.000→0.500（汇总 `mrr@3` 的 -0.020 全部来自这一条，答案仍正确，是命中块排位后移）；
+  k02 `stop_reason` `planner_unavailable`→`final`；r03 `intent` `database`→`mixed`（仍按缺口拒答，
+  `refusal_accuracy` 不变）；r04 `stop_reason` `context_budget`→`insufficient_evidence`（仍是拒答，
+  且写明缺什么，方向更好）。
+- **`source_hit` 0.960 两轮同分、同一条**：v7.3 与本轮都是 m04 判 0，同一原因——SQL 引用排在第 4 位，
+  而 `source_hit` 只看前 3 条引用。这条窗口口径本轮明确不动。
+- **m03 连续第三轮在可答样本上拒答**（`stop_reason=planner_unavailable`，回答里写明只查得香蕉一条、
+  无法确认它是全库最便宜）。它两侧证据其实都取到了（`both_sides_hit` 1.000），拒的是「最便宜」这个
+  需要全表比较的结论，本轮 `answer_rate` 0.960 与上轮同分。
+- **评估语料是本仓库文档，这轮不是 v7.3 的语料快照**：`docs/v7.4-history-as-evidence.md` 已并入 main
+  并被 `config/sources.eval.yaml` 入库，m01/m05/c03 等条目的引用列表里正常出现它。检索排位的差异里
+  含这一项，不能全部记到代码改动头上。

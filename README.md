@@ -513,7 +513,7 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent,ful
 python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --no-agent-sql --skip-ragas
 ```
 
-`agent` 组的口径与固定链路不同义，报告的限制小节逐条写明：耗时是整条循环的墙钟时间（`avg_retrieval_ms` 只记工具执行耗时，其余归 `avg_generation_ms`）；`avg_tool_calls` / `avg_tool_steps` 只有 agentic 组有值；`evidence_hit` 取决于模型 SELECT 了哪些列（只取 `name`/`price` 时答案可以全对但证据判 0）；默认单轮，但带 `history` 字段的样本（v7.3 起 3 条指代消解样本）会把对话历史原样传给 agentic 链路，报告用 `history_turns` 标出哪几条走了多轮。评估运行会设 `RAG_DISABLE_AGENT_TRACE=1`，不把评估样本写进演示轨迹。
+`agent` 组的口径与固定链路不同义，报告的限制小节逐条写明：耗时是整条循环的墙钟时间（`avg_retrieval_ms` 只记工具执行耗时，其余归 `avg_generation_ms`）；`avg_tool_calls` / `avg_tool_steps` 只有 agentic 组有值；`evidence_hit` 取决于模型 SELECT 了哪些列（只取 `name`/`price` 时答案可以全对但证据判 0）；默认单轮，但带 `history` 字段的样本（v7.3 起 3 条指代消解样本）会把对话历史原样传给 agentic 链路，报告用 `history_turns` 标出哪几条走了多轮；v7.4 起混合样本可用 `expected_sources` 声明「文档侧 + SQL 侧」，新读数 `both_sides_hit` 要求声明的每一侧都被引用到（扫全量引用、不套 `@3` 窗口），旧指标定义未动。v7.4 首轮 29 条实跑里 6 条双侧样本两侧取证全中（`both_sides_hit` 1.000，含上一轮只查文档侧、没回查 SQL 的 c03，那轮的既有数据按新口径回算是 0.833），`source_hit` 0.960 与上轮同为 m04 一条未命中，`mrr@3` 的 -0.020 全部来自 k05 一条排位后移，单条平均 82.6 秒，报告 `eval/reports/v7_4_two_sided_report.md`。评估运行会设 `RAG_DISABLE_AGENT_TRACE=1`，不把评估样本写进演示轨迹。
 
 **v7.3 指代消解实跑**（2026-11-20，29 条 = 25 可回答 + 4 应拒答，只跑确定性指标）：3 条带 `history` 的指代样本全部还原成功——c01 按上一轮的「精排」答对、c02 把「它」还原成橙子并走 `sql_query`、c03 判 `mixed`；同 26 条子集与上一轮比 `answer_rate`/`source_hit`/`refusal_accuracy` 持平，`evidence_hit@3` -0.045 与 `citation_rate` -0.045 各自都能落到单条样本上（`@3` 窗口与生成截断），逐条机制见 `eval/README.md`，报告 `eval/reports/v7_3_coreference_report.md`。
 

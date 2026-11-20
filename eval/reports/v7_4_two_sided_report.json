@@ -1,0 +1,2911 @@
+{
+  "meta": {
+    "report_title": "# private-rag 检索策略评估报告：v7_agent_qa",
+    "generated_at": "2026-11-20T20:30:51+08:00",
+    "dataset": "eval/v7_agent_qa.jsonl",
+    "dataset_sha256": "a9a7415a5c748a60b08f77d2629ab8e90b2d8b4b20e73a62640d01436803eaf5",
+    "dataset_total": 29,
+    "samples_total": 29,
+    "samples_answerable": 25,
+    "samples_refusal": 4,
+    "sample_ids": [
+      "k01",
+      "k02",
+      "k03",
+      "k04",
+      "k05",
+      "k06",
+      "k07",
+      "d01",
+      "d02",
+      "d03",
+      "d04",
+      "d05",
+      "d06",
+      "m01",
+      "m02",
+      "m03",
+      "m04",
+      "m05",
+      "s01",
+      "s02",
+      "s03",
+      "s04",
+      "c01",
+      "c02",
+      "c03",
+      "r01",
+      "r02",
+      "r03",
+      "r04"
+    ],
+    "categories": {
+      "knowledge": 7,
+      "database": 6,
+      "mixed": 5,
+      "multi_step": 4,
+      "coreference": 3,
+      "refusal": 4
+    },
+    "configs": [
+      "agent"
+    ],
+    "agent": {
+      "enabled": true,
+      "configs": [
+        "agent"
+      ],
+      "sources": "config/sources.eval.agent.yaml",
+      "tools": [
+        "kb_search",
+        "sql_query"
+      ],
+      "max_steps": 4,
+      "allow_sql": true,
+      "sql_rows": 20,
+      "trace_enabled": false
+    },
+    "dataset_is_default": false,
+    "output_markdown": "v7_4_b1.md",
+    "output_json": "v7_4_b1.json",
+    "llm_model": "qwen3.8:27b-mlx",
+    "judge_model": "qwen3.8:27b-mlx",
+    "embed_model": "bge-m3",
+    "ragas": {
+      "enabled": false,
+      "configs": [],
+      "limit": null,
+      "metrics": [
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall"
+      ],
+      "strictness": 3,
+      "max_workers": 1,
+      "cache": true,
+      "cache_dir": "storage/eval_cache"
+    },
+    "ragas_errors": {},
+    "duration_seconds": 392.06,
+    "git_commit": "2e912379f905dccb702608367f79f8f837c7ceef",
+    "run_note": "本轮 29 条因 Qdrant 磁盘模式独占 storage/eval/qdrant_storage，按 v7.3 同样方式分 4 批串行跑（7/11/7/4），批次 JSON 由一次性脚本 /tmp/merge_v74.py 合并；聚合与渲染走仓库内真实函数 aggregate_results/build_report/render_markdown，合并脚本本身不入库。"
+  },
+  "samples_meta": [
+    {
+      "id": "k01",
+      "question": "父块和子块的默认大小分别是多少，重叠又是多少？",
+      "category": "knowledge",
+      "answerable": true,
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "k02",
+      "question": "精排时为什么始终用原问题，而不用改写后的查询？",
+      "category": "knowledge",
+      "answerable": true,
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "k03",
+      "question": "agentic 循环靠哪三条边界防止跑飞？",
+      "category": "knowledge",
+      "answerable": true,
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "k04",
+      "question": "只读护栏 agent/sql_guard.py 具体做哪几件事？",
+      "category": "knowledge",
+      "answerable": true,
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "k05",
+      "question": "会话历史能当事实依据吗？会话数据存在哪里？",
+      "category": "knowledge",
+      "answerable": true,
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "k06",
+      "question": "v7 的意图路由分成哪几种意图？",
+      "category": "knowledge",
+      "answerable": true,
+      "expected_source": "docs/ROADMAP.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "k07",
+      "question": "这个项目的 embedding 和生成分别由哪个组件负责？",
+      "category": "knowledge",
+      "answerable": true,
+      "expected_source": "README.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "d01",
+      "question": "香蕉到底能不能放冰箱保存？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "d02",
+      "question": "猕猴桃现在单价是多少，买回来应该怎么保存？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "d03",
+      "question": "把这四种水果按价格从高到低列出来，并说明各自的保存方式。",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "d04",
+      "question": "橙子常温下大概能放多久？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "d05",
+      "question": "哪种水果的维生素 C 含量比较高，它的单价是多少？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "d06",
+      "question": "苹果切开后为什么建议尽快吃完？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "m01",
+      "question": "香蕉能不能放冰箱？另外这个项目的引用列表是从哪儿来的？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "m02",
+      "question": "橙子多少钱？这个项目的 embedding 和向量存储分别由什么负责？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "m03",
+      "question": "最便宜的水果是什么、单价多少？精排后最终给大模型几条资料？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "m04",
+      "question": "苹果适合怎么保存？v7 的 agentic 问答支持哪几种意图？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "m05",
+      "question": "橙子的单价是多少？扫描件 PDF 入库时每页 OCR 大概多花时间？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "s01",
+      "question": "单价高于这四种水果平均价的水果有哪些？分别多少钱、该怎么保存？",
+      "category": "multi_step",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "s02",
+      "question": "按价格看最贵的是哪种水果？它的维生素 C 情况怎么样？",
+      "category": "multi_step",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "s03",
+      "question": "单价低于 10 元的水果有哪几种？它们分别该怎么保存？",
+      "category": "multi_step",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "s04",
+      "question": "最近更新的是哪条水果记录？它的保存建议是什么？",
+      "category": "multi_step",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "c01",
+      "question": "那一步为什么始终用原问题，不用改写后的查询？",
+      "category": "coreference",
+      "answerable": true,
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [],
+      "history_turns": 2
+    },
+    {
+      "id": "c02",
+      "question": "那它的保存方式是啥？",
+      "category": "coreference",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [],
+      "history_turns": 2
+    },
+    {
+      "id": "c03",
+      "question": "那这个项目的引用列表是从哪儿来的？还有刚才那条记录的更新时间是什么时候？",
+      "category": "coreference",
+      "answerable": true,
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [
+        "docs/beginner-guide.md",
+        "demo.products"
+      ],
+      "history_turns": 2
+    },
+    {
+      "id": "r01",
+      "question": "橙子的产地和供应商联系方式是什么？",
+      "category": "refusal",
+      "answerable": false,
+      "expected_source": "",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "r02",
+      "question": "这个项目有 iOS 客户端吗？",
+      "category": "refusal",
+      "answerable": false,
+      "expected_source": "",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "r03",
+      "question": "这四种水果本月的采购成本是多少？",
+      "category": "refusal",
+      "answerable": false,
+      "expected_source": "",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "r04",
+      "question": "private-rag 商业版的定价是多少？",
+      "category": "refusal",
+      "answerable": false,
+      "expected_source": "",
+      "expected_sources": [],
+      "history_turns": 0
+    }
+  ],
+  "configs": {
+    "agent": {
+      "spec": {
+        "name": "agent",
+        "label": "Agentic：意图路由 + 工具循环（kb_search + 运行时只读 SQL）",
+        "use_lexical": true,
+        "use_rerank": true,
+        "top_k": 3,
+        "use_parent": true,
+        "query_rewrite": "off",
+        "context_max_chars": 6000,
+        "is_agent": true
+      },
+      "metrics": {
+        "evidence_hit@3": 0.8,
+        "evidence_recall@3": 0.8,
+        "context_precision@3": 0.56,
+        "mrr@3": 0.7266666666666666,
+        "source_hit": 0.96,
+        "both_sides_hit": 1.0,
+        "answer_rate": 0.96,
+        "refusal_accuracy": 1.0,
+        "citation_rate": 0.96,
+        "citation_validity": 0.96,
+        "avg_latency_ms": 82608.79310344828,
+        "avg_retrieval_ms": 1820.5172413793102,
+        "avg_generation_ms": 80788.27586206897,
+        "generation_cache_hits": 0,
+        "avg_retrieved": 2.793103448275862,
+        "avg_context_chars": 1485.655172413793,
+        "avg_query_count": 1.1379310344827587,
+        "avg_tool_calls": 1.3448275862068966,
+        "avg_tool_steps": 3.4482758620689653,
+        "used_parent_rate": 1.0,
+        "rewrite_fallbacks": 0,
+        "n_answerable": 25,
+        "n_refusal": 4,
+        "n_errors": 0
+      },
+      "ragas": null,
+      "n_results": 29
+    }
+  },
+  "samples": [
+    {
+      "id": "k01",
+      "config": "agent",
+      "category": "knowledge",
+      "answerable": true,
+      "question": "父块和子块的默认大小分别是多少，重叠又是多少？",
+      "reference": "子块每张约 700 字符、相邻重叠 100 字符；父块约 2000 字符，父块之间不重叠。",
+      "evidence": [
+        "子块每张约 700 字符，相邻重叠 100 字符；父块约 2000 字符，父块之间不重叠"
+      ],
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [],
+      "answer": "根据文档，默认值如下：\n\n- **子块（chunk）**：大小约 **700 字符**，相邻子块重叠 **100 字符**，目的是避免一句话被切在两张卡片的边界上。[1][3]\n- **父块（parent chunk）**：大小约 **2000 字符**，父块之间重叠为 **0**（不重叠）。[1][2][3]\n\n对应的环境变量为 `CHUNK_SIZE=700`、`CHUNK_OVERLAP=100`、`PARENT_CHUNK_SIZE=2000`、`RAG_PARENT_CHUNK_OVERLAP=0`。[2][3]",
+      "contexts": [
+        "为什么要剪成小卡片？因为一整本书塞不进模型，而且检索时只需要最相关的几段。重叠 100 字符是为了避免一句话刚好被切在两张卡片的边界上。\n\n具体默认值是：子块每张约 700 字符，相邻重叠 100 字符；父块约 2000 字符，父块之间不重叠。\n\n为什么不直接把小卡片送给模型？小卡片适合“找得准”，但前后文可能被切断。于是每张小卡片都记住自己属于哪张大卡片；命中后系统把整张大卡片送进模型，答案就不容易丢前因后果。这就是 v5 的 Parent-Document RAG（父子块）。\n\n为什么要两种索引？因为一种会“漏”：\n\n- 向量检索懂同义表达，比如“冷藏”能匹配“放冰箱”，但有时会漏掉专有名词、编号；\n- BM25 抓关键词很准，但不懂“番茄”和“西红柿”是一回事；\n- 两个一起用，互相补位。",
+        "### 父子块：小块召回，大段阅读\n\n- 入库先按 2000 字符、0 重叠切父块，再在每个父块内按 700/100 切子块；向量与 BM25 **只索引子块**。\n- 子块 payload 带 `parent.id/index/count/text`，BM25 索引同样保存父块字段；命中后按父块去重，在 `RAG_CONTEXT_MAX_CHARS` 预算内送父块整段原文。\n- 父块放不进剩余预算时回退到命中的子块（必要时截断），保证命中内容不丢；`snippet_text` 保存子块原文，用于引用展示。\n- `top_k` 限制的是最终送入的父块数；`retrieved` 也按父块数计。\n- 旧库没有 `parent` 字段时自动回退子块，无需迁移；重新执行 ingest 后生效。\n- 父块文本随每个子块各存一份，Qdrant 与 BM25 体积约放大 2–3 倍；换来的是无需额外 docstore，也不会出现父子存储不一致。\n\n| 环境变量 | 默认 | 说明 |\n|---|---:|---|\n| `RAG_PARENT_CHUNK_SIZE` | 2000 | 父块最大字符数；修改后需重建知识库 |\n| `RAG_PARENT_CHUNK_OVERLAP` | 0 | 父块重叠字符数 |\n| `RAG_CONTEXT_MAX_CHARS` | 6000 | 送入 LLM 的父块总字符预算 |",
+        "## 关键变量\n\n| 变量 | 默认值 | 用大白话说 |\n|---|---:|---|\n| `CHUNK_SIZE` | 700 | 子块最多约 700 个字符，用来检索 |\n| `CHUNK_OVERLAP` | 100 | 相邻子块重叠 100 字符，避免一句话被切断 |\n| `PARENT_CHUNK_SIZE` | 2000 | 父块最多约 2000 字符，命中后整段送模型 |\n| `CONTEXT_MAX_CHARS` | 6000 | 所有父块加起来的字符预算，超了回退子块 |\n| `MAX_VARIANTS` | 2 | 多查询最多生成 2 个改写查询 |\n| `MAX_VARIANT_CHARS` | 300 | 每个改写查询最长 300 字符 |\n| `MAX_HYDE_CHARS` | 400 | HyDE 假想文档最长 400 字符 |\n| `DENSE_TOP_K` | 20 | 语义检索先捞 20 条候选 |\n| `LEXICAL_TOP_K` | 20 | 关键词检索也捞 20 条 |\n| `FUSION_TOP_K` | 10 | 两路合并后留 10 条给下一关 |\n| `TOP_K_RERANK` | 3 | 精读后最终只给大模型 3 条 |\n| `RRF_K` | 60 | 名次折算积分的平滑系数，越大名次差距越平缓 |\n| `SESSION_TTL_SECONDS` | 1800 | 会话闲置 30 分钟就自动清理 |\n| `MAX_HISTORY_TURNS` | 6 | 每次最多带最近 6 轮对话给模型 |\n| `MAX_HISTORY_CHARS` | 3000 | 历史总长度预算，超了就从旧到新裁掉 |\n| `AGENT_MAX_STEPS` | 4 | 一次提问最多让模型调 4 次工具，防止停不下来 |\n| `AGENT_CONTEXT_CHARS` | 7000 | 已收集证据超过 7000 字符就停止取料，直接作答 |\n| `AGENT_TOOL_CHARS` | 3000 | 单个工具返回的证据最多占 3000 字符，按工具数分摊 |\n| `AGENT_SQL_ROWS` | 20 | 运行时 SQL 最多返回 20 行，同时是 `LIMIT` 的上限 |\n| `AGENT_PLANNER_TOKENS` | 2000 | 决策 JSON 的输出预算；推理型模型会先吐思考内容，预算小了正文就空了 |\n| `AGENT_TRACE_PATH` | storage/traces/agent.jsonl | 决策轨迹落盘位置，一次问答追加一行 |"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "为什么要剪成小卡片？因为一整本书塞不进模型，而且检索时只需要最相关的几段。重叠 100 字符是为了避免一句话刚好被切在两张卡片的边界上。 具体默认值是：子块每张约 700 字符，相邻重叠 100 字符；父块约 2000 字符，父块之间不重叠…",
+          "page": null,
+          "table": null,
+          "score": 4.3984375
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### 父子块：小块召回，大段阅读 - 入库先按 2000 字符、0 重叠切父块，再在每个父块内按 700/100 切子块；向量与 BM25 **只索引子块**。 - 子块 payload 带 `parent.id/index/count/…",
+          "page": null,
+          "table": null,
+          "score": 3.064453125
+        },
+        {
+          "index": 3,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "| 变量 | 默认值 | 用大白话说 | |---|---:|---| | `CHUNK_SIZE` | 700 | 子块最多约 700 个字符，用来检索 | | `CHUNK_OVERLAP` | 100 | 相邻子块重叠 100 字符，…",
+          "page": null,
+          "table": null,
+          "score": 2.94921875
+        }
+      ],
+      "source_uris": [
+        "docs/beginner-guide.md",
+        "README.md",
+        "docs/beginner-guide.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 2227,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "knowledge",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "579c991926f6",
+      "history_turns": 0,
+      "retrieval_ms": 2574.0,
+      "generation_ms": 37416.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "k02",
+      "config": "agent",
+      "category": "knowledge",
+      "answerable": true,
+      "question": "精排时为什么始终用原问题，而不用改写后的查询？",
+      "reference": "reranker 把原问题与每张子块放在一起逐条比较选出最相关的 3 张；始终用原问题是为了避免检索跑偏。",
+      "evidence": [
+        "注意这里始终用原问题，不用改写后的查询，避免检索跑偏"
+      ],
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [],
+      "answer": "精排（reranker）始终用原问题而非改写后的查询，核心原因是**避免改写文本把答案带偏、避免检索跑偏**[2][3]。具体机制是：reranker 像面试官逐份精读简历，把「原问题 + 每张子块」放在一起逐条比较，选出真正最相关的 3 张[3]。查询改写的目的是「多找几条路」扩大召回，但最终仍按原问题做精排，确保选出的结果忠实于用户真实意图[1]。",
+      "contexts": [
+        "查询改写则是“多找几条路，最后仍按原问题选”：",
+        "- 所有查询最终仍用**原问题**做 reranker 精排，避免改写文本把答案带偏。\n- 改写失败（JSON 非法、模型不可用、没有可用变体）自动回退原问题，`meta.query_count` 为 1；错误信息最多 200 字符且不包含问题正文。\n- 改写温度固定 0、`num_predict=512`，每个变体 ≤300 字符，HyDE ≤400 字符。\n\nAPI 示例：",
+        "这里有五个关键角色：\n\n- **查询改写（可选）**：像同一句话换几种说法再搜一次。`multi` 让模型生成最多两个同义查询；`hyde` 让模型先写一段“假想答案”，拿它去检索。默认关闭；改写失败就退回原问题。\n- **RRF 合并**：像两个排行榜按名次折算积分。某张卡片在向量榜排第 1，加分；在关键词榜也排第 1，再加一次分。两边都靠前的卡片总分最高；多查询时，各查询的榜单也会再合并一次。\n- **reranker（重排模型）**：像面试官逐份精读简历。它把“原问题 + 每张子块”放在一起逐条比较，选出真正最相关的 3 张。注意这里始终用原问题，不用改写后的查询，避免检索跑偏。\n- **父块扩展**：像查到目录条目后，把整页原文翻出来。系统按父块去重，在 6000 字符预算内送整段父块；放不下就退回命中的子块，保证精排选中的内容一定进上下文。\n- **大模型**：像只拿到这几段父块原文的答题学生。提示词明确要求“只能根据资料回答，没有就拒答”，所以资料里没有的内容不会被编出来。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "查询改写则是“多找几条路，最后仍按原问题选”：",
+          "page": null,
+          "table": null,
+          "score": 0.923828125
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "- 所有查询最终仍用**原问题**做 reranker 精排，避免改写文本把答案带偏。 - 改写失败（JSON 非法、模型不可用、没有可用变体）自动回退原问题，`meta.query_count` 为 1；错误信息最多 200 字符且不包含…",
+          "page": null,
+          "table": null,
+          "score": 0.646484375
+        },
+        {
+          "index": 3,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "这里有五个关键角色： - **查询改写（可选）**：像同一句话换几种说法再搜一次。`multi` 让模型生成最多两个同义查询；`hyde` 让模型先写一段“假想答案”，拿它去检索。默认关闭；改写失败就退回原问题。 - **RRF 合并**：…",
+          "page": null,
+          "table": null,
+          "score": 0.2197265625
+        }
+      ],
+      "source_uris": [
+        "docs/beginner-guide.md",
+        "README.md",
+        "docs/beginner-guide.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 812,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "knowledge",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "11e4fccd5543",
+      "history_turns": 0,
+      "retrieval_ms": 1338.0,
+      "generation_ms": 30503.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 0.3333333333333333,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "k03",
+      "config": "agent",
+      "category": "knowledge",
+      "answerable": true,
+      "question": "agentic 循环靠哪三条边界防止跑飞？",
+      "reference": "工具调用次数上限（AGENT_MAX_STEPS）、证据字符预算（AGENT_CONTEXT_CHARS）、SQL 返回行数上限（AGENT_SQL_ROWS）。",
+      "evidence": [
+        "工具调用次数（`AGENT_MAX_STEPS`）、证据字符预算（`AGENT_CONTEXT_CHARS`）"
+      ],
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [],
+      "answer": "agentic 循环靠以下三条边界防止跑飞[1][2]：\n\n1. **工具调用次数**（`AGENT_MAX_STEPS`）：限制整个循环中最多调用工具的次数，防止无限循环。\n2. **证据字符预算**（`AGENT_CONTEXT_CHARS`）：限制累积证据的总字符量，防止上下文无限膨胀。\n3. **SQL 返回行数**（`AGENT_SQL_ROWS`）：限制每次 SQL 查询返回的最大行数，防止单次查询拉回过多数据。\n\n当任一边界触达时，循环会停止并记录对应的 `stop_reason`（如 `max_steps`、`context_budget` 等），最终仍基于已收集的证据生成回答[3]。",
+      "contexts": [
+        "三条边界防止跑飞：工具调用次数（`AGENT_MAX_STEPS`）、证据字符预算（`AGENT_CONTEXT_CHARS`）、\nSQL 返回行数（`AGENT_SQL_ROWS`）。模型不可用时不会整体失败：路由退回关键词判断，工具没给 SQL 就退化成\n列出白名单表前几行，最终回答仍基于已收集的证据生成，一条证据都没有就按原来的约定返回拒答文本。\n\n判准「该查文档还是查库」靠两件小事：路由器只看得懂工具的 `description`，所以装配 `sql_query` 时会先给\n白名单表做一次**有界采样**（列名 + 每个文本列少量样例值）写进描述，「香蕉到底能不能放冰箱」这种问法才有机会\n被认成「问的是 `products.description` 里那条记录」；采样出来的词同时喂给关键词回退路由。另一件是答不答由模型\n在宣布作答时一并声明充分性（`sufficient` / `missing`），问题要的那项事实不在证据里就直接返回拒答哨兵并写明\n缺哪一项——「资料里没提到」不等于「不存在」，宁可拒答也不要拿通用常识补出一段看着像的答案。\n\n还有一点容易被忽略：模型判「这问题跟我们库无关」（`none`）时，代码不会直接相信它。判 `none` 只说明模型猜查不到，而拒答的正当理由只有「查过了、证据里没有」，所以会先拿原问题检索一次——查到就照常作答，查不到才返回拒答文本。换句话说，「没查就问」不允许，「查了再说」才是正路。\n\n只读护栏（`agent/sql_guard.py`）只做四件事：只允许单条 `SELECT`/`WITH`、出现写操作关键字就拒绝、\n表必须在白名单内、强制一个不超过上限的 `LIMIT`。它是纵深防御的一层，不是沙箱——\n给这个 DSN 用的仍然应该是只读数据库账号。",
+        "## v7 详细验收（本分支）\n\n- [x] 意图路由：`knowledge` / `database` / `mixed` / `none`，由模型顺带给出首个动作，运行时不再预设走哪条链路\n- [x] 工具调用：`kb_search`（复用 `RagEngine.retrieve_with_trace` 的全链路）与 `sql_query`（运行时只读查询业务库）\n- [x] 运行时 SQL 显式授权：只有 `sources.yaml` 里 `allow_runtime_query: true` 的 sql 源才挂上工具，默认关闭；关掉时模型连这个工具都看不到\n- [x] 只读护栏：单条 `SELECT`/`WITH`、写操作与元数据关键字拒绝、表白名单（CTE 名不算表）、强制 `LIMIT` 上限；护栏改写后的 SQL 写进轨迹\n- [x] 检索-行动循环：读观察后再决策，三条边界为工具步数（`AGENT_MAX_STEPS`）、证据字符预算（`AGENT_CONTEXT_CHARS`）、SQL 行数（`AGENT_SQL_ROWS`）\n- [x] 证据统一编号：不同工具的证据块合并后全局编号，回答里的 `[n]` 与引用列表一一对应（SQL 结果复用 `Citation.table`）\n- [x] 失败降级：决策模型不可用退回关键词路由；工具失败作为观察回灌给模型；无证据按既有约定返回拒答文本；agentic 装配失败只让 `/chat/agent` 返回 503，不影响 `/chat`\n- [x] 可观测 trace：每请求一行 JSON 追加到 `storage/traces/agent.jsonl`，记录每步理由/参数/观察/行数/耗时，`scripts/replay_trace.py` 与 `GET /api/v1/traces/{trace_id}` 可逐条回放\n- [x] `Planner` 可注入：护栏、决策器、工具、循环、轨迹、接口六组共 121 条单测都不依赖 Ollama 与 Qdrant（全量 `pytest tests` 295 passed）\n- [x] 决策 JSON 的输出预算独立可配（`RAG_AGENT_PLANNER_TOKENS`，默认 2000）：本机实跑发现默认模型是推理型，400 token 只吐思考不给正文，路由整段回退到关键词判断\n- [x] 本机实跑端到端：`init_demo_db` → `ingest` → `chat_agent` → `replay_trace` 全链路跑通，knowledge/database/mixed/none 四类问题各验一次；预算修好后 mixed 问题的意图与 SQL 都由模型自己给出（2 次工具调用，`stop_reason=final`）\n- [ ] 同一份 …",
+        "响应在 `/chat` 的 `session_id / answer / citations / meta / request_id` 之外多一个 `trace`（完整步骤）；`meta` 里给出 `intent / stop_reason / tool_calls / steps / evidence_blocks / context_chars / history_turns / trace_id`。`citations` 与回答里的 `[n]` 仍是一一对应，SQL 结果的引用复用 `table` 字段。`stop_reason` 取值：`final`（模型认为证据够了）、`max_steps`（步数用尽）、`context_budget`（证据字符预算用完）、`no_retrieval`（判定与两侧都无关且没做验证检索，只在知识库工具不可用或显式关掉探测时出现）、`no_evidence`（检索过但没有可用证据，含路由判 `none` 后验证检索仍空手）、`insufficient_evidence`（判定证据不足，直接拒答）、`generation_failed`（生成失败）。\n\n降级行为（任何一层挂掉都不会让整个请求 500）：\n\n- 决策模型不可用 → 路由退回关键词判断，循环按启发式继续。\n- 工具执行失败（含被护栏拒绝） → 失败原因作为观察回灌给模型，它可以换个 SQL 或改用知识库。\n- 一条证据都没收集到 → 返回既有拒答文本，不编造答案。\n- agentic 运行时装配失败（例如 `sources.yaml` 写坏了） → 只有 `/api/v1/chat/agent` 返回 503 `agent_unavailable`，`/chat` 与 `/chat/stream` 不受影响。\n\n每一次 agentic 问答追加一行 JSON 到 `storage/traces/agent.jsonl`（已 gitignore），记录意图、每步的工具与参数、观察、返回行数与耗时，以及最终引用。`trace_id` 同时出现在 `meta` 与响应头之外，可据此逐条回放。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "三条边界防止跑飞：工具调用次数（`AGENT_MAX_STEPS`）、证据字符预算（`AGENT_CONTEXT_CHARS`）、 SQL 返回行数（`AGENT_SQL_ROWS`）。模型不可用时不会整体失败：路由退回关键词判断，工具没给…",
+          "page": null,
+          "table": null,
+          "score": 3.587890625
+        },
+        {
+          "index": 2,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [x] 意图路由：`knowledge` / `database` / `mixed` / `none`，由模型顺带给出首个动作，运行时不再预设走哪条链路 - [x] 工具调用：`kb_search`（复用 `RagEngine.ret…",
+          "page": null,
+          "table": null,
+          "score": 2.20703125
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "降级行为（任何一层挂掉都不会让整个请求 500）： - 决策模型不可用 → 路由退回关键词判断，循环按启发式继续。 - 工具执行失败（含被护栏拒绝） → 失败原因作为观察回灌给模型，它可以换个 SQL 或改用知识库。 - 一条证据都没收集到…",
+          "page": null,
+          "table": null,
+          "score": -0.7978515625
+        }
+      ],
+      "source_uris": [
+        "docs/beginner-guide.md",
+        "docs/ROADMAP.md",
+        "README.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 3009,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "knowledge",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "86a24d110d2b",
+      "history_turns": 0,
+      "retrieval_ms": 1524.0,
+      "generation_ms": 59035.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "k04",
+      "config": "agent",
+      "category": "knowledge",
+      "answerable": true,
+      "question": "只读护栏 agent/sql_guard.py 具体做哪几件事？",
+      "reference": "只允许单条 SELECT/WITH；出现写操作关键字就拒绝；表必须在白名单内；并强制一个不超过上限的 LIMIT。它是纵深防御的一层，不是沙箱。",
+      "evidence": [
+        "只读护栏（`agent/sql_guard.py`）只做四件事：只允许单条 `SELECT`/`WITH`、出现写操作关键字就拒绝"
+      ],
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [],
+      "answer": "只读护栏 `agent/sql_guard.py` 只做四件事 [1][2]：\n1. **只允许单条 `SELECT`/`WITH`**：非查询语句直接拒绝。\n2. **写操作与元数据关键字拒绝**：出现 INSERT、UPDATE、DELETE 等写操作关键字或元数据关键字时直接拒绝。\n3. **表白名单校验**：SQL 中涉及的表必须在白名单内（`WITH` 定义的 CTE 临时视图名不算表）。\n4. **强制 `LIMIT` 上限**：自动追加不超过 `AGENT_SQL_ROWS` 的 `LIMIT`，防止返回过多行。\n\n此外，护栏改写后的 SQL 与实际返回行数都会写进轨迹（trace）[2][3]。文档同时强调，护栏是纵深防御的一层，并非沙箱——该 DSN 仍应使用只读数据库账号 [1][2]。",
+      "contexts": [
+        "三条边界防止跑飞：工具调用次数（`AGENT_MAX_STEPS`）、证据字符预算（`AGENT_CONTEXT_CHARS`）、\nSQL 返回行数（`AGENT_SQL_ROWS`）。模型不可用时不会整体失败：路由退回关键词判断，工具没给 SQL 就退化成\n列出白名单表前几行，最终回答仍基于已收集的证据生成，一条证据都没有就按原来的约定返回拒答文本。\n\n判准「该查文档还是查库」靠两件小事：路由器只看得懂工具的 `description`，所以装配 `sql_query` 时会先给\n白名单表做一次**有界采样**（列名 + 每个文本列少量样例值）写进描述，「香蕉到底能不能放冰箱」这种问法才有机会\n被认成「问的是 `products.description` 里那条记录」；采样出来的词同时喂给关键词回退路由。另一件是答不答由模型\n在宣布作答时一并声明充分性（`sufficient` / `missing`），问题要的那项事实不在证据里就直接返回拒答哨兵并写明\n缺哪一项——「资料里没提到」不等于「不存在」，宁可拒答也不要拿通用常识补出一段看着像的答案。\n\n还有一点容易被忽略：模型判「这问题跟我们库无关」（`none`）时，代码不会直接相信它。判 `none` 只说明模型猜查不到，而拒答的正当理由只有「查过了、证据里没有」，所以会先拿原问题检索一次——查到就照常作答，查不到才返回拒答文本。换句话说，「没查就问」不允许，「查了再说」才是正路。\n\n只读护栏（`agent/sql_guard.py`）只做四件事：只允许单条 `SELECT`/`WITH`、出现写操作关键字就拒绝、\n表必须在白名单内、强制一个不超过上限的 `LIMIT`。它是纵深防御的一层，不是沙箱——\n给这个 DSN 用的仍然应该是只读数据库账号。",
+        "`sql_query` 执行前先过只读护栏（`private_rag/agent/sql_guard.py`）：只允许单条 `SELECT`/`WITH`，出现写操作或元数据关键字直接拒绝，表必须在白名单内（`WITH` 定义的临时视图名不算表），并强制一个不超过 `AGENT_SQL_ROWS` 的 `LIMIT`；护栏改写后的 SQL 与实际行数都会写进轨迹。**护栏是纵深防御的一层，不是沙箱**：这个 DSN 仍然应该使用只读数据库账号，`allow_runtime_query` 默认关闭也是这个原因。\n\n意图分成 `knowledge` / `database` / `mixed` / `none` 四类。`none` 表示与知识库无关，直接按既有约定返回拒答文本，不做任何检索。\n\n路由器只看得到工具的 `description`，所以库里存着什么必须写进描述才可能判准意图：装配 `sql_query` 时会对白名单表做一次**有界采样**（列名 + 每个文本列少量样例值，总长受 `RAG_AGENT_CATALOG_CHARS` 限制，`RAG_AGENT_CATALOG_SAMPLES=0` 则只列列名不取样例），采样出的词同时作为关键词回退的补充线索。判意图的标准是「回答所需的事实住在哪一侧」，不是问法像不像技术查询：问一条业务记录自身的描述、备注、状态、时间，即使一个数字词都没有也算 `database`；只要有一侧被漏掉就选 `mixed`。代价是**样例值会进入 prompt**：业务数据敏感的库请把 `RAG_AGENT_CATALOG_SAMPLES` 设为 0，只让路由器看列名。\n\n证据够不够用由步进决策自己声明（`sufficient` / `missing`），不额外加一次判断调用：判不足时不进生成，直接返回拒答哨兵并写明缺少的信息，`stop_reason` 为 `insufficient_evidence`。生成侧同样写死「资料里没提到不等于不存在」，禁止用通用常识补全有据无据都行的事实；确实有缺口时回答第一行必须是拒答哨兵，好让「没查到」不被读成「不存在」。\n\n`none` 不再是一张免检通行证：路由器判 `none` 只说明它「猜两侧都查不到」，而拒答的正当理由只有「查过了，证据里没有」。所以判成 `none` 时不再直接拒答，而是先用原问题做一次知识库验证检索——查到东西就照常作答，并把意图按实际作答依据报成 `knowledge`；查不到才返回拒答哨兵，`stop_reason` 记 `no_evidence`。代价是一条真正无关的问题多花一次 `kb_search`（仍受 `RAG_AGENT_MAX_STEPS` 约束）；`RAG_DISABLE_AGENT_NONE_PROBE=1` 退回「判 none 就直接…",
+        "## v7 详细验收（本分支）\n\n- [x] 意图路由：`knowledge` / `database` / `mixed` / `none`，由模型顺带给出首个动作，运行时不再预设走哪条链路\n- [x] 工具调用：`kb_search`（复用 `RagEngine.retrieve_with_trace` 的全链路）与 `sql_query`（运行时只读查询业务库）\n- [x] 运行时 SQL 显式授权：只有 `sources.yaml` 里 `allow_runtime_query: true` 的 sql 源才挂上工具，默认关闭；关掉时模型连这个工具都看不到\n- [x] 只读护栏：单条 `SELECT`/`WITH`、写操作与元数据关键字拒绝、表白名单（CTE 名不算表）、强制 `LIMIT` 上限；护栏改写后的 SQL 写进轨迹\n- [x] 检索-行动循环：读观察后再决策，三条边界为工具步数（`AGENT_MAX_STEPS`）、证据字符预算（`AGENT_CONTEXT_CHARS`）、SQL 行数（`AGENT_SQL_ROWS`）\n- [x] 证据统一编号：不同工具的证据块合并后全局编号，回答里的 `[n]` 与引用列表一一对应（SQL 结果复用 `Citation.table`）\n- [x] 失败降级：决策模型不可用退回关键词路由；工具失败作为观察回灌给模型；无证据按既有约定返回拒答文本；agentic 装配失败只让 `/chat/agent` 返回 503，不影响 `/chat`\n- [x] 可观测 trace：每请求一行 JSON 追加到 `storage/traces/agent.jsonl`，记录每步理由/参数/观察/行数/耗时，`scripts/replay_trace.py` 与 `GET /api/v1/traces/{trace_id}` 可逐条回放\n- [x] `Planner` 可注入：护栏、决策器、工具、循环、轨迹、接口六组共 121 条单测都不依赖 Ollama 与 Qdrant（全量 `pytest tests` 295 passed）\n- [x] 决策 JSON 的输出预算独立可配（`RAG_AGENT_PLANNER_TOKENS`，默认 2000）：本机实跑发现默认模型是推理型，400 token 只吐思考不给正文，路由整段回退到关键词判断\n- [x] 本机实跑端到端：`init_demo_db` → `ingest` → `chat_agent` → `replay_trace` 全链路跑通，knowledge/database/mixed/none 四类问题各验一次；预算修好后 mixed 问题的意图与 SQL 都由模型自己给出（2 次工具调用，`stop_reason=final`）\n- [ ] 同一份 …"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "只读护栏（`agent/sql_guard.py`）只做四件事：只允许单条 `SELECT`/`WITH`、出现写操作关键字就拒绝、 表必须在白名单内、强制一个不超过上限的 `LIMIT`。它是纵深防御的一层，不是沙箱—— 给这个 DSN …",
+          "page": null,
+          "table": null,
+          "score": 5.70703125
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "`sql_query` 执行前先过只读护栏（`private_rag/agent/sql_guard.py`）：只允许单条 `SELECT`/`WITH`，出现写操作或元数据关键字直接拒绝，表必须在白名单内（`WITH` 定义的临时视图名不…",
+          "page": null,
+          "table": null,
+          "score": 2.61328125
+        },
+        {
+          "index": 3,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [x] 意图路由：`knowledge` / `database` / `mixed` / `none`，由模型顺带给出首个动作，运行时不再预设走哪条链路 - [x] 工具调用：`kb_search`（复用 `RagEngine.ret…",
+          "page": null,
+          "table": null,
+          "score": -0.198486328125
+        }
+      ],
+      "source_uris": [
+        "docs/beginner-guide.md",
+        "README.md",
+        "docs/ROADMAP.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 3302,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "knowledge",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "e08e576bff87",
+      "history_turns": 0,
+      "retrieval_ms": 1161.0,
+      "generation_ms": 57212.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "k05",
+      "config": "agent",
+      "category": "knowledge",
+      "answerable": true,
+      "question": "会话历史能当事实依据吗？会话数据存在哪里？",
+      "reference": "不能，提示词明确规定历史不能当事实依据，只用于理解指代；会话保存在内存里，服务重启就清空。",
+      "evidence": [
+        "但提示词明确规定历史不能当事实依据；会话在内存里，服务重启就清空"
+      ],
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [],
+      "answer": "**会话历史能当事实依据吗？**\n\n不能。提示词明确规定\"历史不能当事实依据\"，会话的角色只是\"理解指代的记事本\"，帮助模型知道\"它\"指什么，而非提供事实 [2]。固定链路中 `generation.py:97` 也写了完整措辞：\"对话历史（仅用于理解当前问题的指代，不能作为事实依据）\"[3]。\n\n不过 v7.4 诊断指出，在 agent 模式下历史被直接裸贴在规则块与证据块之间，\"没有小标题、没有编号、没有「这不是事实来源」的标注\"，看起来像规则或匿名证据，导致 `FINAL_PROMPT` 第 1 条\"证据之外的事实一句都不要写\"字面上虽覆盖，但\"被这样渲染出来，实际约束不住\"[3]。\n\n**会话数据存在哪里？**\n\n会话数据存在内存中，服务重启即清空 [2]。文档同时提到，若需要横向扩展，要把会话搬到 Redis 之类的外部存储，但那是扩展方案，并非当前默认 [2]。",
+      "contexts": [
+        "# v7.4 诊断：模型把对话历史当成事实来源，还原指代后不回查工具\n\n> **代码与数据位置**：本文引用的代码、`eval/v7_agent_qa.jsonl` 的三条 `coreference` 样本与\n> `eval/reports/v7_3_coreference_report.*` 都已在 `main` 上（v7.3 经 PR #12 并入，merge 提交 `4ee6564`）。\n> 本分支 `v7.4-history-as-evidence` 基于该 `main`，只多本文这一个提交，文中行号可在当前检出直接打开。\n> 本文只做诊断，不改任何行为。",
+        "## 最需要看懂的七处\n\n1. **建库和问答是两条时间线**：建库慢，负责把资料整理好；问答快，只做查找和生成。两者通过 Qdrant 和 BM25 索引交接。\n2. **两份索引各管一种“相关性”**：向量管“意思像不像”，BM25 管“词对不对得上”，RRF 负责把两个排行榜合成一个。\n3. **reranker 是质量闸门**：它把候选从 10 条压到 3 条，大模型看到的资料越干净，越不容易胡编。\n4. **引用来自元数据，不是模型自由发挥**：每张卡片入库时就带着来源、页码、表名，返回时直接组装成引用。\n5. **会话只是“理解指代的记事本”**：历史帮助模型知道“它”指橙子，但提示词明确规定历史不能当事实依据；会话在内存里，服务重启就清空。\n6. **v5 是两级阅读**：子块负责找得准，父块负责读得全；查询改写只是多找几条路，最后仍按原问题精排，失败就退回原问题。\n7. **v7 把“查什么”交给模型，把“能跑多远”留给人**：模型只能在 `kb_search` 与只读 `sql_query` 之间选，步数、证据字符、SQL 行数都是硬上限；每一步决策写进 trace，事后能逐条回放它当时为什么这么选。\n\n当前版本还有两个使用边界：服务默认只监听本机、没有鉴权，不要直接暴露公网；Qdrant 用本地磁盘模式，所以 `serve.py` 固定单进程单 worker，需要横向扩展时要换 Qdrant server 模式并把会话搬到 Redis 之类的外部存储。",
+        "历史直接裸贴在规则块与证据块之间，**没有小标题、没有编号、没有「这不是事实来源」的标注**，\n看起来就像规则的第 7 款或者一条匿名证据。而固定链路的 `generation.py:97` 反而写了完整措辞：\n「对话历史（仅用于理解当前问题的指代，不能作为事实依据）」。\n`FINAL_PROMPT` 第 1 条「证据之外的事实一句都不要写」字面上覆盖这种情况，但被这样渲染出来，实际约束不住。\n\n`agent/tools.py` 的 `render_evidence()` 只给工具产出的块编号，历史永远不进引用列表，\n所以抄历史得到的那半句在引用列表里没有对应条目——用户看不见它的出处。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v7.4-history-as-evidence.md",
+          "source_type": "file",
+          "source_uri": "docs/v7.4-history-as-evidence.md",
+          "snippet": "# v7.4 诊断：模型把对话历史当成事实来源，还原指代后不回查工具 > **代码与数据位置**：本文引用的代码、`eval/v7_agent_qa.jsonl` 的三条 `coreference` 样本与 > `eval/reports/…",
+          "page": null,
+          "table": null,
+          "score": 1.1806640625
+        },
+        {
+          "index": 2,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "## 最需要看懂的七处 1. **建库和问答是两条时间线**：建库慢，负责把资料整理好；问答快，只做查找和生成。两者通过 Qdrant 和 BM25 索引交接。 2. **两份索引各管一种“相关性”**：向量管“意思像不像”，BM25 管“…",
+          "page": null,
+          "table": null,
+          "score": -0.0726318359375
+        },
+        {
+          "index": 3,
+          "title": "v7.4-history-as-evidence.md",
+          "source_type": "file",
+          "source_uri": "docs/v7.4-history-as-evidence.md",
+          "snippet": "历史直接裸贴在规则块与证据块之间，**没有小标题、没有编号、没有「这不是事实来源」的标注**， 看起来就像规则的第 7 款或者一条匿名证据。而固定链路的 `generation.py:97` 反而写了完整措辞： 「对话历史（仅用于理解当前问…",
+          "page": null,
+          "table": null,
+          "score": -0.2313232421875
+        }
+      ],
+      "source_uris": [
+        "docs/v7.4-history-as-evidence.md",
+        "docs/beginner-guide.md",
+        "docs/v7.4-history-as-evidence.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 1439,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "knowledge",
+      "stop_reason": "planner_unavailable",
+      "tool_calls": 1,
+      "tool_steps": 4,
+      "trace_id": "5cd2f75973b6",
+      "history_turns": 0,
+      "retrieval_ms": 1501.0,
+      "generation_ms": 122248.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 0.5,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "k06",
+      "config": "agent",
+      "category": "knowledge",
+      "answerable": true,
+      "question": "v7 的意图路由分成哪几种意图？",
+      "reference": "knowledge / database / mixed / none 四种，由模型顺带给出首个动作，运行时不再预设走哪条链路。",
+      "evidence": [
+        "意图路由：`knowledge` / `database` / `mixed` / `none`"
+      ],
+      "expected_source": "docs/ROADMAP.md",
+      "expected_sources": [],
+      "answer": "v7 的意图路由分成四种意图：`knowledge`、`database`、`mixed`、`none`。[1] 其中 `none` 表示与知识库无关，直接按既有约定返回拒答文本，不做任何检索；`mixed` 表示两侧（知识库与业务数据库）都需要查询；`knowledge` 和 `database` 则分别对应只需查知识库或只需查业务库的情况。[1]",
+      "contexts": [
+        "`sql_query` 执行前先过只读护栏（`private_rag/agent/sql_guard.py`）：只允许单条 `SELECT`/`WITH`，出现写操作或元数据关键字直接拒绝，表必须在白名单内（`WITH` 定义的临时视图名不算表），并强制一个不超过 `AGENT_SQL_ROWS` 的 `LIMIT`；护栏改写后的 SQL 与实际行数都会写进轨迹。**护栏是纵深防御的一层，不是沙箱**：这个 DSN 仍然应该使用只读数据库账号，`allow_runtime_query` 默认关闭也是这个原因。\n\n意图分成 `knowledge` / `database` / `mixed` / `none` 四类。`none` 表示与知识库无关，直接按既有约定返回拒答文本，不做任何检索。\n\n路由器只看得到工具的 `description`，所以库里存着什么必须写进描述才可能判准意图：装配 `sql_query` 时会对白名单表做一次**有界采样**（列名 + 每个文本列少量样例值，总长受 `RAG_AGENT_CATALOG_CHARS` 限制，`RAG_AGENT_CATALOG_SAMPLES=0` 则只列列名不取样例），采样出的词同时作为关键词回退的补充线索。判意图的标准是「回答所需的事实住在哪一侧」，不是问法像不像技术查询：问一条业务记录自身的描述、备注、状态、时间，即使一个数字词都没有也算 `database`；只要有一侧被漏掉就选 `mixed`。代价是**样例值会进入 prompt**：业务数据敏感的库请把 `RAG_AGENT_CATALOG_SAMPLES` 设为 0，只让路由器看列名。\n\n证据够不够用由步进决策自己声明（`sufficient` / `missing`），不额外加一次判断调用：判不足时不进生成，直接返回拒答哨兵并写明缺少的信息，`stop_reason` 为 `insufficient_evidence`。生成侧同样写死「资料里没提到不等于不存在」，禁止用通用常识补全有据无据都行的事实；确实有缺口时回答第一行必须是拒答哨兵，好让「没查到」不被读成「不存在」。\n\n`none` 不再是一张免检通行证：路由器判 `none` 只说明它「猜两侧都查不到」，而拒答的正当理由只有「查过了，证据里没有」。所以判成 `none` 时不再直接拒答，而是先用原问题做一次知识库验证检索——查到东西就照常作答，并把意图按实际作答依据报成 `knowledge`；查不到才返回拒答哨兵，`stop_reason` 记 `no_evidence`。代价是一条真正无关的问题多花一次 `kb_search`（仍受 `RAG_AGENT_MAX_STEPS` 约束）；`RAG_DISABLE_AGENT_NONE_PROBE=1` 退回「判 none 就直接…",
+        "| v7.2 | `v7.2` | 意图路由与拒答策略：数据可得性驱动路由、证据充分性拒答 | ✅ 本分支完成 | 343 测试通过（同日收紧 `none` 判据后）；`sql_query` 工具描述带上库内数据目录（列名 + 有界样例值，`RAG_AGENT_CATALOG_CHARS` / `RAG_AGENT_CATALOG_SAMPLES` 可关），路由判据改为「回答所需的事实住在哪一侧」；证据充分性由步进决策声明，判不足直接拒答并给 `stop_reason=insufficient_evidence`；v7 评估集 26 条复跑 `refusal_accuracy` 0.250→1.000、`source_hit` 0.591→1.000、`evidence_hit@3` 0.409→0.864、单条耗时 71.2s→51.9s，`knowledge` 类 7 条持平无回归，报告 `eval/reports/v7_2_agent_report.md`；同日在同一条线上收紧 `none` 判据（分支 `v7.2-none-gate`：判 `none` 先做一次验证检索，拒答必须建立在证据上，`RAG_DISABLE_AGENT_NONE_PROBE` 可关），复跑 26 条 `none`/`no_retrieval` 双双归零、`refusal_accuracy` 1.000 持平、`citation_rate` 0.955→1.000，报告 `eval/reports/v7_2_nonegate_report.md`；指代消解见下一行 v7.3 |\n| v7.3 | `v7.3-coreference` | 指代消解：提示词写死「本项目/本系统」的消解规则，评估补上真正带对话历史的多轮样本 | ✅ 本分支完成 | 350 测试通过；`ROUTER_PROMPT`/`STEP_PROMPT`/`FINAL_PROMPT` 三处写死「『这个项目』『本系统』指本系统自身、它的说明文档就在知识库里」「没有对话历史绝不是选 `none` 的理由」；评估集 26→29 条（新增 `coreference` 3 条带 `history`），`EvalSample.history` 做严格校验并真的传给 `agent.run(..., history=...)`，报告新增 `history_turns`；三条指代样本全部还原（c01 文档侧、c02 走 `sql_query`、c03 判 `mixed`），同 26 条子集 `answer_rate`/`source_hit`/`refusal_accuracy` 与上一轮持平（0.955/0.955/1.000），`evidence_hit@3` -0.045 是 k06 与 m04 各 -1、m01 +1 的…",
+        "- [x] 回归检查通过：`knowledge` 类 7 条 `source_hit` 与 `evidence_hit@3` 两轮都是 1.000，且这 7 条一次都没\n      引用业务库——路由改动没把纯文档问答带偏。分类别 `source_hit`：`database` 0.167→1.000、\n      `mixed` 0.400→1.000、`multi_step` 0.750→1.000。15 条业务库类样本里真的引用 `demo.products` 的从\n      9 条升到 15 条；意图分布从 `knowledge`15 / `mixed`9 / `none`2（一条 `database` 都没有）变成\n      `database`10 / `knowledge`9 / `mixed`6 / `none`1\n- [x] `stop_reason` 分布：v7.1 `final`18 / `no_retrieval`2 / `planner_unavailable`6 → v7.2 `final`21 /\n      `insufficient_evidence`2 / `no_retrieval`1 / `context_budget`1 / `planner_unavailable`1。决策 JSON\n      解析失败从 6 条降到 1 条只作为观察记录，不作归因（提示词改动与模型随机性同时在里面）\n- [x] 4 条应拒答样本全部以哨兵文本开头，但路径不同：r03/r04 走 `insufficient_evidence`（先检索、判证据不足），\n      r02 走 `context_budget`（12 段证据用尽字符预算后仍按缺口拒答），r01 走 `none`（根本没检索）\n- [x] `none` 判据已收紧（同日，`v7.2-none-gate`）：`none` 不再是免检通行证。路由判成 `none` 时不再直接\n      拒答，而是先用原问题做一次知识库验证检索——查到证据就照常作答、把上报意图改写成 `knowledge`，查不到\n      才返回拒答哨兵、`stop_reason` 记 `no_evidence`（与压根没检索的 `no_retrieval` 区分开），开关\n      `RAG_DISABLE_AGENT_NONE_PROBE`；提示词把 `none` 的准入收紧到实时信息、天气、新闻、外部网站内容、\n      主观偏好这类明确在本系统之外的事实，问到业务记录、字段或本系统自身文档一律先取证。全量 26 条复跑\n      （`eval/reports/v7_2_nonegate_report.md`）：`none` 与 `no_retrieval` 各从 1 条降到 0 条，…"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "意图分成 `knowledge` / `database` / `mixed` / `none` 四类。`none` 表示与知识库无关，直接按既有约定返回拒答文本，不做任何检索。 路由器只看得到工具的 `description`，所以库里存…",
+          "page": null,
+          "table": null,
+          "score": 3.556640625
+        },
+        {
+          "index": 2,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "| v7.2 | `v7.2` | 意图路由与拒答策略：数据可得性驱动路由、证据充分性拒答 | ✅ 本分支完成 | 343 测试通过（同日收紧 `none` 判据后）；`sql_query` 工具描述带上库内数据目录（列名 + 有界样例值，…",
+          "page": null,
+          "table": null,
+          "score": 2.3203125
+        },
+        {
+          "index": 3,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [x] 回归检查通过：`knowledge` 类 7 条 `source_hit` 与 `evidence_hit@3` 两轮都是 1.000，且这 7 条一次都没 引用业务库——路由改动没把纯文档问答带偏。分类别 `source_hi…",
+          "page": null,
+          "table": null,
+          "score": 1.8583984375
+        }
+      ],
+      "source_uris": [
+        "README.md",
+        "docs/ROADMAP.md",
+        "docs/ROADMAP.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 3725,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "knowledge",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "65d4cdc89412",
+      "history_turns": 0,
+      "retrieval_ms": 3647.0,
+      "generation_ms": 46302.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "k07",
+      "config": "agent",
+      "category": "knowledge",
+      "answerable": true,
+      "question": "这个项目的 embedding 和生成分别由哪个组件负责？",
+      "reference": "Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储。",
+      "evidence": [
+        "Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储"
+      ],
+      "expected_source": "README.md",
+      "expected_sources": [],
+      "answer": "根据项目 README 的说明，embedding 和生成均由 **Ollama** 负责；而向量存储则由 **Qdrant**（本地磁盘模式）承担。[1]",
+      "contexts": [
+        "# private-rag\n\n完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Parent-Document 父子块上下文**与**查询改写（多查询 / HyDE）**：子块负责召回，父块负责给模型完整上下文。Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储。v7 起额外提供 **agentic 问答**：模型按问题意图在知识库检索与只读 SQL 之间自动选择，边看结果边决定要不要继续查，并把每条决策写成可回放的 trace。",
+        "### 5. v5：小块负责找，大段负责读\n\nParent-Document RAG 的核心就一句话：**检索用子块，送模型用父块**。下面把建库和问答各拆成两段。",
+        "## v6.1 详细验收（只读公网演示）\n\n- [x] `scripts/build_demo_snapshot.py` 用真实加载器导出快照，含扫描件 OCR 文本与表格文档\n- [x] 构建器白名单校验：file 源只允许 `data/docs`，sql 源只允许 `data/sql/demo.db`，web 源拒绝构建\n- [x] 拆出 `retrieval/tokenizer.py`，只读服务复用同一套分词而不依赖 qdrant-client\n- [x] 只读服务不加载模型：依赖清单不含 torch/transformers/sentence-transformers/FlagEmbedding/\n      qdrant-client/pdfplumber/rapidocr，可在免费实例（512 MB）上运行\n- [x] `/ready` 的 `checks` 显式给出 `embedding_model/reranker/llm = false`，不让只读状态被误读成就绪的完整服务\n- [x] 引用条目字段与线上 `CitationOut` 一致，页码与表格名在公网演示页可见\n- [x] `/api/v1/chat*` 恒返回 409 `generation_disabled`，不假装能回答\n- [x] 只读索引与 `LexicalIndex` 的排序对齐测试；共 12 条只读接口测试，不依赖 Ollama/Qdrant/网络\n- [x] 可选令牌 `RAG_DEMO_TOKEN`：设置后 `/api/v1/*` 要求 `X-Demo-Token`\n- [x] README 说明只读部署不能代表完整效果（无语义召回、无精排、无父子块、无问答）"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "# private-rag 完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Par…",
+          "page": null,
+          "table": null,
+          "score": -0.044464111328125
+        },
+        {
+          "index": 2,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "### 5. v5：小块负责找，大段负责读 Parent-Document RAG 的核心就一句话：**检索用子块，送模型用父块**。下面把建库和问答各拆成两段。",
+          "page": null,
+          "table": null,
+          "score": -3.57421875
+        },
+        {
+          "index": 3,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [x] `scripts/build_demo_snapshot.py` 用真实加载器导出快照，含扫描件 OCR 文本与表格文档 - [x] 构建器白名单校验：file 源只允许 `data/docs`，sql 源只允许 `data/s…",
+          "page": null,
+          "table": null,
+          "score": -4.7734375
+        }
+      ],
+      "source_uris": [
+        "README.md",
+        "docs/beginner-guide.md",
+        "docs/ROADMAP.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 1269,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "knowledge",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "dbf55e8f5767",
+      "history_turns": 0,
+      "retrieval_ms": 1393.0,
+      "generation_ms": 26175.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "d01",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "香蕉到底能不能放冰箱保存？",
+      "reference": "香蕉不适合放冰箱，低温会让表皮变黑、口感变差；建议常温阴凉处保存。",
+      "evidence": [
+        "香蕉不适合放冰箱，低温会让表皮变黑、口感变差"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "香蕉不适合放冰箱保存。低温会让香蕉表皮变黑、口感变差，建议将香蕉放在常温阴凉处保存。[1]",
+      "contexts": [
+        "name | description\n香蕉 | 香蕉不适合放冰箱，低温会让表皮变黑、口感变差；建议常温阴凉处保存。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | description；首行：香蕉 | 香蕉不适合放冰箱，低温会让表皮变黑、口感变差；建议常温阴凉处保存。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 88,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "62360e779ba5",
+      "history_turns": 0,
+      "retrieval_ms": 3.0,
+      "generation_ms": 19859.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "d02",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "猕猴桃现在单价是多少，买回来应该怎么保存？",
+      "reference": "猕猴桃单价 15.0 元；维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化。",
+      "evidence": [
+        "猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "猕猴桃目前的单价为 15.0 元 [1]。买回来后的保存建议：猕猴桃维生素 C 含量高，成熟后应尽快食用；如果尚未完全成熟，可以冷藏以延缓软化 [1]。",
+      "contexts": [
+        "name | price | description\n猕猴桃 | 15.0 | 猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price | description；首行：猕猴桃 | 15.0 | 猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 103,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "1dbed71fd8f0",
+      "history_turns": 0,
+      "retrieval_ms": 8.0,
+      "generation_ms": 50832.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "d03",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "把这四种水果按价格从高到低列出来，并说明各自的保存方式。",
+      "reference": "按价格从高到低：猕猴桃 15.0 元、橙子 12.5 元、苹果 8.0 元、香蕉 6.5 元；苹果适合冷藏保存以延长保鲜时间，切开后容易氧化建议尽快食用。",
+      "evidence": [
+        "苹果适合冷藏保存，可以延长保鲜时间"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "四种水果按价格从高到低排列如下：\n\n1. 猕猴桃 — 15.0元：维生素C含量高，成熟后应尽快食用，也可以冷藏延缓软化。[1]\n2. 橙子 — 12.5元：表皮较厚，常温可存放一周左右，适合日常补充维C。[1]\n3. 苹果 — 8.0元：适合冷藏保存以延长保鲜时间；切开后容易氧化，建议尽快食用。[1]\n4. 香蕉 — 6.5元：不适合放冰箱，低温会让表皮变黑、口感变差，建议常温阴凉处保存。[1]",
+      "contexts": [
+        "name | price | description\n猕猴桃 | 15.0 | 猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化。\n橙子 | 12.5 | 橙子富含维生素 C，适合日常补充维 C；表皮较厚，常温可存放一周左右。\n苹果 | 8.0 | 苹果适合冷藏保存，可以延长保鲜时间；切开后容易氧化，建议尽快食用。\n香蕉 | 6.5 | 香蕉不适合放冰箱，低温会让表皮变黑、口感变差；建议常温阴凉处保存。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price | description；首行：猕猴桃 | 15.0 | 猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 241,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "b3f6849a6633",
+      "history_turns": 0,
+      "retrieval_ms": 1.0,
+      "generation_ms": 29096.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "d04",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "橙子常温下大概能放多久？",
+      "reference": "橙子表皮较厚，常温可存放一周左右。",
+      "evidence": [
+        "表皮较厚，常温可存放一周左右"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "橙子表皮较厚，常温下大概可以存放一周左右。[1]",
+      "contexts": [
+        "name | description\n橙子 | 橙子富含维生素 C，适合日常补充维 C；表皮较厚，常温可存放一周左右。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | description；首行：橙子 | 橙子富含维生素 C，适合日常补充维 C；表皮较厚，常温可存放一周左右。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 90,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "d6e310f1e7c2",
+      "history_turns": 0,
+      "retrieval_ms": 3.0,
+      "generation_ms": 23429.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "d05",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "哪种水果的维生素 C 含量比较高，它的单价是多少？",
+      "reference": "猕猴桃维生素 C 含量高，单价 15.0 元。",
+      "evidence": [
+        "猕猴桃维生素 C 含量高"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "根据知识库记录，猕猴桃的维生素 C 含量较高（描述为",
+      "contexts": [
+        "name | price | description\n橙子 | 12.5 | 橙子富含维生素 C，适合日常补充维 C；表皮较厚，常温可存放一周左右。\n猕猴桃 | 15.0 | 猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price | description；首行：橙子 | 12.5 | 橙子富含维生素 C，适合日常补充维 C；表皮较厚，常温可存放一周左右。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 151,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "09f94c207a42",
+      "history_turns": 0,
+      "retrieval_ms": 3.0,
+      "generation_ms": 49484.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 0.0,
+        "citation_validity": 0.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "d06",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "苹果切开后为什么建议尽快吃完？",
+      "reference": "苹果切开后容易氧化，建议尽快食用；平时适合冷藏保存以延长保鲜时间。",
+      "evidence": [
+        "切开后容易氧化，建议尽快食用"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "苹果切开后建议尽快吃完，是因为切开后容易氧化[1]。",
+      "contexts": [
+        "name | description\n苹果 | 苹果适合冷藏保存，可以延长保鲜时间；切开后容易氧化，建议尽快食用。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | description；首行：苹果 | 苹果适合冷藏保存，可以延长保鲜时间；切开后容易氧化，建议尽快食用。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 88,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "1ef6e649b0c4",
+      "history_turns": 0,
+      "retrieval_ms": 4.0,
+      "generation_ms": 28727.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "m01",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "香蕉能不能放冰箱？另外这个项目的引用列表是从哪儿来的？",
+      "reference": "香蕉不适合放冰箱，低温会让表皮变黑、口感变差，建议常温阴凉处保存；引用列表不是模型编的，而是卡片入库时自带的 source_type / title / source_uri / page / table 等身份信息整理而成。",
+      "evidence": [
+        "香蕉不适合放冰箱，低温会让表皮变黑、口感变差"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "answer": "**香蕉能不能放冰箱？** 不能。香蕉不适合放冰箱，低温会让表皮变黑、口感变差，建议常温阴凉处保存。[1]\n\n**引用列表是从哪儿来的？** 引用列表并非模型自行编造，而是来自卡片入库时携带的元数据（`source_type / title / source_uri / page / table`）；返回答案时，系统直接把这些元数据整理成引用列表，模型只负责在正文里标注 `[1]`、`[2]` 等编号。[2] 具体实现上，`agent/tools.py` 的 `render_evidence()` 只给工具产出的证据块编号，对话历史不会进入引用列表。[4] 而来源的注册则由 `sources.yaml` 统一管理，支持三类来源。[3]",
+      "contexts": [
+        "name | description\n香蕉 | 香蕉不适合放冰箱，低温会让表皮变黑、口感变差；建议常温阴凉处保存。",
+        "值得记住的一点：**引用不是模型编的**。每张卡片入库时就带着 `source_type / title / source_uri / page / table` 这些身份信息；返回答案时，系统直接把这些元数据整理成引用列表，模型只负责在答案里标 `[1]`、`[2]`。",
+        "`sources.yaml` 支持三类来源：",
+        "历史直接裸贴在规则块与证据块之间，**没有小标题、没有编号、没有「这不是事实来源」的标注**，\n看起来就像规则的第 7 款或者一条匿名证据。而固定链路的 `generation.py:97` 反而写了完整措辞：\n「对话历史（仅用于理解当前问题的指代，不能作为事实依据）」。\n`FINAL_PROMPT` 第 1 条「证据之外的事实一句都不要写」字面上覆盖这种情况，但被这样渲染出来，实际约束不住。\n\n`agent/tools.py` 的 `render_evidence()` 只给工具产出的块编号，历史永远不进引用列表，\n所以抄历史得到的那半句在引用列表里没有对应条目——用户看不见它的出处。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | description；首行：香蕉 | 香蕉不适合放冰箱，低温会让表皮变黑、口感变差；建议常温阴凉处保存。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "值得记住的一点：**引用不是模型编的**。每张卡片入库时就带着 `source_type / title / source_uri / page / table` 这些身份信息；返回答案时，系统直接把这些元数据整理成引用列表，模型只负责在答…",
+          "page": null,
+          "table": null,
+          "score": -1.1279296875
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "`sources.yaml` 支持三类来源：",
+          "page": null,
+          "table": null,
+          "score": -1.5615234375
+        },
+        {
+          "index": 4,
+          "title": "v7.4-history-as-evidence.md",
+          "source_type": "file",
+          "source_uri": "docs/v7.4-history-as-evidence.md",
+          "snippet": "历史直接裸贴在规则块与证据块之间，**没有小标题、没有编号、没有「这不是事实来源」的标注**， 看起来就像规则的第 7 款或者一条匿名证据。而固定链路的 `generation.py:97` 反而写了完整措辞： 「对话历史（仅用于理解当前问…",
+          "page": null,
+          "table": null,
+          "score": -2.685546875
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "docs/beginner-guide.md",
+        "README.md",
+        "docs/v7.4-history-as-evidence.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 713,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "trace_id": "8ef69db98ac5",
+      "history_turns": 0,
+      "retrieval_ms": 4047.0,
+      "generation_ms": 92718.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "m02",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "橙子多少钱？这个项目的 embedding 和向量存储分别由什么负责？",
+      "reference": "橙子单价 12.5 元；Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储。",
+      "evidence": [
+        "橙子富含维生素 C，适合日常补充维 C"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "answer": "1. 橙子的价格为 12.5 元 [1]。2. 在该项目中，embedding 由 Ollama 负责，向量存储由 Qdrant（本地磁盘模式）负责 [2]。",
+      "contexts": [
+        "name | price\n橙子 | 12.5",
+        "# private-rag\n\n完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Parent-Document 父子块上下文**与**查询改写（多查询 / HyDE）**：子块负责召回，父块负责给模型完整上下文。Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储。v7 起额外提供 **agentic 问答**：模型按问题意图在知识库检索与只读 SQL 之间自动选择，边看结果边决定要不要继续查，并把每条决策写成可回放的 trace。",
+        "## 增量与更新语义\n\n- **幂等**：`doc_id + content_hash` 未变化时跳过，不重复调用 embedding。\n- **稳定 ID**：`uuid5(doc_id + content_hash + chunk_index)`，重复写入是覆盖而不是新增。\n- **更新**：内容变化时先删除该 `doc_id` 的旧向量，再写入新版本；PDF 按页、SQL 按行、网页按 URL 独立更新。\n- **prune**：`--prune` 删除本次没有再次出现的文件/页面/行。若某个 source 在加载阶段有错误（如网页暂时失败），跳过该 source 的 prune，避免误删。\n- **词法索引**：每次入库结束重建 `storage/lexical/bm25.pkl`；问答时缺失会自动降级为纯向量检索并提示。",
+        "### 5. v5：小块负责找，大段负责读\n\nParent-Document RAG 的核心就一句话：**检索用子块，送模型用父块**。下面把建库和问答各拆成两段。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price；首行：橙子 | 12.5",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "# private-rag 完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Par…",
+          "page": null,
+          "table": null,
+          "score": -0.76904296875
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "## 增量与更新语义 - **幂等**：`doc_id + content_hash` 未变化时跳过，不重复调用 embedding。 - **稳定 ID**：`uuid5(doc_id + content_hash + chunk_ind…",
+          "page": null,
+          "table": null,
+          "score": -4.09375
+        },
+        {
+          "index": 4,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "### 5. v5：小块负责找，大段负责读 Parent-Document RAG 的核心就一句话：**检索用子块，送模型用父块**。下面把建库和问答各拆成两段。",
+          "page": null,
+          "table": null,
+          "score": -4.41796875
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "README.md",
+        "README.md",
+        "docs/beginner-guide.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 947,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "trace_id": "df78bc160990",
+      "history_turns": 0,
+      "retrieval_ms": 1420.0,
+      "generation_ms": 53636.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "m03",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "最便宜的水果是什么、单价多少？精排后最终给大模型几条资料？",
+      "reference": "最便宜的是香蕉，6.5 元；精排后最终只给大模型 3 条（TOP_K_RERANK=3）。",
+      "evidence": [
+        "香蕉不适合放冰箱，低温会让表皮变黑"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "answer": "**最便宜的水果是什么、单价多少？**\n\n【资料中没有相关信息】证据中仅查得一条水果记录——香蕉，单价 6.5 [1]，但无法据此确认它是所有水果中最便宜的（证据未提供完整水果列表或排序条件）。\n\n**精排后最终给大模型几条资料？**\n\n精排（rerank）后最终只给大模型 **3 条**资料 [2]。具体流程是：两路检索各捞 20 条候选，经 RRF 融合后保留 10 条，再由 reranker 精读压缩到 3 条交给大模型 [2][4]；文档也用\"精读筛出最相关的 3 张\"来概括这一步 [3]。",
+      "contexts": [
+        "name | price\n香蕉 | 6.5",
+        "## 关键变量\n\n| 变量 | 默认值 | 用大白话说 |\n|---|---:|---|\n| `CHUNK_SIZE` | 700 | 子块最多约 700 个字符，用来检索 |\n| `CHUNK_OVERLAP` | 100 | 相邻子块重叠 100 字符，避免一句话被切断 |\n| `PARENT_CHUNK_SIZE` | 2000 | 父块最多约 2000 字符，命中后整段送模型 |\n| `CONTEXT_MAX_CHARS` | 6000 | 所有父块加起来的字符预算，超了回退子块 |\n| `MAX_VARIANTS` | 2 | 多查询最多生成 2 个改写查询 |\n| `MAX_VARIANT_CHARS` | 300 | 每个改写查询最长 300 字符 |\n| `MAX_HYDE_CHARS` | 400 | HyDE 假想文档最长 400 字符 |\n| `DENSE_TOP_K` | 20 | 语义检索先捞 20 条候选 |\n| `LEXICAL_TOP_K` | 20 | 关键词检索也捞 20 条 |\n| `FUSION_TOP_K` | 10 | 两路合并后留 10 条给下一关 |\n| `TOP_K_RERANK` | 3 | 精读后最终只给大模型 3 条 |\n| `RRF_K` | 60 | 名次折算积分的平滑系数，越大名次差距越平缓 |\n| `SESSION_TTL_SECONDS` | 1800 | 会话闲置 30 分钟就自动清理 |\n| `MAX_HISTORY_TURNS` | 6 | 每次最多带最近 6 轮对话给模型 |\n| `MAX_HISTORY_CHARS` | 3000 | 历史总长度预算，超了就从旧到新裁掉 |\n| `AGENT_MAX_STEPS` | 4 | 一次提问最多让模型调 4 次工具，防止停不下来 |\n| `AGENT_CONTEXT_CHARS` | 7000 | 已收集证据超过 7000 字符就停止取料，直接作答 |\n| `AGENT_TOOL_CHARS` | 3000 | 单个工具返回的证据最多占 3000 字符，按工具数分摊 |\n| `AGENT_SQL_ROWS` | 20 | 运行时 SQL 最多返回 20 行，同时是 `LIMIT` 的上限 |\n| `AGENT_PLANNER_TOKENS` | 2000 | 决策 JSON 的输出预算；推理型模型会先吐思考内容，预算小了正文就空了 |\n| `AGENT_TRACE_PATH` | storage/traces/agent.jsonl | 决策轨迹落盘位置，一次问答追加一行 |",
+        "## 一句话总结\n\n这个项目像一位“只回答你资料里内容的私人图书管理员”：先把你的文件、网页、数据库整理成两层卡片——小卡片用来快速查找，大卡片保留完整段落；你提问时，它先用两套目录找出候选小卡片，精读筛出最相关的 3 张，再把它们所属的大卡片整段交给本地大模型，只照着这些资料回答，并告诉你答案来自哪一页、哪个网址或哪条记录。\n\n这就是 RAG（检索增强生成），可以理解成“开卷考试”：模型不许凭记忆答题，必须先翻你的资料。",
+        "## 最需要看懂的七处\n\n1. **建库和问答是两条时间线**：建库慢，负责把资料整理好；问答快，只做查找和生成。两者通过 Qdrant 和 BM25 索引交接。\n2. **两份索引各管一种“相关性”**：向量管“意思像不像”，BM25 管“词对不对得上”，RRF 负责把两个排行榜合成一个。\n3. **reranker 是质量闸门**：它把候选从 10 条压到 3 条，大模型看到的资料越干净，越不容易胡编。\n4. **引用来自元数据，不是模型自由发挥**：每张卡片入库时就带着来源、页码、表名，返回时直接组装成引用。\n5. **会话只是“理解指代的记事本”**：历史帮助模型知道“它”指橙子，但提示词明确规定历史不能当事实依据；会话在内存里，服务重启就清空。\n6. **v5 是两级阅读**：子块负责找得准，父块负责读得全；查询改写只是多找几条路，最后仍按原问题精排，失败就退回原问题。\n7. **v7 把“查什么”交给模型，把“能跑多远”留给人**：模型只能在 `kb_search` 与只读 `sql_query` 之间选，步数、证据字符、SQL 行数都是硬上限；每一步决策写进 trace，事后能逐条回放它当时为什么这么选。\n\n当前版本还有两个使用边界：服务默认只监听本机、没有鉴权，不要直接暴露公网；Qdrant 用本地磁盘模式，所以 `serve.py` 固定单进程单 worker，需要横向扩展时要换 Qdrant server 模式并把会话搬到 Redis 之类的外部存储。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price；首行：香蕉 | 6.5",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "| 变量 | 默认值 | 用大白话说 | |---|---:|---| | `CHUNK_SIZE` | 700 | 子块最多约 700 个字符，用来检索 | | `CHUNK_OVERLAP` | 100 | 相邻子块重叠 100 字符，…",
+          "page": null,
+          "table": null,
+          "score": 2.314453125
+        },
+        {
+          "index": 3,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "## 一句话总结 这个项目像一位“只回答你资料里内容的私人图书管理员”：先把你的文件、网页、数据库整理成两层卡片——小卡片用来快速查找，大卡片保留完整段落；你提问时，它先用两套目录找出候选小卡片，精读筛出最相关的 3 张，再把它们所属的大卡…",
+          "page": null,
+          "table": null,
+          "score": 0.2283935546875
+        },
+        {
+          "index": 4,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "## 最需要看懂的七处 1. **建库和问答是两条时间线**：建库慢，负责把资料整理好；问答快，只做查找和生成。两者通过 Qdrant 和 BM25 索引交接。 2. **两份索引各管一种“相关性”**：向量管“意思像不像”，BM25 管“…",
+          "page": null,
+          "table": null,
+          "score": 0.2117919921875
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "docs/beginner-guide.md",
+        "docs/beginner-guide.md",
+        "docs/beginner-guide.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 2198,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": true,
+      "intent": "mixed",
+      "stop_reason": "planner_unavailable",
+      "tool_calls": 2,
+      "tool_steps": 5,
+      "trace_id": "90857e6a0601",
+      "history_turns": 0,
+      "retrieval_ms": 1372.0,
+      "generation_ms": 190933.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "m04",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "苹果适合怎么保存？v7 的 agentic 问答支持哪几种意图？",
+      "reference": "苹果适合冷藏保存以延长保鲜时间；v7 的意图路由支持 knowledge / database / mixed / none 四种意图。",
+      "evidence": [
+        "苹果适合冷藏保存，可以延长保鲜时间"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "answer": "1）苹果保存方式：苹果适合冷藏保存，可以延长保鲜时间；切开后容易氧化，建议尽快食用。[4]\n\n2）v7 agentic 问答支持的意图：模型按问题意图在「知识库检索」与「只读 SQL 查询」之间自动选择，即支持两种意图——kb_search（检索本地知识库）和 sql_query（只读查询业务数据库）。模型先看问题决定用哪个工具，读完返回结果再决定要不要继续查，最后基于统一编号的证据生成带引用回答。[1][2]",
+      "contexts": [
+        "# private-rag\n\n完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Parent-Document 父子块上下文**与**查询改写（多查询 / HyDE）**：子块负责召回，父块负责给模型完整上下文。Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储。v7 起额外提供 **agentic 问答**：模型按问题意图在知识库检索与只读 SQL 之间自动选择，边看结果边决定要不要继续查，并把每条决策写成可回放的 trace。",
+        "## v7 Agentic RAG（意图路由 + 工具调用 + 决策轨迹）\n\n前面几版的流程是固定的：任何问题都先召回、精排、再生成。v7 在它上面加一层循环——模型先看问题决定用哪个工具，读完返回结果再决定要不要继续查，最后仍基于统一编号的证据生成带引用回答。",
+        "### 端点\n\n| 方法 | 路径 | 说明 |\n|---|---|---|\n| GET | `/health` | 存活检查，200 |\n| GET | `/ready` | 知识库/BM25/reranker 就绪状态，不就绪返回 503 |\n| POST | `/api/v1/sessions` | 创建会话，201；可选 `{\"title\": \"...\"}` |\n| GET | `/api/v1/sessions/{id}` | 会话详情与历史消息 |\n| DELETE | `/api/v1/sessions/{id}` | 删除会话，204 |\n| POST | `/api/v1/chat` | 同步问答，JSON |\n| POST | `/api/v1/chat/stream` | SSE 流式问答 |\n| POST | `/api/v1/chat/agent` | agentic 问答：意图路由 + 工具调用，返回回答与决策轨迹 |\n| GET | `/api/v1/traces` | 最近的 agentic 决策轨迹索引 |\n| GET | `/api/v1/traces/{trace_id}` | 回放一条决策轨迹（结构化 + 可读文本） |",
+        "name | description\n苹果 | 苹果适合冷藏保存，可以延长保鲜时间；切开后容易氧化，建议尽快食用。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "# private-rag 完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Par…",
+          "page": null,
+          "table": null,
+          "score": 3.115234375
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "## v7 Agentic RAG（意图路由 + 工具调用 + 决策轨迹） 前面几版的流程是固定的：任何问题都先召回、精排、再生成。v7 在它上面加一层循环——模型先看问题决定用哪个工具，读完返回结果再决定要不要继续查，最后仍基于统一编号的…",
+          "page": null,
+          "table": null,
+          "score": 2.857421875
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### 端点 | 方法 | 路径 | 说明 | |---|---|---| | GET | `/health` | 存活检查，200 | | GET | `/ready` | 知识库/BM25/reranker 就绪状态，不就绪返回 503…",
+          "page": null,
+          "table": null,
+          "score": 1.498046875
+        },
+        {
+          "index": 4,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | description；首行：苹果 | 苹果适合冷藏保存，可以延长保鲜时间；切开后容易氧化，建议尽快食用。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "README.md",
+        "README.md",
+        "README.md",
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 1178,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "trace_id": "dbbb2cdbe2c8",
+      "history_turns": 0,
+      "retrieval_ms": 4119.0,
+      "generation_ms": 138409.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "m05",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "橙子的单价是多少？扫描件 PDF 入库时每页 OCR 大概多花时间？",
+      "reference": "橙子单价 12.5 元；扫描件 PDF 每页会多花 1–5 秒做 OCR 推理，是入库时一次性消耗，问答不受影响。",
+      "evidence": [
+        "橙子富含维生素 C，适合日常补充维 C"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "answer": "橙子的单价为 12.5 元 [1]。扫描件 PDF 入库时，每页会多花 1–5 秒做 OCR 推理（该时间仅在入库时一次性消耗，后续问答不受影响）[2]。",
+      "contexts": [
+        "name | price\n橙子 | 12.5",
+        "安装后，扫描件 PDF 每页会多花 1–5 秒做 OCR 推理（入库时一次性消耗，问答不受影响）。如果不安装这些依赖，扫描件页面会被跳过，文本型 PDF 仍然正常工作。识别前会把页面放大到 200 dpi 再喂给 OCR——用默认分辨率识别时中文容易认错，比如\"产品库存\"被读成\"产品本存\"。\n\n**文字型 PDF** 里带边框线的表格会被单独提取成一份文档入库，引用中会显示表名和页码（例如\"第 1 页 / 表 商品库存表_table_1\"）。扫描件做不到这一步：那一页对程序来说只是一张图片，没有\"表格线\"和\"单元格文字\"可取，只能把整页文字连表格一起读出来。纯靠文字对齐排版、没有边框线的表格同理提不出结构，但内容仍会随整页正文被检索到。",
+        "### PDF 入库：文本型 vs 扫描件\n\nPDF 有两种”长相”，入库时处理方式不同：\n\n- **文本型 PDF**：文字是真正的文本数据，可以直接提取。速度很快，和 txt/md 一样逐页切分。\n- **扫描件 PDF**：本质是一堆图片拼在一起，页面没有真正的文字。入库时会先检测——如果某页提取到的文本为空或中文比例极低，就判定为扫描件，调用 OCR（光学字符识别）把图片中的文字”读”出来。\n\nOCR 需要额外安装依赖：",
+        "### 原理\n\n- 入库时优先使用 `pdfplumber` 打开 PDF：\n  - **文本型 PDF**：直接提取页面文本与表格（`extract_text` / `extract_tables`），速度同 v5。\n  - **扫描件 PDF**：页面文本为空或没有实质字符（汉字/拉丁字母）时，判定为扫描件，自动渲染页面 → OCR 识别文字。\n- OCR 渲染固定 **200 dpi**（`OCR_RENDER_RESOLUTION`）：`pdfplumber` 默认 72 dpi，实测中文会认错（\"产品库存\" → \"产品本存\"，置信度 0.79），200 dpi 下整句正确、置信度约 0.98。\n- 表格作为独立的 `SourceDocument` 入库，获得独立的向量与 BM25 索引；引用中显示表名与页码。\n- 父子块切分对 OCR 与表格透明：正文与表格各自走相同的父子块流程。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price；首行：橙子 | 12.5",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "安装后，扫描件 PDF 每页会多花 1–5 秒做 OCR 推理（入库时一次性消耗，问答不受影响）。如果不安装这些依赖，扫描件页面会被跳过，文本型 PDF 仍然正常工作。识别前会把页面放大到 200 dpi 再喂给 OCR——用默认分辨率识别…",
+          "page": null,
+          "table": null,
+          "score": 4.83203125
+        },
+        {
+          "index": 3,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "### PDF 入库：文本型 vs 扫描件 PDF 有两种”长相”，入库时处理方式不同： - **文本型 PDF**：文字是真正的文本数据，可以直接提取。速度很快，和 txt/md 一样逐页切分。 - **扫描件 PDF**：本质是一堆图片…",
+          "page": null,
+          "table": null,
+          "score": -1.9306640625
+        },
+        {
+          "index": 4,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### 原理 - 入库时优先使用 `pdfplumber` 打开 PDF： - **文本型 PDF**：直接提取页面文本与表格（`extract_text` / `extract_tables`），速度同 v5。 - **扫描件 PDF**…",
+          "page": null,
+          "table": null,
+          "score": -2.3984375
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "docs/beginner-guide.md",
+        "docs/beginner-guide.md",
+        "README.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 1142,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "trace_id": "f26692ab8fff",
+      "history_turns": 0,
+      "retrieval_ms": 7395.0,
+      "generation_ms": 46206.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "s01",
+      "config": "agent",
+      "category": "multi_step",
+      "answerable": true,
+      "question": "单价高于这四种水果平均价的水果有哪些？分别多少钱、该怎么保存？",
+      "reference": "平均价 10.5 元，高于平均的是橙子（12.5 元）和猕猴桃（15.0 元）；橙子表皮较厚，常温可存放一周左右。",
+      "evidence": [
+        "表皮较厚，常温可存放一周左右"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "单价高于四种水果平均价的水果有两种：\n\n1. **橙子**，单价 12.5 元。保存方式：表皮较厚，常温可存放一周左右 [1]。\n2. **猕猴桃**，单价 15.0 元。保存方式：成熟后应尽快食用，也可以冷藏延缓软化 [1]。",
+      "contexts": [
+        "name | price | description\n橙子 | 12.5 | 橙子富含维生素 C，适合日常补充维 C；表皮较厚，常温可存放一周左右。\n猕猴桃 | 15.0 | 猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price | description；首行：橙子 | 12.5 | 橙子富含维生素 C，适合日常补充维 C；表皮较厚，常温可存放一周左右。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 151,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "df7800ed89dc",
+      "history_turns": 0,
+      "retrieval_ms": 3.0,
+      "generation_ms": 44993.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "s02",
+      "config": "agent",
+      "category": "multi_step",
+      "answerable": true,
+      "question": "按价格看最贵的是哪种水果？它的维生素 C 情况怎么样？",
+      "reference": "最贵的是猕猴桃，单价 15.0 元；它维生素 C 含量高，成熟后应尽快食用。",
+      "evidence": [
+        "猕猴桃维生素 C 含量高"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "按价格来看，最贵的水果是猕猴桃，售价为 15.0 元 [1]。关于它的维生素 C 情况：猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化 [1]。",
+      "contexts": [
+        "name | price | description\n猕猴桃 | 15.0 | 猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price | description；首行：猕猴桃 | 15.0 | 猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 103,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "ae303f99e069",
+      "history_turns": 0,
+      "retrieval_ms": 3.0,
+      "generation_ms": 32855.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "s03",
+      "config": "agent",
+      "category": "multi_step",
+      "answerable": true,
+      "question": "单价低于 10 元的水果有哪几种？它们分别该怎么保存？",
+      "reference": "苹果（8.0 元）和香蕉（6.5 元）低于 10 元；苹果适合冷藏保存延长保鲜，香蕉不适合放冰箱，建议常温阴凉处保存。",
+      "evidence": [
+        "苹果适合冷藏保存，可以延长保鲜时间"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "根据数据库查询，单价低于 10 元的水果共有 2 种：\n\n1. **苹果**（8.0 元）：适合冷藏保存，可以延长保鲜时间；切开后容易氧化，建议尽快食用。[1]\n2. **香蕉**（6.5 元）：不适合放冰箱，低温会让表皮变黑、口感变差；建议常温阴凉处保存。[1]",
+      "contexts": [
+        "name | price | description\n苹果 | 8.0 | 苹果适合冷藏保存，可以延长保鲜时间；切开后容易氧化，建议尽快食用。\n香蕉 | 6.5 | 香蕉不适合放冰箱，低温会让表皮变黑、口感变差；建议常温阴凉处保存。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price | description；首行：苹果 | 8.0 | 苹果适合冷藏保存，可以延长保鲜时间；切开后容易氧化，建议尽快食用。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 147,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "908dfb6210e3",
+      "history_turns": 0,
+      "retrieval_ms": 3.0,
+      "generation_ms": 43483.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "s04",
+      "config": "agent",
+      "category": "multi_step",
+      "answerable": true,
+      "question": "最近更新的是哪条水果记录？它的保存建议是什么？",
+      "reference": "最近更新的是猕猴桃（updated_at 2026-01-18）；它成熟后应尽快食用，也可以冷藏延缓软化。",
+      "evidence": [
+        "成熟后应尽快食用，也可以冷藏延缓软化"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "最近更新的水果记录是「猕猴桃」，更新时间为 2026-01-18 [1]。它的保存建议是：猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化 [1]。",
+      "contexts": [
+        "name | description | updated_at\n猕猴桃 | 猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化。 | 2026-01-18"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | description | updated_at；首行：猕猴桃 | 猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化。 | 2026-01-18",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 114,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "7a5b248f408b",
+      "history_turns": 0,
+      "retrieval_ms": 5.0,
+      "generation_ms": 34936.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "c01",
+      "config": "agent",
+      "category": "coreference",
+      "answerable": true,
+      "question": "那一步为什么始终用原问题，不用改写后的查询？",
+      "reference": "精排始终用原问题，是为了避免改写后的查询把检索带偏。",
+      "evidence": [
+        "注意这里始终用原问题，不用改写后的查询，避免检索跑偏"
+      ],
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [],
+      "answer": "精排始终用原问题、不用改写后的查询，原因是**避免改写文本把答案带偏（即避免检索跑偏）**[2][3]。\n\n具体来说：\n\n- 查询改写的定位是\"多找几条路\"，让召回阶段有更多候选进入管道[1]；\n- 但到了 reranker 精排这一步，所有查询最终仍用**原问题**与每张子块逐条比较，目的是防止改写文本把答案带偏[2]；\n- 证据中也强调\"注意这里始终用原问题，不用改写后的查询，避免检索跑偏\"[3]。\n\n简言之：改写负责\"广撒网\"，原问题负责\"精准选\"，两者分工不同，精排用原问题是为了保证最终选出的 3 张子块真正对应用户本意，而非被改写语义拉偏。[1][2][3]",
+      "contexts": [
+        "查询改写则是“多找几条路，最后仍按原问题选”：",
+        "- 所有查询最终仍用**原问题**做 reranker 精排，避免改写文本把答案带偏。\n- 改写失败（JSON 非法、模型不可用、没有可用变体）自动回退原问题，`meta.query_count` 为 1；错误信息最多 200 字符且不包含问题正文。\n- 改写温度固定 0、`num_predict=512`，每个变体 ≤300 字符，HyDE ≤400 字符。\n\nAPI 示例：",
+        "这里有五个关键角色：\n\n- **查询改写（可选）**：像同一句话换几种说法再搜一次。`multi` 让模型生成最多两个同义查询；`hyde` 让模型先写一段“假想答案”，拿它去检索。默认关闭；改写失败就退回原问题。\n- **RRF 合并**：像两个排行榜按名次折算积分。某张卡片在向量榜排第 1，加分；在关键词榜也排第 1，再加一次分。两边都靠前的卡片总分最高；多查询时，各查询的榜单也会再合并一次。\n- **reranker（重排模型）**：像面试官逐份精读简历。它把“原问题 + 每张子块”放在一起逐条比较，选出真正最相关的 3 张。注意这里始终用原问题，不用改写后的查询，避免检索跑偏。\n- **父块扩展**：像查到目录条目后，把整页原文翻出来。系统按父块去重，在 6000 字符预算内送整段父块；放不下就退回命中的子块，保证精排选中的内容一定进上下文。\n- **大模型**：像只拿到这几段父块原文的答题学生。提示词明确要求“只能根据资料回答，没有就拒答”，所以资料里没有的内容不会被编出来。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "查询改写则是“多找几条路，最后仍按原问题选”：",
+          "page": null,
+          "table": null,
+          "score": 2.041015625
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "- 所有查询最终仍用**原问题**做 reranker 精排，避免改写文本把答案带偏。 - 改写失败（JSON 非法、模型不可用、没有可用变体）自动回退原问题，`meta.query_count` 为 1；错误信息最多 200 字符且不包含…",
+          "page": null,
+          "table": null,
+          "score": 1.791015625
+        },
+        {
+          "index": 3,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "这里有五个关键角色： - **查询改写（可选）**：像同一句话换几种说法再搜一次。`multi` 让模型生成最多两个同义查询；`hyde` 让模型先写一段“假想答案”，拿它去检索。默认关闭；改写失败就退回原问题。 - **RRF 合并**：…",
+          "page": null,
+          "table": null,
+          "score": 1.3623046875
+        }
+      ],
+      "source_uris": [
+        "docs/beginner-guide.md",
+        "README.md",
+        "docs/beginner-guide.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 812,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "knowledge",
+      "stop_reason": "planner_unavailable",
+      "tool_calls": 1,
+      "tool_steps": 4,
+      "trace_id": "a7429660b108",
+      "history_turns": 2,
+      "retrieval_ms": 3430.0,
+      "generation_ms": 114491.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 0.3333333333333333,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "c02",
+      "config": "agent",
+      "category": "coreference",
+      "answerable": true,
+      "question": "那它的保存方式是啥？",
+      "reference": "橙子表皮较厚，常温可存放一周左右。",
+      "evidence": [
+        "表皮较厚，常温可存放一周左右"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "橙子的保存方式是：表皮较厚，常温可存放一周左右。[1]",
+      "contexts": [
+        "name | description\n橙子 | 橙子富含维生素 C，适合日常补充维 C；表皮较厚，常温可存放一周左右。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | description；首行：橙子 | 橙子富含维生素 C，适合日常补充维 C；表皮较厚，常温可存放一周左右。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 90,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "bd7f802dcf2e",
+      "history_turns": 2,
+      "retrieval_ms": 5.0,
+      "generation_ms": 36097.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "c03",
+      "config": "agent",
+      "category": "coreference",
+      "answerable": true,
+      "question": "那这个项目的引用列表是从哪儿来的？还有刚才那条记录的更新时间是什么时候？",
+      "reference": "引用列表不是模型编的：每张卡片入库时就带着身份信息，系统直接把这些元数据整理成引用列表；香蕉那条记录的更新时间是 2026-01-15。",
+      "evidence": [
+        "引用不是模型编的",
+        "系统直接把这些元数据整理成引用列表"
+      ],
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [
+        "docs/beginner-guide.md",
+        "demo.products"
+      ],
+      "answer": "1）引用列表的来源：每张卡片入库时就自带 `source_type / title / source_uri / page / table` 等身份信息，返回答案时系统直接把这些元数据整理成引用列表，模型只负责在正文里标注 `[1]`、`[2]` 等编号，引用并非模型编造。[1]\n\n2）刚才那条记录（香蕉）的更新时间是 2026-01-15。[4]",
+      "contexts": [
+        "值得记住的一点：**引用不是模型编的**。每张卡片入库时就带着 `source_type / title / source_uri / page / table` 这些身份信息；返回答案时，系统直接把这些元数据整理成引用列表，模型只负责在答案里标 `[1]`、`[2]`。",
+        "历史直接裸贴在规则块与证据块之间，**没有小标题、没有编号、没有「这不是事实来源」的标注**，\n看起来就像规则的第 7 款或者一条匿名证据。而固定链路的 `generation.py:97` 反而写了完整措辞：\n「对话历史（仅用于理解当前问题的指代，不能作为事实依据）」。\n`FINAL_PROMPT` 第 1 条「证据之外的事实一句都不要写」字面上覆盖这种情况，但被这样渲染出来，实际约束不住。\n\n`agent/tools.py` 的 `render_evidence()` 只给工具产出的块编号，历史永远不进引用列表，\n所以抄历史得到的那半句在引用列表里没有对应条目——用户看不见它的出处。",
+        "- [x] 回归检查通过：`knowledge` 类 7 条 `source_hit` 与 `evidence_hit@3` 两轮都是 1.000，且这 7 条一次都没\n      引用业务库——路由改动没把纯文档问答带偏。分类别 `source_hit`：`database` 0.167→1.000、\n      `mixed` 0.400→1.000、`multi_step` 0.750→1.000。15 条业务库类样本里真的引用 `demo.products` 的从\n      9 条升到 15 条；意图分布从 `knowledge`15 / `mixed`9 / `none`2（一条 `database` 都没有）变成\n      `database`10 / `knowledge`9 / `mixed`6 / `none`1\n- [x] `stop_reason` 分布：v7.1 `final`18 / `no_retrieval`2 / `planner_unavailable`6 → v7.2 `final`21 /\n      `insufficient_evidence`2 / `no_retrieval`1 / `context_budget`1 / `planner_unavailable`1。决策 JSON\n      解析失败从 6 条降到 1 条只作为观察记录，不作归因（提示词改动与模型随机性同时在里面）\n- [x] 4 条应拒答样本全部以哨兵文本开头，但路径不同：r03/r04 走 `insufficient_evidence`（先检索、判证据不足），\n      r02 走 `context_budget`（12 段证据用尽字符预算后仍按缺口拒答），r01 走 `none`（根本没检索）\n- [x] `none` 判据已收紧（同日，`v7.2-none-gate`）：`none` 不再是免检通行证。路由判成 `none` 时不再直接\n      拒答，而是先用原问题做一次知识库验证检索——查到证据就照常作答、把上报意图改写成 `knowledge`，查不到\n      才返回拒答哨兵、`stop_reason` 记 `no_evidence`（与压根没检索的 `no_retrieval` 区分开），开关\n      `RAG_DISABLE_AGENT_NONE_PROBE`；提示词把 `none` 的准入收紧到实时信息、天气、新闻、外部网站内容、\n      主观偏好这类明确在本系统之外的事实，问到业务记录、字段或本系统自身文档一律先取证。全量 26 条复跑\n      （`eval/reports/v7_2_nonegate_report.md`）：`none` 与 `no_retrieval` 各从 1 条降到 0 条，…",
+        "name | updated_at\n香蕉 | 2026-01-15"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "值得记住的一点：**引用不是模型编的**。每张卡片入库时就带着 `source_type / title / source_uri / page / table` 这些身份信息；返回答案时，系统直接把这些元数据整理成引用列表，模型只负责在答…",
+          "page": null,
+          "table": null,
+          "score": 0.1336669921875
+        },
+        {
+          "index": 2,
+          "title": "v7.4-history-as-evidence.md",
+          "source_type": "file",
+          "source_uri": "docs/v7.4-history-as-evidence.md",
+          "snippet": "历史直接裸贴在规则块与证据块之间，**没有小标题、没有编号、没有「这不是事实来源」的标注**， 看起来就像规则的第 7 款或者一条匿名证据。而固定链路的 `generation.py:97` 反而写了完整措辞： 「对话历史（仅用于理解当前问…",
+          "page": null,
+          "table": null,
+          "score": -2.390625
+        },
+        {
+          "index": 3,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [x] 回归检查通过：`knowledge` 类 7 条 `source_hit` 与 `evidence_hit@3` 两轮都是 1.000，且这 7 条一次都没 引用业务库——路由改动没把纯文档问答带偏。分类别 `source_hi…",
+          "page": null,
+          "table": null,
+          "score": -2.66015625
+        },
+        {
+          "index": 4,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | updated_at；首行：香蕉 | 2026-01-15",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "docs/beginner-guide.md",
+        "docs/v7.4-history-as-evidence.md",
+        "docs/ROADMAP.md",
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 1875,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "trace_id": "b1dead7e676f",
+      "history_turns": 2,
+      "retrieval_ms": 1321.0,
+      "generation_ms": 116947.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "r01",
+      "config": "agent",
+      "category": "refusal",
+      "answerable": false,
+      "question": "橙子的产地和供应商联系方式是什么？",
+      "reference": "",
+      "evidence": [],
+      "expected_source": "",
+      "expected_sources": [],
+      "answer": "【资料中没有相关信息】\n缺少的信息：products 表仅有 id/name/category/description/price/updated_at 六列，description 中橙子的内容为'富含维生素 C，适合日常补充维 C；表皮较厚，常温可存放一周左右'，知识库文档亦未涉及产地或供应商联系方式，无法提供这两项信息",
+      "contexts": [
+        "## 三、波及面：评估集 1/3，但生产面比这大，而且是静默的\n\n- **带历史的样本只有 3 条**（c01/c02/c03），抄历史 1 条。样本层面看是 1/3。\n- **c02 是反例**：它的历史里同样写着「橙子当前单价 12.5 元，记录更新时间是 2026-01-10」，模型照样去跑了\n  `sql_query`，检索五项全 1.000。所以触发条件不是「有历史」，而是\n  **问题含多个子问题 ∧ 其中一子问题的答案已在历史里 ∧ 那一半属于另一个工具**。单侧指代问题不会触发。\n- **`mixed` 判对但只查一侧的，全量 29 条里只有 c03 一条**（另一条 `tool_calls=1` 的 mixed 是 d02，它本身是单侧问题，SQL 一次就够）。\n- **生产暴露面更大**：`api/routes.py` 四个问答端点（`:238`、`:295`、`:398`、`:473`）都把\n  `session.history_for_prompt()` 原样传进去，默认最多 6 轮 / 3000 字符 / 单条 800 字符（`config.py:82-84`），\n  历史里的 assistant 内容就是上一轮的完整回答。连着追问同一条记录的不同字段是常见用法，\n  上一轮刚报过的价格、库存、更新时间天然躺在 prompt 里。\n- **而且是静默的**：c03 的 `source_hit`、`citation_rate`、`citation_validity` 全是 1.000，`answer_rate` 计入已回答，\n  `intent=mixed` 看着正常。原因是 `evaluation.py:513-517`——`expected_source` 是单个字符串，\n  判定用 `any(...)`，双侧样本只能要求「任一侧命中即算过」。c03 标的是文档侧，SQL 那一半没有任何指标覆盖。\n  v7.3 自己在 `eval/README.md` 的读数限制里写了这条：「混合样本的 `expected_source` 只标一侧……\n  它的 `evidence_hit@3` 1.000 不等于两半都查过」，但当时只记为口径限制，没修。",
+        "`agent` 组的口径与固定链路不同义，报告的限制小节逐条写明：耗时是整条循环的墙钟时间（`avg_retrieval_ms` 只记工具执行耗时，其余归 `avg_generation_ms`）；`avg_tool_calls` / `avg_tool_steps` 只有 agentic 组有值；`evidence_hit` 取决于模型 SELECT 了哪些列（只取 `name`/`price` 时答案可以全对但证据判 0）；默认单轮，但带 `history` 字段的样本（v7.3 起 3 条指代消解样本）会把对话历史原样传给 agentic 链路，报告用 `history_turns` 标出哪几条走了多轮。评估运行会设 `RAG_DISABLE_AGENT_TRACE=1`，不把评估样本写进演示轨迹。\n\n**v7.3 指代消解实跑**（2026-11-20，29 条 = 25 可回答 + 4 应拒答，只跑确定性指标）：3 条带 `history` 的指代样本全部还原成功——c01 按上一轮的「精排」答对、c02 把「它」还原成橙子并走 `sql_query`、c03 判 `mixed`；同 26 条子集与上一轮比 `answer_rate`/`source_hit`/`refusal_accuracy` 持平，`evidence_hit@3` -0.045 与 `citation_rate` -0.045 各自都能落到单条样本上（`@3` 窗口与生成截断），逐条机制见 `eval/README.md`，报告 `eval/reports/v7_3_coreference_report.md`。\n\n**本机实跑结果**（2026-11-19，26 条 × `agent`/`full`，只跑确定性指标，`git_commit = a6e2bd8`，完整报告 `eval/reports/v7_agent_report.md`）：\n\n| 指标 | agentic | `full`（v4 基线） |\n|---|---:|---:|\n| `answer_rate` | 0.909 | 0.318 |\n| `source_hit` | 0.591 | 0.318 |\n| `citation_rate` | 0.864 | 0.591 |\n| `evidence_hit@3` | 0.409 | 0.318 |\n| `mrr@3` | 0.348 | 0.295 |\n| `refusal_accuracy` | 0.250 | 1.000 |\n| 单条平均耗时 | 71.2 秒 | 17.0 秒 |",
+        "### Web 演示页\n\n启动服务后打开 <http://127.0.0.1:8000/demo>。页面由 FastAPI 同源提供，只有一个 HTML 文件，无构建步骤、无 CDN、无外部资源，直接调用真实 API：\n\n- 实时读取 `/health` 与 `/ready`，显示版本、向量数、BM25/reranker 状态、未就绪原因与 warning。\n- 对话支持流式/同步切换、停止生成、示例问题；Enter 发送，Shift+Enter 换行，问题上限 2000 字符。\n- 可调 `top_k`（1–10）、`source_type`、`tags`、`use_lexical`、`use_rerank`、`use_parent` 与 `query_rewrite`（关闭 / 多查询 / HyDE）；结果区的 `meta`、引用和会话历史会随参数变化。\n- 本轮信息会展示实际送入的父块字符数、查询数与改写模式；引用片段优先显示命中的子块原文。\n- 支持新建、复制、删除会话与刷新历史；流式生成会逐字显示，并展示 `session → citations → token → done` 的真实事件效果。\n- 错误统一展示 `code / message / details / request_id`；流式中途停止不会留下半轮会话。\n- 仅用于本机演示：服务默认无鉴权，请勿直接暴露公网。",
+        "## 三、波及面：评估集 1/3，但生产面比这大，而且是静默的\n\n- **带历史的样本只有 3 条**（c01/c02/c03），抄历史 1 条。样本层面看是 1/3。\n- **c02 是反例**：它的历史里同样写着「橙子当前单价 12.5 元，记录更新时间是 2026-01-10」，模型照样去跑了\n  `sql_query`，检索五项全 1.000。所以触发条件不是「有历史」，而是\n  **问题含多个子问题 ∧ 其中一子问题的答案已在历史里 ∧ 那一半属于另一个工具**。单侧指代问题不会触发。\n- **`mixed` 判对但只查一侧的，全量 29 条里只有 c03 一条**（另一条 `tool_calls=1` 的 mixed 是 d02，它本身是单侧问题，SQL 一次就够）。\n- **生产暴露面更大**：`api/routes.py` 四个问答端点（`:238`、`:295`、`:398`、`:473`）都把\n  `session.history_for_prompt()` 原样传进去，默认最多 6 轮 / 3000 字符 / 单条 800 字符（`config.py:82-84`），\n  历史里的 assistant 内容就是上一轮的完整回答。连着追问同一条记录的不同字段是常见用法，\n  上一轮刚报过的价格、库存、更新时间天然躺在 prompt 里。\n- **而且是静默的**：c03 的 `source_hit`、`citation_rate`、`citation_validity` 全是 1.000，`answer_rate` 计入已回答，\n  `intent=mixed` 看着正常。原因是 `evaluation.py:513-517`——`expected_source` 是单个字符串，\n  判定用 `any(...)`，双侧样本只能要求「任一侧命中即算过」。c03 标的是文档侧，SQL 那一半没有任何指标覆盖。\n  v7.3 自己在 `eval/README.md` 的读数限制里写了这条：「混合样本的 `expected_source` 只标一侧……\n  它的 `evidence_hit@3` 1.000 不等于两半都查过」，但当时只记为口径限制，没修。",
+        "`agent` 组的口径与固定链路不同义，报告的限制小节逐条写明：耗时是整条循环的墙钟时间（`avg_retrieval_ms` 只记工具执行耗时，其余归 `avg_generation_ms`）；`avg_tool_calls` / `avg_tool_steps` 只有 agentic 组有值；`evidence_hit` 取决于模型 SELECT 了哪些列（只取 `name`/`price` 时答案可以全对但证据判 0）；默认单轮，但带 `history` 字段的样本（v7.3 起 3 条指代消解样本）会把对话历史原样传给 agentic 链路，报告用 `history_turns` 标出哪几条走了多轮。评估运行会设 `RAG_DISABLE_AGENT_TRACE=1`，不把评估样本写进演示轨迹。\n\n**v7.3 指代消解实跑**（2026-11-20，29 条 = 25 可回答 + 4 应拒答，只跑确定性指标）：3 条带 `history` 的指代样本全部还原成功——c01 按上一轮的「精排」答对、c02 把「它」还原成橙子并走 `sql_query`、c03 判 `mixed`；同 26 条子集与上一轮比 `answer_rate`/`source_hit`/`refusal_accuracy` 持平，`evidence_hit@3` -0.045 与 `citation_rate` -0.045 各自都能落到单条样本上（`@3` 窗口与生成截断），逐条机制见 `eval/README.md`，报告 `eval/reports/v7_3_coreference_report.md`。\n\n**本机实跑结果**（2026-11-19，26 条 × `agent`/`full`，只跑确定性指标，`git_commit = a6e2bd8`，完整报告 `eval/reports/v7_agent_report.md`）：\n\n| 指标 | agentic | `full`（v4 基线） |\n|---|---:|---:|\n| `answer_rate` | 0.909 | 0.318 |\n| `source_hit` | 0.591 | 0.318 |\n| `citation_rate` | 0.864 | 0.591 |\n| `evidence_hit@3` | 0.409 | 0.318 |\n| `mrr@3` | 0.348 | 0.295 |\n| `refusal_accuracy` | 0.250 | 1.000 |\n| 单条平均耗时 | 71.2 秒 | 17.0 秒 |",
+        "### Web 演示页\n\n启动服务后打开 <http://127.0.0.1:8000/demo>。页面由 FastAPI 同源提供，只有一个 HTML 文件，无构建步骤、无 CDN、无外部资源，直接调用真实 API：\n\n- 实时读取 `/health` 与 `/ready`，显示版本、向量数、BM25/reranker 状态、未就绪原因与 warning。\n- 对话支持流式/同步切换、停止生成、示例问题；Enter 发送，Shift+Enter 换行，问题上限 2000 字符。\n- 可调 `top_k`（1–10）、`source_type`、`tags`、`use_lexical`、`use_rerank`、`use_parent` 与 `query_rewrite`（关闭 / 多查询 / HyDE）；结果区的 `meta`、引用和会话历史会随参数变化。\n- 本轮信息会展示实际送入的父块字符数、查询数与改写模式；引用片段优先显示命中的子块原文。\n- 支持新建、复制、删除会话与刷新历史；流式生成会逐字显示，并展示 `session → citations → token → done` 的真实事件效果。\n- 错误统一展示 `code / message / details / request_id`；流式中途停止不会留下半轮会话。\n- 仅用于本机演示：服务默认无鉴权，请勿直接暴露公网。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v7.4-history-as-evidence.md",
+          "source_type": "file",
+          "source_uri": "docs/v7.4-history-as-evidence.md",
+          "snippet": "- **带历史的样本只有 3 条**（c01/c02/c03），抄历史 1 条。样本层面看是 1/3。 - **c02 是反例**：它的历史里同样写着「橙子当前单价 12.5 元，记录更新时间是 2026-01-10」，模型照样去跑了 `s…",
+          "page": null,
+          "table": null,
+          "score": -6.6328125
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "**v7.3 指代消解实跑**（2026-11-20，29 条 = 25 可回答 + 4 应拒答，只跑确定性指标）：3 条带 `history` 的指代样本全部还原成功——c01 按上一轮的「精排」答对、c02 把「它」还原成橙子并走 `s…",
+          "page": null,
+          "table": null,
+          "score": -7.13671875
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### Web 演示页 启动服务后打开 <http://127.0.0.1:8000/demo>。页面由 FastAPI 同源提供，只有一个 HTML 文件，无构建步骤、无 CDN、无外部资源，直接调用真实 API： - 实时读取 `/he…",
+          "page": null,
+          "table": null,
+          "score": -8.25
+        },
+        {
+          "index": 4,
+          "title": "v7.4-history-as-evidence.md",
+          "source_type": "file",
+          "source_uri": "docs/v7.4-history-as-evidence.md",
+          "snippet": "- **带历史的样本只有 3 条**（c01/c02/c03），抄历史 1 条。样本层面看是 1/3。 - **c02 是反例**：它的历史里同样写着「橙子当前单价 12.5 元，记录更新时间是 2026-01-10」，模型照样去跑了 `s…",
+          "page": null,
+          "table": null,
+          "score": -4.8359375
+        },
+        {
+          "index": 5,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "**v7.3 指代消解实跑**（2026-11-20，29 条 = 25 可回答 + 4 应拒答，只跑确定性指标）：3 条带 `history` 的指代样本全部还原成功——c01 按上一轮的「精排」答对、c02 把「它」还原成橙子并走 `s…",
+          "page": null,
+          "table": null,
+          "score": -5.79296875
+        },
+        {
+          "index": 6,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### Web 演示页 启动服务后打开 <http://127.0.0.1:8000/demo>。页面由 FastAPI 同源提供，只有一个 HTML 文件，无构建步骤、无 CDN、无外部资源，直接调用真实 API： - 实时读取 `/he…",
+          "page": null,
+          "table": null,
+          "score": -8.2734375
+        }
+      ],
+      "source_uris": [
+        "docs/v7.4-history-as-evidence.md",
+        "README.md",
+        "README.md",
+        "docs/v7.4-history-as-evidence.md",
+        "README.md",
+        "README.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 2,
+      "context_chars": 5628,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 6,
+      "refusal": true,
+      "intent": "knowledge",
+      "stop_reason": "insufficient_evidence",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "trace_id": "2182e598d814",
+      "history_turns": 0,
+      "retrieval_ms": 4535.0,
+      "generation_ms": 179651.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": null,
+        "evidence_recall@3": null,
+        "context_precision@3": null,
+        "mrr@3": null,
+        "source_hit": null,
+        "citation_rate": null,
+        "citation_validity": null,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "r02",
+      "config": "agent",
+      "category": "refusal",
+      "answerable": false,
+      "question": "这个项目有 iOS 客户端吗？",
+      "reference": "",
+      "evidence": [],
+      "expected_source": "",
+      "expected_sources": [],
+      "answer": "【资料中没有相关信息】\n缺少的信息：现有资料中未提及 iOS 客户端或任何移动端应用，无法确认该项目是否存在 iOS 客户端（不能因未提及即断言不存在）",
+      "contexts": [
+        "### Web 演示页\n\n启动服务后打开 <http://127.0.0.1:8000/demo>。页面由 FastAPI 同源提供，只有一个 HTML 文件，无构建步骤、无 CDN、无外部资源，直接调用真实 API：\n\n- 实时读取 `/health` 与 `/ready`，显示版本、向量数、BM25/reranker 状态、未就绪原因与 warning。\n- 对话支持流式/同步切换、停止生成、示例问题；Enter 发送，Shift+Enter 换行，问题上限 2000 字符。\n- 可调 `top_k`（1–10）、`source_type`、`tags`、`use_lexical`、`use_rerank`、`use_parent` 与 `query_rewrite`（关闭 / 多查询 / HyDE）；结果区的 `meta`、引用和会话历史会随参数变化。\n- 本轮信息会展示实际送入的父块字符数、查询数与改写模式；引用片段优先显示命中的子块原文。\n- 支持新建、复制、删除会话与刷新历史；流式生成会逐字显示，并展示 `session → citations → token → done` 的真实事件效果。\n- 错误统一展示 `code / message / details / request_id`；流式中途停止不会留下半轮会话。\n- 仅用于本机演示：服务默认无鉴权，请勿直接暴露公网。",
+        "CI（`.github/workflows/ci.yml`）在每次 push 与 PR 上跑两个作业：\n\n- `tests`：只装 `requirements-ci.txt`（**不含** `torch` / `transformers` / `sentence-transformers` /\n  `FlagEmbedding` / `faiss-cpu`——单测不加载任何模型，精排在 `retrieval/rerank.py` 里是函数内懒加载；\n  但 `pdfplumber` 与 `rapidocr-onnxruntime` 必须装，`test_ocr.py` 会断言这两个后端可导入），跑全量单测，\n  再用 `evaluate.py --validate-only` 校验 v4 / v5 / v7 三份评估集的证据逐字校验与结构——标注漂移在打模型之前就会被拦住。\n  `rapidocr-onnxruntime` 带的是非 headless 的 opencv，所以作业会先试 `import cv2`，缺 libGL 才补装 `libgl1`。\n- `readonly`：只装 `requirements-readonly.txt`（Render 上实际安装的那份），验证只读演示的依赖清单真的够用，\n  并断言导入 `private_rag.api.readonly` 后 `sys.modules` 里没有 `torch` / `FlagEmbedding` / `qdrant_client`。\n  其中 `test_readonly_index_ranks_like_lexical_index` 被排除：它要 `import LexicalIndex`，\n  而 `retrieval/lexical.py` 模块级导入 `qdrant_client`；该条在 `tests` 作业里照常执行，覆盖没有丢。\n\n覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、OCR 与表格提取、PDF 加载器（文本/扫描件/表格/降级）、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4/v5 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。v7 agentic 部分另覆盖只读 SQL 护栏（写操作、多语句、越权表必须被拒，CTE 与子查询不能误拒）、工具层证据与引用统一编号、检索-行动循环（意图路由、步数与字符预算、无效工具名、模型不可用降级、决策 JSON 的输出预算…",
+        "## v3 详细验收（本分支）\n\n- [x] `RagEngine` 收敛检索/精排/生成，CLI 与 API 共用同一条链路\n- [x] FastAPI 应用工厂、lifespan 延迟加载、请求 ID 与统一错误结构\n- [x] 内存多会话：TTL、容量上限、消息上限、逐会话锁、历史按轮次/字符预算裁剪\n- [x] 同步 `/api/v1/chat` 与 SSE `/api/v1/chat/stream`；`session → citations → token → done/error`\n- [x] 只有完整生成成功才写入会话；客户端断开不留下半截历史\n- [x] `/health` 与 `/ready`；BM25/reranker 缺失时降级并给出 warning\n- [x] 未知会话 404、参数校验 422、知识库未就绪/容量 503、内部异常 500，均带 `request_id`\n- [x] API 级测试：同步/流式/错误/多会话隔离/并发；不依赖 Ollama 与真实 Qdrant\n- [x] README 启动与 curl 说明，明确单 worker、内存会话与本地无鉴权的边界",
+        "### Web 演示页\n\n启动服务后打开 <http://127.0.0.1:8000/demo>。页面由 FastAPI 同源提供，只有一个 HTML 文件，无构建步骤、无 CDN、无外部资源，直接调用真实 API：\n\n- 实时读取 `/health` 与 `/ready`，显示版本、向量数、BM25/reranker 状态、未就绪原因与 warning。\n- 对话支持流式/同步切换、停止生成、示例问题；Enter 发送，Shift+Enter 换行，问题上限 2000 字符。\n- 可调 `top_k`（1–10）、`source_type`、`tags`、`use_lexical`、`use_rerank`、`use_parent` 与 `query_rewrite`（关闭 / 多查询 / HyDE）；结果区的 `meta`、引用和会话历史会随参数变化。\n- 本轮信息会展示实际送入的父块字符数、查询数与改写模式；引用片段优先显示命中的子块原文。\n- 支持新建、复制、删除会话与刷新历史；流式生成会逐字显示，并展示 `session → citations → token → done` 的真实事件效果。\n- 错误统一展示 `code / message / details / request_id`；流式中途停止不会留下半轮会话。\n- 仅用于本机演示：服务默认无鉴权，请勿直接暴露公网。",
+        "## v6.1 详细验收（只读公网演示）\n\n- [x] `scripts/build_demo_snapshot.py` 用真实加载器导出快照，含扫描件 OCR 文本与表格文档\n- [x] 构建器白名单校验：file 源只允许 `data/docs`，sql 源只允许 `data/sql/demo.db`，web 源拒绝构建\n- [x] 拆出 `retrieval/tokenizer.py`，只读服务复用同一套分词而不依赖 qdrant-client\n- [x] 只读服务不加载模型：依赖清单不含 torch/transformers/sentence-transformers/FlagEmbedding/\n      qdrant-client/pdfplumber/rapidocr，可在免费实例（512 MB）上运行\n- [x] `/ready` 的 `checks` 显式给出 `embedding_model/reranker/llm = false`，不让只读状态被误读成就绪的完整服务\n- [x] 引用条目字段与线上 `CitationOut` 一致，页码与表格名在公网演示页可见\n- [x] `/api/v1/chat*` 恒返回 409 `generation_disabled`，不假装能回答\n- [x] 只读索引与 `LexicalIndex` 的排序对齐测试；共 12 条只读接口测试，不依赖 Ollama/Qdrant/网络\n- [x] 可选令牌 `RAG_DEMO_TOKEN`：设置后 `/api/v1/*` 要求 `X-Demo-Token`\n- [x] README 说明只读部署不能代表完整效果（无语义召回、无精排、无父子块、无问答）",
+        "## v3 详细验收（本分支）\n\n- [x] `RagEngine` 收敛检索/精排/生成，CLI 与 API 共用同一条链路\n- [x] FastAPI 应用工厂、lifespan 延迟加载、请求 ID 与统一错误结构\n- [x] 内存多会话：TTL、容量上限、消息上限、逐会话锁、历史按轮次/字符预算裁剪\n- [x] 同步 `/api/v1/chat` 与 SSE `/api/v1/chat/stream`；`session → citations → token → done/error`\n- [x] 只有完整生成成功才写入会话；客户端断开不留下半截历史\n- [x] `/health` 与 `/ready`；BM25/reranker 缺失时降级并给出 warning\n- [x] 未知会话 404、参数校验 422、知识库未就绪/容量 503、内部异常 500，均带 `request_id`\n- [x] API 级测试：同步/流式/错误/多会话隔离/并发；不依赖 Ollama 与真实 Qdrant\n- [x] README 启动与 curl 说明，明确单 worker、内存会话与本地无鉴权的边界",
+        "### Web 演示页\n\n启动服务后打开 <http://127.0.0.1:8000/demo>。页面由 FastAPI 同源提供，只有一个 HTML 文件，无构建步骤、无 CDN、无外部资源，直接调用真实 API：\n\n- 实时读取 `/health` 与 `/ready`，显示版本、向量数、BM25/reranker 状态、未就绪原因与 warning。\n- 对话支持流式/同步切换、停止生成、示例问题；Enter 发送，Shift+Enter 换行，问题上限 2000 字符。\n- 可调 `top_k`（1–10）、`source_type`、`tags`、`use_lexical`、`use_rerank`、`use_parent` 与 `query_rewrite`（关闭 / 多查询 / HyDE）；结果区的 `meta`、引用和会话历史会随参数变化。\n- 本轮信息会展示实际送入的父块字符数、查询数与改写模式；引用片段优先显示命中的子块原文。\n- 支持新建、复制、删除会话与刷新历史；流式生成会逐字显示，并展示 `session → citations → token → done` 的真实事件效果。\n- 错误统一展示 `code / message / details / request_id`；流式中途停止不会留下半轮会话。\n- 仅用于本机演示：服务默认无鉴权，请勿直接暴露公网。",
+        "## v6.1 详细验收（只读公网演示）\n\n- [x] `scripts/build_demo_snapshot.py` 用真实加载器导出快照，含扫描件 OCR 文本与表格文档\n- [x] 构建器白名单校验：file 源只允许 `data/docs`，sql 源只允许 `data/sql/demo.db`，web 源拒绝构建\n- [x] 拆出 `retrieval/tokenizer.py`，只读服务复用同一套分词而不依赖 qdrant-client\n- [x] 只读服务不加载模型：依赖清单不含 torch/transformers/sentence-transformers/FlagEmbedding/\n      qdrant-client/pdfplumber/rapidocr，可在免费实例（512 MB）上运行\n- [x] `/ready` 的 `checks` 显式给出 `embedding_model/reranker/llm = false`，不让只读状态被误读成就绪的完整服务\n- [x] 引用条目字段与线上 `CitationOut` 一致，页码与表格名在公网演示页可见\n- [x] `/api/v1/chat*` 恒返回 409 `generation_disabled`，不假装能回答\n- [x] 只读索引与 `LexicalIndex` 的排序对齐测试；共 12 条只读接口测试，不依赖 Ollama/Qdrant/网络\n- [x] 可选令牌 `RAG_DEMO_TOKEN`：设置后 `/api/v1/*` 要求 `X-Demo-Token`\n- [x] README 说明只读部署不能代表完整效果（无语义召回、无精排、无父子块、无问答）",
+        "## v3 详细验收（本分支）\n\n- [x] `RagEngine` 收敛检索/精排/生成，CLI 与 API 共用同一条链路\n- [x] FastAPI 应用工厂、lifespan 延迟加载、请求 ID 与统一错误结构\n- [x] 内存多会话：TTL、容量上限、消息上限、逐会话锁、历史按轮次/字符预算裁剪\n- [x] 同步 `/api/v1/chat` 与 SSE `/api/v1/chat/stream`；`session → citations → token → done/error`\n- [x] 只有完整生成成功才写入会话；客户端断开不留下半截历史\n- [x] `/health` 与 `/ready`；BM25/reranker 缺失时降级并给出 warning\n- [x] 未知会话 404、参数校验 422、知识库未就绪/容量 503、内部异常 500，均带 `request_id`\n- [x] API 级测试：同步/流式/错误/多会话隔离/并发；不依赖 Ollama 与真实 Qdrant\n- [x] README 启动与 curl 说明，明确单 worker、内存会话与本地无鉴权的边界"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### Web 演示页 启动服务后打开 <http://127.0.0.1:8000/demo>。页面由 FastAPI 同源提供，只有一个 HTML 文件，无构建步骤、无 CDN、无外部资源，直接调用真实 API： - 实时读取 `/he…",
+          "page": null,
+          "table": null,
+          "score": -4.14453125
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、OCR 与表格提取、PDF 加载器（文本/扫描件/表格/降级）、入库幂等/更新/prune、引用构建与拒答、…",
+          "page": null,
+          "table": null,
+          "score": -5.12890625
+        },
+        {
+          "index": 3,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "## v3 详细验收（本分支） - [x] `RagEngine` 收敛检索/精排/生成，CLI 与 API 共用同一条链路 - [x] FastAPI 应用工厂、lifespan 延迟加载、请求 ID 与统一错误结构 - [x] 内存多会…",
+          "page": null,
+          "table": null,
+          "score": -5.140625
+        },
+        {
+          "index": 4,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### Web 演示页 启动服务后打开 <http://127.0.0.1:8000/demo>。页面由 FastAPI 同源提供，只有一个 HTML 文件，无构建步骤、无 CDN、无外部资源，直接调用真实 API： - 实时读取 `/he…",
+          "page": null,
+          "table": null,
+          "score": -3.369140625
+        },
+        {
+          "index": 5,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [x] `scripts/build_demo_snapshot.py` 用真实加载器导出快照，含扫描件 OCR 文本与表格文档 - [x] 构建器白名单校验：file 源只允许 `data/docs`，sql 源只允许 `data/s…",
+          "page": null,
+          "table": null,
+          "score": -3.896484375
+        },
+        {
+          "index": 6,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "## v3 详细验收（本分支） - [x] `RagEngine` 收敛检索/精排/生成，CLI 与 API 共用同一条链路 - [x] FastAPI 应用工厂、lifespan 延迟加载、请求 ID 与统一错误结构 - [x] 内存多会…",
+          "page": null,
+          "table": null,
+          "score": -3.93359375
+        },
+        {
+          "index": 7,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### Web 演示页 启动服务后打开 <http://127.0.0.1:8000/demo>。页面由 FastAPI 同源提供，只有一个 HTML 文件，无构建步骤、无 CDN、无外部资源，直接调用真实 API： - 实时读取 `/he…",
+          "page": null,
+          "table": null,
+          "score": -4.0625
+        },
+        {
+          "index": 8,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [x] `scripts/build_demo_snapshot.py` 用真实加载器导出快照，含扫描件 OCR 文本与表格文档 - [x] 构建器白名单校验：file 源只允许 `data/docs`，sql 源只允许 `data/s…",
+          "page": null,
+          "table": null,
+          "score": -4.31640625
+        },
+        {
+          "index": 9,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "## v3 详细验收（本分支） - [x] `RagEngine` 收敛检索/精排/生成，CLI 与 API 共用同一条链路 - [x] FastAPI 应用工厂、lifespan 延迟加载、请求 ID 与统一错误结构 - [x] 内存多会…",
+          "page": null,
+          "table": null,
+          "score": -4.390625
+        }
+      ],
+      "source_uris": [
+        "README.md",
+        "README.md",
+        "docs/ROADMAP.md",
+        "README.md",
+        "docs/ROADMAP.md",
+        "docs/ROADMAP.md",
+        "README.md",
+        "docs/ROADMAP.md",
+        "docs/ROADMAP.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 3,
+      "context_chars": 6366,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 9,
+      "refusal": true,
+      "intent": "knowledge",
+      "stop_reason": "insufficient_evidence",
+      "tool_calls": 3,
+      "tool_steps": 5,
+      "trace_id": "2e7b9551bb83",
+      "history_turns": 0,
+      "retrieval_ms": 3904.0,
+      "generation_ms": 189710.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": null,
+        "evidence_recall@3": null,
+        "context_precision@3": null,
+        "mrr@3": null,
+        "source_hit": null,
+        "citation_rate": null,
+        "citation_validity": null,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "r03",
+      "config": "agent",
+      "category": "refusal",
+      "answerable": false,
+      "question": "这四种水果本月的采购成本是多少？",
+      "reference": "",
+      "evidence": [],
+      "expected_source": "",
+      "expected_sources": [],
+      "answer": "【资料中没有相关信息】\n缺少的信息：数据库 products 表仅有 price（单价）字段，缺少各水果的采购数量/采购量，无法计算本月采购成本总额。",
+      "contexts": [
+        "name | price | updated_at\n橙子 | 12.5 | 2026-01-10\n苹果 | 8.0 | 2026-01-12\n香蕉 | 6.5 | 2026-01-15\n猕猴桃 | 15.0 | 2026-01-18"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price | updated_at；首行：橙子 | 12.5 | 2026-01-10",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 147,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": true,
+      "intent": "mixed",
+      "stop_reason": "insufficient_evidence",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "d76c2f531a92",
+      "history_turns": 0,
+      "retrieval_ms": 69.0,
+      "generation_ms": 302129.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": null,
+        "evidence_recall@3": null,
+        "context_precision@3": null,
+        "mrr@3": null,
+        "source_hit": null,
+        "citation_rate": null,
+        "citation_validity": null,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "r04",
+      "config": "agent",
+      "category": "refusal",
+      "answerable": false,
+      "question": "private-rag 商业版的定价是多少？",
+      "reference": "",
+      "evidence": [],
+      "expected_source": "",
+      "expected_sources": [],
+      "answer": "【资料中没有相关信息】\n缺少的信息：知识库中未包含 private-rag 商业版定价的任何信息（证据[4]已将其明确列为'应拒答'样本 r04，即该事实在现有资料中无依据），无法给出定价数字。",
+      "contexts": [
+        "| 阶段 | 分支 | 内容 | 状态 | 验收标准 |\n|---|---|---|---|---|\n| v1 | `main`（历史脚本在 `legacy/`） | FAISS 基础 RAG：单文件、向量召回、LLM 问答 | ✅ 已完成，仅作演进参考 | 能对一个 txt 文件完成切分、检索、问答 |\n| v2 | `v2-qdrant-rerank-citation` | Qdrant 持久化、bge-reranker、混合检索（BM25 + 向量 + RRF）、标签/来源过滤、多源接入（文件/网页/SQL）、页码与引用溯源、增量与 prune | ✅ 本分支完成 | 三源可入库；重复入库跳过；更新只替换对应 doc_id；引用含类型/标题/URL 或页码；过滤生效；pytest 通过 |\n| v3 | `v3-fastapi-session` | FastAPI 服务化、多轮会话（session + 历史裁剪）、流式输出、统一错误处理 | ✅ 本分支完成 | API 可并发处理多会话；历史不串号；有接口级测试与启动说明 |\n| v4 | `v4-ragas-eval` | Ragas 自动评估：30–50 条标注问答、faithfulness / answer relevancy / context precision / recall、调参对比报告 | ✅ 本分支完成 | 固化评估集与脚本；给出 v2→v4 的量化对比（至少 2 组参数/策略） |\n| v5 | `v5-parent-rag-query-rewrite` | Parent-Document RAG（子块召回、父块送上下文）、查询改写（多查询 / HyDE）、去重与上下文预算 | ✅ 本分支完成（评估结果见报告） | 支持父子块、多查询/HyDE、预算与去重；有 `full` / `parent` / `parent_multi` / `parent_hyde` 前后对比、Ragas 子集与失败案例分析，见 `eval/reports/v5_report.md` |\n| v6 | `v6-ocr-parser` | 扫描件 OCR、表格解析、版面处理，接入现有连接器与元数据 | ✅ 本分支完成 | 扫描 PDF 与表格可检索；页码/表格名进入引用 |\n| v6.1 | `v6.1-readonly-render` | 只读公网演示：v6 入库产物导出快照，小服务暴露语料与 BM25 检索，问答明确关闭 | ✅ 已部署 (<https://private-rag-readonly.onrender.com>) | 公网可看到扫描件 OCR 文本、表格文档与页码/表格名引用；不加载模型，问答返回 409 |\n| v7 | `claude/heuristic-edison-ebcf0b` …",
+        "# private-rag\n\n完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Parent-Document 父子块上下文**与**查询改写（多查询 / HyDE）**：子块负责召回，父块负责给模型完整上下文。Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储。v7 起额外提供 **agentic 问答**：模型按问题意图在知识库检索与只读 SQL 之间自动选择，边看结果边决定要不要继续查，并把每条决策写成可回放的 trace。",
+        "这些路径通过 `RAG_COLLECTION_NAME`、`RAG_STORAGE_DIR`、`RAG_LEXICAL_INDEX_PATH` 环境变量覆盖，由 `private_rag/eval_env.py` 在导入配置前设置，因此**不会与正在运行的演示服务争抢 Qdrant 本地锁**。\n\n评估集固定 40 条：36 条可回答 + 4 条应拒答，覆盖架构、入库、检索、API、边界与拒答 6 类；标注与字段说明见 [eval/README.md](eval/README.md)。v5 另有 18 条口语化问题集，v7 另有按「需要哪个工具」分类的 agentic 评估集（见下文「v7 评估」）。\n\n三组策略：\n\n| 配置 | BM25 | reranker | 用途 |\n|---|---|---|---|\n| `dense` | 否 | 否 | 纯向量召回基线 |\n| `hybrid` | 是 | 否 | 观察混合召回 + RRF 的增益 |\n| `full` | 是 | 是 | 当前 v2/v3 默认链路，作为 **v2 基线** |",
+        "15 条需要业务库的样本里 agentic 有 9 条真的引用 `demo.products#sql_query` 给出正确数据（单价、价格排序、维 C 对比、比平均价再筛），`full` 组 26 条一条都没碰过业务数据；`knowledge` 类 7 条两组逐项持平，工具循环没把纯文档问答做坏。代价是单条耗时约 4.2 倍（多次决策调用的模型开销占 68.8 秒，工具执行只占 2.4 秒）。\n\n量出来的两条真实短板：一是路由受问法影响——像「香蕉能不能放冰箱」这种读起来像生活常识的问题，决策模型判成 `knowledge` 去查文档（保存方法其实在 `products.description` 里），6 条样本因此没查到库；二是证据不足时 agentic 倾向作答而不是拒答，`refusal_accuracy` 从 1.000 掉到 0.250，其中 d06、r04 在没有知识库依据的情况下补了通用知识（苹果氧化、商业版定价），属于该拒答却作答。\n\n**v7.2 对这两条的改法与复跑**：路由判据换成「回答所需的事实住在哪一侧」，并在装配 `sql_query` 时把白名单表的\n列名与少量样例值有界采样进工具描述——库里到底存着什么，模型看不见就判不准，这不是问法的错；答与不答改由步进\n决策声明充分性，判不足就不进生成、直接返回拒答哨兵并写明缺哪一项（`stop_reason` 新增 `insufficient_evidence`），\n生成侧同时禁掉「用通用常识补全」和「资料没提到就等于不存在」两条偷懒路径。把判错的 9 条单独重跑\n（`eval/reports/v7_2_routing_report.md`）：6 条业务库样本全部改判 `database`/`mixed` 并真的引用\n`demo.products#sql_query`，3 条应拒答样本输出哨兵文本；同样子集均值 `source_hit` 0.000→1.000、\n`citation_rate` 0.500→1.000。全量 26 条复跑（同生成模型、同确定性口径，`eval/reports/v7_2_agent_report.md`）确认这不是子集效应：\n\n| 指标（`agent` 组） | v7.1 | v7.2 |\n|---|---:|---:|\n| `answer_rate` | 0.909 | 1.000 |\n| `refusal_accuracy` | 0.250 | 1.000 |\n| `source_hit` | 0.591 | 1.000 |\n| `evidence_hit@3` | 0.409 | 0.864 |\n| `mrr@3` | 0.348 | 0.811 |\n| `citation_rate` | 0.864 | 0.955 |\n| 单条平均耗时 | 71.…",
+        "## v7.2 详细验收（意图路由与拒答策略）\n\nv7.1 报告量出的两条短板都在「模型看不见它需要的东西」上：路由器只能读到工具的 `description`，而描述里只有\n「精确数值查询」这类抽象说明，它不知道 `products.description` 存的就是保存建议，于是「香蕉到底能不能放冰箱」\n被判成 `knowledge`；关键词回退同样瞎——`DATABASE_HINTS` 清一色是数字词。第二段短板是答与不答没有判据，\n证据不够时模型倾向于硬凑（d06 补了苹果氧化的通用知识，r04 补了商业版定价）。",
+        "## 四、修法选项与代价\n\n| 选项 | 做法 | 会动的文件 | 代价 |\n|---|---|---|---|\n| **A 提示词**（弱保障） | `STEP_PROMPT` 第 1 条限定「只有『已收集的证据』算支撑，对话历史不算」，并加一条「已判定需要两侧、某一侧还没有证据时不得选 `final`」；`FINAL_PROMPT` 给 `{history_section}` 套上固定链路那句「不能作为事实依据」的标题段，并明确历史里的事实要写进回答必须先查 | `private_rag/agent/prompts.py`、`tests/test_agent_planner.py`（扩 `TestCoreferenceResolution`） | 与 v7.3 第 9 条方向相反（那条催「别停」，这条要「别抄」），同一个本机 27b 可能反向过度检索：单侧问题（c02/d02）多跑一次 SQL，耗时在 v7.3 同子集 89.1 秒的基础上再涨；保障仍是软的 |\n| **B 评估口径**（先让缺口可测） | `expected_source` 支持多值，`source_hit` 改成「声明的每个来源都必须被引用」；另加一个不调模型的逐条读数（按引用是否含 `#sql_query` 判「两侧是否都有证据」），把 c03 与 mixed 5 条改标双侧 | `private_rag/evaluation.py`（`EvalSample`/`load_dataset` 校验/`score_deterministic`/`_result_to_dict`/`build_report`/`render_markdown`）、`eval/v7_agent_qa.jsonl`、`eval/README.md`、`tests/test_evaluation.py`、重跑 29 条报告 | 与历史报告口径不可比，要重跑一条基线（v7.2 那轮 26 条 1348.6 秒、v7.3 同子集单条 89.1 秒，全量重跑按 25–45 分钟估）；`tests/test_evaluation.py` 里 `expected_source` 断言密集，改动面不小 |\n| **C 运行时硬约束**（强保障） | 代码级两侧覆盖检查：`intent=mixed`、步数未用尽、某一侧零证据时不许进 `final`——把缺口写进 `missing` 让现有 `missing_rule` 哨兵生效，或直接补一次该侧工具；带开关（仿 `RAG_DISABLE_AGENT_NONE_PROBE`） | `private_rag/agent/runtime.py`（`run` 与 `run_stream` 两处）、`tests/test_agent_loop.py`、`config.py` | d…"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "| v5 | `v5-parent-rag-query-rewrite` | Parent-Document RAG（子块召回、父块送上下文）、查询改写（多查询 / HyDE）、去重与上下文预算 | ✅ 本分支完成（评估结果见报告） | 支…",
+          "page": null,
+          "table": null,
+          "score": -4.125
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "# private-rag 完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Par…",
+          "page": null,
+          "table": null,
+          "score": -4.1484375
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "这些路径通过 `RAG_COLLECTION_NAME`、`RAG_STORAGE_DIR`、`RAG_LEXICAL_INDEX_PATH` 环境变量覆盖，由 `private_rag/eval_env.py` 在导入配置前设置，因此**…",
+          "page": null,
+          "table": null,
+          "score": -4.8046875
+        },
+        {
+          "index": 4,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "15 条需要业务库的样本里 agentic 有 9 条真的引用 `demo.products#sql_query` 给出正确数据（单价、价格排序、维 C 对比、比平均价再筛），`full` 组 26 条一条都没碰过业务数据；`knowled…",
+          "page": null,
+          "table": null,
+          "score": -2.962890625
+        },
+        {
+          "index": 5,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "## v7.2 详细验收（意图路由与拒答策略） v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上：路由器只能读到工具的 `description`，而描述里只有 「精确数值查询」这类抽象说明，它不知道 `products.des…",
+          "page": null,
+          "table": null,
+          "score": -3.619140625
+        },
+        {
+          "index": 6,
+          "title": "v7.4-history-as-evidence.md",
+          "source_type": "file",
+          "source_uri": "docs/v7.4-history-as-evidence.md",
+          "snippet": "## 四、修法选项与代价",
+          "page": null,
+          "table": null,
+          "score": -6.28515625
+        }
+      ],
+      "source_uris": [
+        "docs/ROADMAP.md",
+        "README.md",
+        "README.md",
+        "README.md",
+        "docs/ROADMAP.md",
+        "docs/v7.4-history-as-evidence.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 2,
+      "context_chars": 4929,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 6,
+      "refusal": true,
+      "intent": "knowledge",
+      "stop_reason": "insufficient_evidence",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "trace_id": "5daf36f146e3",
+      "history_turns": 0,
+      "retrieval_ms": 8004.0,
+      "generation_ms": 145348.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": null,
+        "evidence_recall@3": null,
+        "context_precision@3": null,
+        "mrr@3": null,
+        "source_hit": null,
+        "citation_rate": null,
+        "citation_validity": null,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    }
+  ]
+}
