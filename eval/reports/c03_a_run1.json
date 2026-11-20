@@ -1,0 +1,223 @@
+{
+  "meta": {
+    "report_title": "# private-rag 检索策略评估报告：v7_agent_qa",
+    "generated_at": "2026-11-20T23:08:33+08:00",
+    "dataset": "eval/v7_agent_qa.jsonl",
+    "dataset_sha256": "a9a7415a5c748a60b08f77d2629ab8e90b2d8b4b20e73a62640d01436803eaf5",
+    "dataset_total": 29,
+    "samples_total": 1,
+    "samples_answerable": 1,
+    "samples_refusal": 0,
+    "sample_ids": [
+      "c03"
+    ],
+    "categories": {
+      "coreference": 1
+    },
+    "configs": [
+      "agent"
+    ],
+    "agent": {
+      "enabled": true,
+      "configs": [
+        "agent"
+      ],
+      "sources": "config/sources.eval.agent.yaml",
+      "tools": [
+        "kb_search",
+        "sql_query"
+      ],
+      "max_steps": 4,
+      "allow_sql": true,
+      "sql_rows": 20,
+      "trace_enabled": false
+    },
+    "dataset_is_default": false,
+    "output_markdown": "eval/reports/c03_a_run1.md",
+    "output_json": "eval/reports/c03_a_run1.json",
+    "llm_model": "qwen3.8:27b-mlx",
+    "judge_model": "qwen3.8:27b-mlx",
+    "embed_model": "bge-m3",
+    "ragas": {
+      "enabled": false,
+      "configs": [],
+      "limit": null,
+      "metrics": [
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall"
+      ],
+      "strictness": 3,
+      "max_workers": 1,
+      "cache": false,
+      "cache_dir": null
+    },
+    "ragas_errors": {},
+    "duration_seconds": 162.04,
+    "git_commit": "d43b314c41583f5b85b3d94a2365541a155e467d"
+  },
+  "samples_meta": [
+    {
+      "id": "c03",
+      "question": "那这个项目的引用列表是从哪儿来的？还有刚才那条记录的更新时间是什么时候？",
+      "category": "coreference",
+      "answerable": true,
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [
+        "docs/beginner-guide.md",
+        "demo.products"
+      ],
+      "history_turns": 2
+    }
+  ],
+  "configs": {
+    "agent": {
+      "spec": {
+        "name": "agent",
+        "label": "Agentic：意图路由 + 工具循环（kb_search + 运行时只读 SQL）",
+        "use_lexical": true,
+        "use_rerank": true,
+        "top_k": 3,
+        "use_parent": true,
+        "query_rewrite": "off",
+        "context_max_chars": 6000,
+        "is_agent": true
+      },
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "both_sides_hit": 1.0,
+        "answer_rate": 1.0,
+        "refusal_accuracy": null,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "avg_latency_ms": 162012.0,
+        "avg_retrieval_ms": 3018.0,
+        "avg_generation_ms": 158994.0,
+        "generation_cache_hits": 0,
+        "avg_retrieved": 4.0,
+        "avg_context_chars": 1889.0,
+        "avg_query_count": 1.0,
+        "avg_tool_calls": 2.0,
+        "avg_tool_steps": 4.0,
+        "used_parent_rate": 1.0,
+        "rewrite_fallbacks": 0,
+        "n_answerable": 1,
+        "n_refusal": 0,
+        "n_errors": 0
+      },
+      "ragas": null,
+      "n_results": 1
+    }
+  },
+  "samples": [
+    {
+      "id": "c03",
+      "config": "agent",
+      "category": "coreference",
+      "answerable": true,
+      "question": "那这个项目的引用列表是从哪儿来的？还有刚才那条记录的更新时间是什么时候？",
+      "reference": "引用列表不是模型编的：每张卡片入库时就带着身份信息，系统直接把这些元数据整理成引用列表；香蕉那条记录的更新时间是 2026-01-15。",
+      "evidence": [
+        "引用不是模型编的",
+        "系统直接把这些元数据整理成引用列表"
+      ],
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [
+        "docs/beginner-guide.md",
+        "demo.products"
+      ],
+      "answer": "1）引用列表的来源：每张卡片入库时就携带 `source_type / title / source_uri / page / table` 等身份信息，返回答案时系统直接把这些元数据整理成引用列表，模型只负责在正文里标注 `[1]`、`[2]` 等编号；`agent/tools.py` 的 `render_evidence()` 只给工具产出的证据块编号，对话历史永远不进引用列表。[1][2]\n2）刚才那条香蕉记录的更新时间是 2026-01-15。[4]",
+      "contexts": [
+        "值得记住的一点：**引用不是模型编的**。每张卡片入库时就带着 `source_type / title / source_uri / page / table` 这些身份信息；返回答案时，系统直接把这些元数据整理成引用列表，模型只负责在答案里标 `[1]`、`[2]`。",
+        "历史直接裸贴在规则块与证据块之间，**没有小标题、没有编号、没有「这不是事实来源」的标注**，\n看起来就像规则的第 7 款或者一条匿名证据。而固定链路的 `generation.py:97` 反而写了完整措辞：\n「对话历史（仅用于理解当前问题的指代，不能作为事实依据）」。\n`FINAL_PROMPT` 第 1 条「证据之外的事实一句都不要写」字面上覆盖这种情况，但被这样渲染出来，实际约束不住。\n\n`agent/tools.py` 的 `render_evidence()` 只给工具产出的块编号，历史永远不进引用列表，\n所以抄历史得到的那半句在引用列表里没有对应条目——用户看不见它的出处。",
+        "- [x] 回归检查通过：`knowledge` 类 7 条 `source_hit` 与 `evidence_hit@3` 两轮都是 1.000，且这 7 条一次都没\n      引用业务库——路由改动没把纯文档问答带偏。分类别 `source_hit`：`database` 0.167→1.000、\n      `mixed` 0.400→1.000、`multi_step` 0.750→1.000。15 条业务库类样本里真的引用 `demo.products` 的从\n      9 条升到 15 条；意图分布从 `knowledge`15 / `mixed`9 / `none`2（一条 `database` 都没有）变成\n      `database`10 / `knowledge`9 / `mixed`6 / `none`1\n- [x] `stop_reason` 分布：v7.1 `final`18 / `no_retrieval`2 / `planner_unavailable`6 → v7.2 `final`21 /\n      `insufficient_evidence`2 / `no_retrieval`1 / `context_budget`1 / `planner_unavailable`1。决策 JSON\n      解析失败从 6 条降到 1 条只作为观察记录，不作归因（提示词改动与模型随机性同时在里面）\n- [x] 4 条应拒答样本全部以哨兵文本开头，但路径不同：r03/r04 走 `insufficient_evidence`（先检索、判证据不足），\n      r02 走 `context_budget`（12 段证据用尽字符预算后仍按缺口拒答），r01 走 `none`（根本没检索）\n- [x] `none` 判据已收紧（同日，`v7.2-none-gate`）：`none` 不再是免检通行证。路由判成 `none` 时不再直接\n      拒答，而是先用原问题做一次知识库验证检索——查到证据就照常作答、把上报意图改写成 `knowledge`，查不到\n      才返回拒答哨兵、`stop_reason` 记 `no_evidence`（与压根没检索的 `no_retrieval` 区分开），开关\n      `RAG_DISABLE_AGENT_NONE_PROBE`；提示词把 `none` 的准入收紧到实时信息、天气、新闻、外部网站内容、\n      主观偏好这类明确在本系统之外的事实，问到业务记录、字段或本系统自身文档一律先取证。全量 26 条复跑\n      （`eval/reports/v7_2_nonegate_report.md`）：`none` 与 `no_retrieval` 各从 1 条降到 0 条，…",
+        "name | price | updated_at\n香蕉 | 6.5 | 2026-01-15"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "值得记住的一点：**引用不是模型编的**。每张卡片入库时就带着 `source_type / title / source_uri / page / table` 这些身份信息；返回答案时，系统直接把这些元数据整理成引用列表，模型只负责在答…",
+          "page": null,
+          "table": null,
+          "score": 0.1336669921875
+        },
+        {
+          "index": 2,
+          "title": "v7.4-history-as-evidence.md",
+          "source_type": "file",
+          "source_uri": "docs/v7.4-history-as-evidence.md",
+          "snippet": "历史直接裸贴在规则块与证据块之间，**没有小标题、没有编号、没有「这不是事实来源」的标注**， 看起来就像规则的第 7 款或者一条匿名证据。而固定链路的 `generation.py:97` 反而写了完整措辞： 「对话历史（仅用于理解当前问…",
+          "page": null,
+          "table": null,
+          "score": -2.390625
+        },
+        {
+          "index": 3,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [x] 回归检查通过：`knowledge` 类 7 条 `source_hit` 与 `evidence_hit@3` 两轮都是 1.000，且这 7 条一次都没 引用业务库——路由改动没把纯文档问答带偏。分类别 `source_hi…",
+          "page": null,
+          "table": null,
+          "score": -2.66015625
+        },
+        {
+          "index": 4,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price | updated_at；首行：香蕉 | 6.5 | 2026-01-15",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "docs/beginner-guide.md",
+        "docs/v7.4-history-as-evidence.md",
+        "docs/ROADMAP.md",
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 1889,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "trace_id": "641c5b468341",
+      "history_turns": 2,
+      "retrieval_ms": 3018.0,
+      "generation_ms": 158994.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    }
+  ]
+}

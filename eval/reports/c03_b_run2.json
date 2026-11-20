@@ -1,0 +1,211 @@
+{
+  "meta": {
+    "report_title": "# private-rag 检索策略评估报告：v7_agent_qa",
+    "generated_at": "2026-11-20T23:37:52+08:00",
+    "dataset": "eval/v7_agent_qa.jsonl",
+    "dataset_sha256": "a9a7415a5c748a60b08f77d2629ab8e90b2d8b4b20e73a62640d01436803eaf5",
+    "dataset_total": 29,
+    "samples_total": 1,
+    "samples_answerable": 1,
+    "samples_refusal": 0,
+    "sample_ids": [
+      "c03"
+    ],
+    "categories": {
+      "coreference": 1
+    },
+    "configs": [
+      "agent"
+    ],
+    "agent": {
+      "enabled": true,
+      "configs": [
+        "agent"
+      ],
+      "sources": "config/sources.eval.agent.yaml",
+      "tools": [
+        "kb_search",
+        "sql_query"
+      ],
+      "max_steps": 4,
+      "allow_sql": true,
+      "sql_rows": 20,
+      "trace_enabled": false
+    },
+    "dataset_is_default": false,
+    "output_markdown": "eval/reports/c03_b_run2.md",
+    "output_json": "eval/reports/c03_b_run2.json",
+    "llm_model": "qwen3.8:27b-mlx",
+    "judge_model": "qwen3.8:27b-mlx",
+    "embed_model": "bge-m3",
+    "ragas": {
+      "enabled": false,
+      "configs": [],
+      "limit": null,
+      "metrics": [
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall"
+      ],
+      "strictness": 3,
+      "max_workers": 1,
+      "cache": false,
+      "cache_dir": null
+    },
+    "ragas_errors": {},
+    "duration_seconds": 79.79,
+    "git_commit": "d43b314c41583f5b85b3d94a2365541a155e467d"
+  },
+  "samples_meta": [
+    {
+      "id": "c03",
+      "question": "那这个项目的引用列表是从哪儿来的？还有刚才那条记录的更新时间是什么时候？",
+      "category": "coreference",
+      "answerable": true,
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [
+        "docs/beginner-guide.md",
+        "demo.products"
+      ],
+      "history_turns": 2
+    }
+  ],
+  "configs": {
+    "agent": {
+      "spec": {
+        "name": "agent",
+        "label": "Agentic：意图路由 + 工具循环（kb_search + 运行时只读 SQL）",
+        "use_lexical": true,
+        "use_rerank": true,
+        "top_k": 3,
+        "use_parent": true,
+        "query_rewrite": "off",
+        "context_max_chars": 6000,
+        "is_agent": true
+      },
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "both_sides_hit": 0.0,
+        "answer_rate": 1.0,
+        "refusal_accuracy": null,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "avg_latency_ms": 79769.0,
+        "avg_retrieval_ms": 2346.0,
+        "avg_generation_ms": 77423.0,
+        "generation_cache_hits": 0,
+        "avg_retrieved": 3.0,
+        "avg_context_chars": 625.0,
+        "avg_query_count": 1.0,
+        "avg_tool_calls": 1.0,
+        "avg_tool_steps": 3.0,
+        "used_parent_rate": 1.0,
+        "rewrite_fallbacks": 0,
+        "n_answerable": 1,
+        "n_refusal": 0,
+        "n_errors": 0
+      },
+      "ragas": null,
+      "n_results": 1
+    }
+  },
+  "samples": [
+    {
+      "id": "c03",
+      "config": "agent",
+      "category": "coreference",
+      "answerable": true,
+      "question": "那这个项目的引用列表是从哪儿来的？还有刚才那条记录的更新时间是什么时候？",
+      "reference": "引用列表不是模型编的：每张卡片入库时就带着身份信息，系统直接把这些元数据整理成引用列表；香蕉那条记录的更新时间是 2026-01-15。",
+      "evidence": [
+        "引用不是模型编的",
+        "系统直接把这些元数据整理成引用列表"
+      ],
+      "expected_source": "docs/beginner-guide.md",
+      "expected_sources": [
+        "docs/beginner-guide.md",
+        "demo.products"
+      ],
+      "answer": "1）引用列表的来源：每张卡片入库时就带着 `source_type / title / source_uri / page / table` 这些身份信息，返回答案时系统直接把这些元数据整理成引用列表，模型只负责在答案里标 `[1]`、`[2]`，引用不是模型编的[1]。具体实现上，`agent/tools.py` 的 `render_evidence()` 只给工具产出的证据块编号，对话历史永远不进引用列表[3]。\n\n2）刚才那条记录（香蕉，单价 6.5 元）的更新时间是 **2026-01-15**（对话历史中已给出，且与 products 表中 updated_at 取值一致）。",
+      "contexts": [
+        "值得记住的一点：**引用不是模型编的**。每张卡片入库时就带着 `source_type / title / source_uri / page / table` 这些身份信息；返回答案时，系统直接把这些元数据整理成引用列表，模型只负责在答案里标 `[1]`、`[2]`。",
+        "`sources.yaml` 支持三类来源：",
+        "历史直接裸贴在规则块与证据块之间，**没有小标题、没有编号、没有「这不是事实来源」的标注**，\n看起来就像规则的第 7 款或者一条匿名证据。而固定链路的 `generation.py:97` 反而写了完整措辞：\n「对话历史（仅用于理解当前问题的指代，不能作为事实依据）」。\n`FINAL_PROMPT` 第 1 条「证据之外的事实一句都不要写」字面上覆盖这种情况，但被这样渲染出来，实际约束不住。\n\n`agent/tools.py` 的 `render_evidence()` 只给工具产出的块编号，历史永远不进引用列表，\n所以抄历史得到的那半句在引用列表里没有对应条目——用户看不见它的出处。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "值得记住的一点：**引用不是模型编的**。每张卡片入库时就带着 `source_type / title / source_uri / page / table` 这些身份信息；返回答案时，系统直接把这些元数据整理成引用列表，模型只负责在答…",
+          "page": null,
+          "table": null,
+          "score": -0.66064453125
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "`sources.yaml` 支持三类来源：",
+          "page": null,
+          "table": null,
+          "score": -2.33203125
+        },
+        {
+          "index": 3,
+          "title": "v7.4-history-as-evidence.md",
+          "source_type": "file",
+          "source_uri": "docs/v7.4-history-as-evidence.md",
+          "snippet": "历史直接裸贴在规则块与证据块之间，**没有小标题、没有编号、没有「这不是事实来源」的标注**， 看起来就像规则的第 7 款或者一条匿名证据。而固定链路的 `generation.py:97` 反而写了完整措辞： 「对话历史（仅用于理解当前问…",
+          "page": null,
+          "table": null,
+          "score": -2.3828125
+        }
+      ],
+      "source_uris": [
+        "docs/beginner-guide.md",
+        "README.md",
+        "docs/v7.4-history-as-evidence.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 625,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "trace_id": "cb673b9b0246",
+      "history_turns": 2,
+      "retrieval_ms": 2346.0,
+      "generation_ms": 77423.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 0.0
+      },
+      "ragas": null
+    }
+  ]
+}
