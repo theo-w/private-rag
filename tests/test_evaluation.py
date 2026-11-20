@@ -13,6 +13,7 @@ from private_rag import config
 from private_rag import eval_env
 from private_rag.evaluation import (
     CONFIGS,
+    DETERMINISTIC_METRICS,
     DatasetError,
     EvalSample,
     SampleResult,
@@ -725,6 +726,237 @@ def test_v7_agent_dataset_is_valid():
     )
     # 三条里只有一条的得分侧依赖运行时 SQL（c02），其余按文档来源判定
     assert sum(1 for s in coreference if s.expected_source == "demo.products") == 1
+    # v7.4 双侧取证：恰好 m01–m05 + c03 六条声明「文档侧 + SQL 侧」
+    two_sided = [s for s in samples if len(s.expected_sources) >= 2]
+    assert [s.id for s in two_sided] == ["m01", "m02", "m03", "m04", "m05", "c03"]
+    for s in two_sided:
+        assert "demo.products" in s.expected_sources
+        docs = [x for x in s.expected_sources if x != "demo.products"]
+        # 文档侧必须落在真实存在、且真的会被评估库入库的文件上
+        assert len(docs) == 1, (s.id, s.expected_sources)
+        doc_path = Path(config.ROOT) / docs[0]
+        assert doc_path.exists(), (s.id, docs[0])
+        assert docs[0] == "README.md" or docs[0].startswith("docs/")
+    # 其余样本不得声明双侧，否则 both_sides_hit 的分母会悄悄漂移
+    assert sum(1 for s in samples if 0 < len(s.expected_sources) < 2) == 0
+    assert all(not s.expected_sources for s in samples if s.category == "refusal")
+
+
+def test_both_sides_hit_requires_every_declared_side():
+    sample = EvalSample(
+        id="m99",
+        question="香蕉能放冰箱吗？引用列表从哪来？",
+        reference="不适合；引用来自入库元数据。",
+        evidence=("香蕉不适合放冰箱",),
+        source="scripts/init_demo_db.py",
+        category="mixed",
+        answerable=True,
+        expected_source="demo.products",
+        expected_sources=("demo.products", "docs/beginner-guide.md"),
+    )
+    contexts = ["香蕉不适合放冰箱，低温会让表皮变黑、口感变差", "引用不是模型编的"]
+    citations = [{"index": 1, "source_uri": "demo.products#sql_query"}]
+    both = score_deterministic(
+        sample,
+        contexts,
+        ["demo.products#sql_query", "docs/beginner-guide.md"],
+        citations,
+        "不适合[1]，引用来自元数据[1]",
+    )
+    assert both["both_sides_hit"] == 1.0
+
+    # 复刻 v7.3 的 c03：只引到文档侧、SQL 那一半抄的历史 —— 必须判 0
+    one_sided = score_deterministic(
+        sample,
+        contexts,
+        ["docs/beginner-guide.md", "README.md"],
+        citations,
+        "引用来自元数据[1]",
+    )
+    assert one_sided["both_sides_hit"] == 0.0
+    # 现有口径不动：source_hit 仍只看 expected_source 单字符串与前 3 条引用
+    assert one_sided["source_hit"] == 0.0
+    both["source_hit"]  # 双侧样本的 source_hit 口径保持 v7 原样
+
+    # 声明的文档侧没被引用到，只引了 README.md / docs/ROADMAP.md —— 仍判 0，
+    # 证明 README.md 与 docs/beginner-guide.md 之间不会互相误命中
+    wrong_doc = score_deterministic(
+        sample,
+        contexts,
+        ["README.md", "docs/ROADMAP.md", "demo.products#sql_query"],
+        citations,
+        "四种意图[1]",
+    )
+    assert wrong_doc["both_sides_hit"] == 0.0
+
+    # 复刻 v7.3 的 m04：README.md 侧 + SQL 侧，SQL 引到第 4 条（@3 窗口之外）。
+    # 新读数扫全量引用，因此仍判 1——这正是它与 source_hit 的口径差别
+    m04_like = EvalSample(
+        id="m98",
+        question="苹果怎么保存？支持哪几种意图？",
+        reference="冷藏；四种意图。",
+        evidence=("苹果适合冷藏保存",),
+        source="scripts/init_demo_db.py",
+        category="mixed",
+        answerable=True,
+        expected_source="demo.products",
+        expected_sources=("demo.products", "README.md"),
+    )
+    late_sql = score_deterministic(
+        m04_like,
+        ["苹果适合冷藏保存，可以延长保鲜时间"],
+        ["README.md", "README.md", "docs/ROADMAP.md", "demo.products#sql_query"],
+        citations,
+        "冷藏[1]，四种意图[1]",
+    )
+    assert late_sql["both_sides_hit"] == 1.0
+    assert late_sql["source_hit"] == 0.0  # source_hit 只看前 3 条引用，SQL 排在窗口外
+
+    # 只声明一侧 / 未声明：不参与该读数
+    single = EvalSample(
+        id="k99",
+        question="embedding 由谁负责？",
+        reference="Ollama。",
+        evidence=("Ollama 负责 embedding 与生成",),
+        source="README.md",
+        category="knowledge",
+        answerable=True,
+        expected_sources=("README.md",),
+    )
+    only_doc = score_deterministic(
+        single, ["Ollama 负责 embedding 与生成"], ["README.md"], [{"index": 1}], "Ollama[1]"
+    )
+    assert only_doc["both_sides_hit"] is None
+    assert single.expected_sources == ("README.md",)
+
+    # 应拒答样本同样不参与（保持全 None，不进任何均值）
+    refusal_sample = EvalSample(
+        id="r99",
+        question="有 iOS 客户端吗",
+        reference="",
+        evidence=(),
+        source="",
+        category="refusal",
+        answerable=False,
+    )
+    refusal_metrics = score_deterministic(refusal_sample, [], [], [], "没有相关信息")
+    assert refusal_metrics["both_sides_hit"] is None
+
+
+def test_expected_sources_optional_and_validated(tmp_path: Path):
+    needle = "Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储"
+    base = {
+        "id": "x11",
+        "question": "embedding 由谁负责？",
+        "reference": "Ollama 负责 embedding 与生成。",
+        "evidence": [needle],
+        "source": "README.md",
+        "category": "knowledge",
+        "answerable": True,
+    }
+    path = tmp_path / "qa.jsonl"
+    path.write_text(json.dumps(base, ensure_ascii=False) + "\n", encoding="utf-8")
+    assert load_dataset(path)[0].expected_sources == ()
+
+    path.write_text(
+        json.dumps(
+            {**base, "expected_sources": ["README.md", "demo.products", "README.md"]},
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    # 去重保序：同一侧写两遍不该算两侧
+    assert load_dataset(path)[0].expected_sources == ("README.md", "demo.products")
+
+    for bad in ("README.md", ["README.md", ""], ["README.md", 3]):
+        path.write_text(
+            json.dumps({**base, "expected_sources": bad}, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(DatasetError):
+            load_dataset(path)
+
+    path.write_text(
+        json.dumps(
+            {
+                **base,
+                "id": "x12",
+                "reference": "",
+                "evidence": [],
+                "source": "",
+                "category": "refusal",
+                "answerable": False,
+                "expected_sources": ["README.md"],
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(DatasetError):
+        load_dataset(path)
+
+
+def test_both_sides_hit_aggregates_and_renders():
+    assert "both_sides_hit" in DETERMINISTIC_METRICS
+    # 只有声明双侧的样本进均值：1.0 与 0.0 各一条 → 0.5，单侧样本不得稀释
+    mixed_a = SampleResult(
+        sample_id="m01",
+        config="agent",
+        category="mixed",
+        answerable=True,
+        question="q",
+        reference="r",
+        evidence=[],
+        expected_source="demo.products",
+        expected_sources=["demo.products", "docs/beginner-guide.md"],
+        metrics={"evidence_hit@3": 1.0, "source_hit": 1.0, "both_sides_hit": 1.0},
+    )
+    mixed_b = SampleResult(
+        sample_id="c03",
+        config="agent",
+        category="coreference",
+        answerable=True,
+        question="q",
+        reference="r",
+        evidence=[],
+        expected_source="docs/beginner-guide.md",
+        expected_sources=["docs/beginner-guide.md", "demo.products"],
+        metrics={"evidence_hit@3": 1.0, "source_hit": 1.0, "both_sides_hit": 0.0},
+    )
+    single = SampleResult(
+        sample_id="k01",
+        config="agent",
+        category="knowledge",
+        answerable=True,
+        question="q",
+        reference="r",
+        evidence=[],
+        expected_source="README.md",
+        metrics={"evidence_hit@3": 1.0, "source_hit": 1.0, "both_sides_hit": None},
+    )
+    aggregate = aggregate_results([mixed_a, mixed_b, single])
+    assert aggregate["both_sides_hit"] == 0.5
+
+    samples = [
+        EvalSample(
+            id=item.sample_id,
+            question="q",
+            reference="r",
+            evidence=(),
+            source="README.md",
+            category=item.category,
+            answerable=True,
+            expected_sources=tuple(item.expected_sources),
+        )
+        for item in (mixed_a, mixed_b, single)
+    ]
+    report = build_report({"configs": ["agent"]}, samples, [mixed_a, mixed_b, single])
+    markdown = render_markdown(report)
+    assert "`both_sides_hit`" in markdown
+    # c03 只取到一侧：evidence_hit@3 满分也必须进失败清单，且现象单独成类
+    assert "只取到一侧证据" in markdown
 
 
 def test_source_matches_ignores_fragment():

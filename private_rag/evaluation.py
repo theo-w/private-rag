@@ -138,6 +138,10 @@ class EvalSample:
     # 不作为事实依据。空元组表示单轮样本。加载时校验成对出现、role 合法、content 非空，
     # 运行时原样传给 agent.run 的 history 参数。
     history: tuple[tuple[str, str], ...] = ()
+    # 双侧样本声明的全部应取证来源（如「文档侧 + SQL 侧」）；只有 both_sides_hit 读数使用。
+    # 留空或只有一条表示本条不参与该读数；expected_source 的单字符串口径保持不变，
+    # 旧字段与既有指标逐条可比。
+    expected_sources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -237,6 +241,9 @@ class SampleResult:
     trace_id: str = ""
     # 该样本带了几轮历史；固定链路保持 None，报告显示为「—」
     history_turns: Optional[int] = None
+    # 样本声明的双侧取证来源（来自 EvalSample.expected_sources）；逐条读数看 metrics 里的
+    # both_sides_hit，这里只为让 JSON/报告能直接看出这条样本该取哪几侧
+    expected_sources: list[str] = field(default_factory=list)
 
 
 def normalize_text(text: str) -> str:
@@ -279,9 +286,10 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
         "category",
         "answerable",
     }
-    # expected_source 与 history 都是可选字段：前者只在证据权威文件与期望引用不是同一个东西
-    # 时使用，后者给需要还原指代的样本提供前置对话轮次
-    optional = {"expected_source", "history"}
+    # 三个可选字段：expected_source 只在证据权威文件与期望引用不是同一个东西时使用；
+    # history 给需要还原指代的样本提供前置对话轮次；
+    # expected_sources 给「文档侧 + SQL 侧」的双侧样本声明全部应取证来源（both_sides_hit 用）
+    optional = {"expected_source", "history", "expected_sources"}
     allowed = required | optional
 
     lines = dataset_path.read_text(encoding="utf-8").splitlines()
@@ -310,6 +318,7 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
         category = data["category"]
         answerable = data["answerable"]
         expected_source = data.get("expected_source", "")
+        expected_sources = data.get("expected_sources", [])
         history = data.get("history", [])
 
         if not isinstance(sample_id, str) or not sample_id.strip():
@@ -330,6 +339,13 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
             raise DatasetError(f"第 {line_number} 行 source 必须是字符串")
         if not isinstance(expected_source, str):
             raise DatasetError(f"第 {line_number} 行 expected_source 必须是字符串")
+        if not isinstance(expected_sources, list):
+            raise DatasetError(f"第 {line_number} 行 expected_sources 必须是字符串数组")
+        for item in expected_sources:
+            if not isinstance(item, str) or not item.strip():
+                raise DatasetError(
+                    f"第 {line_number} 行 expected_sources 的每一项都必须是非空字符串"
+                )
         if not isinstance(evidence, list) or not all(
             isinstance(item, str) and item.strip() for item in evidence
         ):
@@ -393,10 +409,10 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
         else:
             if category != "refusal":
                 raise DatasetError(f"第 {line_number} 行拒答样本的 category 必须是 refusal")
-            if reference or evidence or source or expected_source:
+            if reference or evidence or source or expected_source or expected_sources:
                 raise DatasetError(
                     f"第 {line_number} 行拒答样本的 reference/evidence/source/"
-                    "expected_source 必须为空"
+                    "expected_source/expected_sources 必须为空"
                 )
 
         seen_ids.add(sample_id)
@@ -412,6 +428,10 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
                 answerable=answerable,
                 expected_source=expected_source.strip(),
                 history=tuple(turns),
+                # 去重保序：同一侧写两遍不该算两侧
+                expected_sources=tuple(
+                    dict.fromkeys(item.strip() for item in expected_sources)
+                ),
             )
         )
 
@@ -481,6 +501,7 @@ def score_deterministic(
             "source_hit": None,
             "citation_rate": None,
             "citation_validity": None,
+            "both_sides_hit": None,
         }
 
     top_contexts = list(contexts[:3])
@@ -516,6 +537,22 @@ def score_deterministic(
         if any(_source_matches(uri, expected_source) for uri in source_uris[:3])
         else 0.0
     )
+    # 双侧取证读数（v7.4）：声明的每一侧都要在全量引用里出现。
+    # 刻意不套 @3 窗口——source_hit 只看前 3 条引用，混合问题常把 SQL 侧排到第 4 条
+    # （v7.3 报告 m04 即如此），那属于已知窗口口径限制，不该让新读数一上来就带上。
+    sides = sample.expected_sources
+    if len(sides) >= 2:
+        both_sides_hit = (
+            1.0
+            if all(
+                any(_source_matches(uri, side) for uri in source_uris)
+                for side in sides
+            )
+            else 0.0
+        )
+    else:
+        # 未声明双侧（或只有一条，视为单侧期望）：记 None，不进 both_sides_hit 的均值
+        both_sides_hit = None
 
     citation_numbers_list = citation_numbers(
         answer, citation_count=len(citations)
@@ -536,6 +573,7 @@ def score_deterministic(
         "source_hit": source_hit,
         "citation_rate": citation_rate,
         "citation_validity": citation_validity,
+        "both_sides_hit": both_sides_hit,
     }
 
 
@@ -557,6 +595,10 @@ def aggregate_results(results: Sequence[SampleResult]) -> dict[str, Any]:
         ),
         "mrr@3": _mean([item.metrics.get("mrr@3") for item in answerable]),
         "source_hit": _mean([item.metrics.get("source_hit") for item in answerable]),
+        # 只有声明双侧的样本参与均值（其余条目该键为 None，_mean 自动跳过）
+        "both_sides_hit": _mean(
+            [item.metrics.get("both_sides_hit") for item in answerable]
+        ),
         "answer_rate": _mean([0.0 if item.refusal else 1.0 for item in answerable]),
         "refusal_accuracy": _mean([1.0 if item.refusal else 0.0 for item in refusal]),
         "citation_rate": _mean([item.metrics.get("citation_rate") for item in answerable]),
@@ -633,6 +675,7 @@ def collect_results(
                 reference=sample.reference,
                 evidence=list(sample.evidence),
                 expected_source=sample.source,
+                expected_sources=list(sample.expected_sources),
                 requested_rerank=spec.use_rerank,
             )
 
@@ -759,6 +802,7 @@ def collect_agent_results(
             reference=sample.reference,
             evidence=list(sample.evidence),
             expected_source=sample.expected_source or sample.source,
+            expected_sources=list(sample.expected_sources),
             requested_rerank=spec.use_rerank,
             used_lexical=spec.use_lexical,
             used_rerank=spec.use_rerank,
@@ -1029,6 +1073,7 @@ DETERMINISTIC_METRICS = (
     "context_precision@3",
     "mrr@3",
     "source_hit",
+    "both_sides_hit",
     "answer_rate",
     "refusal_accuracy",
     "citation_rate",
@@ -1068,6 +1113,7 @@ def _result_to_dict(result: SampleResult) -> dict:
         "reference": result.reference,
         "evidence": list(result.evidence),
         "expected_source": result.expected_source,
+        "expected_sources": list(result.expected_sources),
         "answer": result.answer,
         "contexts": list(result.contexts),
         "citations": list(result.citations),
@@ -1123,6 +1169,7 @@ def build_report(
                 "category": sample.category,
                 "answerable": sample.answerable,
                 "expected_source": sample.source,
+                "expected_sources": list(sample.expected_sources),
                 "history_turns": len(sample.history),
             }
             for sample in samples
@@ -1233,9 +1280,13 @@ def _failure_lines(report: dict, limit: int = 20) -> list[str]:
     config_order = {name: index for index, name in enumerate(report["configs"])}
     for item in report["samples"]:
         if item["answerable"]:
-            failed = bool(item["error"]) or item["refusal"] or item["metrics"].get(
-                "evidence_hit@3"
-            ) == 0.0
+            failed = (
+                bool(item["error"])
+                or item["refusal"]
+                or item["metrics"].get("evidence_hit@3") == 0.0
+                # 双侧样本只引到一侧：evidence_hit@3 可能仍是满分，不单独判失败就看不见
+                or item["metrics"].get("both_sides_hit") == 0.0
+            )
         else:
             # 应拒答样本：未输出拒答文案也算失败，避免只展示可回答样本的问题。
             failed = bool(item["error"]) or not item["refusal"]
@@ -1283,6 +1334,8 @@ def _failure_lines(report: dict, limit: int = 20) -> list[str]:
             phenomenon = "应拒答但未拒答"
         elif item["refusal"]:
             phenomenon = "拒答"
+        elif item["metrics"].get("both_sides_hit") == 0.0:
+            phenomenon = "只取到一侧证据"
         else:
             phenomenon = "未命中证据"
         answer = _cell(item["answer"])[:110] if item["answer"] else "—"
@@ -1612,6 +1665,11 @@ def render_markdown(report: dict) -> str:
         "v5 口语化数据集规模较小，只做结构/证据校验，不能与 v4 分数直接混比。"
     )
     lines.append(
+        "- `both_sides_hit` 只对声明了双侧取证来源（`expected_sources`）的样本有意义，"
+        "其余条目恒为 `None` 不进均值；固定链路没挂运行时 SQL 源时它必然整列 NaN——"
+        "双侧样本要跑得通，得用 agentic 组加 `--agent-sources`。"
+    )
+    lines.append(
         "- 生成调用未固定采样参数（`ChatOllama` 默认温度/随机种子），"
         "同一问题重跑可能得到不同答案；Ragas 磁盘缓存只在 prompt 完全一致时命中，"
         "因此重跑耗时不会归零。"
@@ -1643,6 +1701,10 @@ def render_markdown(report: dict) -> str:
                 "`agent.run` 的 history 参数，报告用 `history_turns` 标出哪几条走了多轮；"
                 "不带该字段的样本传空列表，与单轮等价。加载时校验 role 必须 user/assistant 交替、"
                 "content 非空，且 history 里不得出现 evidence 原文——那等于把答案喂进提示词。",
+                "- `both_sides_hit` 是 v7.4 新增的双侧取证读数：样本可用 `expected_sources` "
+                "声明「文档侧 + SQL 侧」，声明的每一侧都要在全量引用列表里出现才判 1；"
+                "它扫全量引用、不套 `@3` 窗口，与 `source_hit` 不同口径，"
+                "未声明双侧的样本不参与其均值。",
                 "- 评估运行设置 `RAG_DISABLE_AGENT_TRACE=1`，不写 "
                 "`storage/traces/agent.jsonl`，避免把评估样本混进演示轨迹；"
                 "因此报告里的 `trace_id` 不能逐条回放。",
