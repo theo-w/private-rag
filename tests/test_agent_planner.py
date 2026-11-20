@@ -250,3 +250,33 @@ class TestCoreferenceResolution:
         ):
             for leaked in ("products", "香蕉", "猕猴桃", "橙子", "demo.", "精排", "引用列表"):
                 assert leaked not in prompt
+
+    def test_step_prompt_limits_sufficient_to_collected_evidence(self):
+        """修法 A：规则 1 限定 sufficient 只看已收集的证据，不含历史。"""
+        prompt = build_step_prompt("问题", "工具清单", "证据", [], None)
+        assert "只有「已收集的证据」段落里的内容算支撑" in prompt
+        assert "对话历史不算事实依据" in prompt
+
+    def test_step_prompt_forbids_final_without_both_sides(self):
+        """修法 A：规则 10 禁止 mixed 查询在任一侧无证据时选 final。"""
+        prompt = build_step_prompt("问题", "工具清单", "证据", [], None)
+        assert "intent=mixed" in prompt
+        assert "不得选 final" in prompt
+        assert "至少各查一次" in prompt
+
+    def test_final_prompt_requires_rechecking_history_facts(self):
+        """修法 A：规则 7 要求历史里的事实必须先查证据。"""
+        prompt = build_final_prompt("问题", "证据", None)
+        assert "对话历史里的事实" in prompt
+        assert "必须先查证据" in prompt
+        assert "不能直接引用历史里的数据" in prompt
+
+    def test_history_section_has_factual_disclaimer(self):
+        """修法 A：_history_section() 加上固定链路的标注。"""
+        from private_rag.agent.prompts import _history_section
+        from private_rag.generation import History
+
+        hist: History = [("user", "香蕉多少钱？"), ("assistant", "6.5 元")]
+        result = _history_section(hist)
+        assert "不能作为事实依据" in result
+        assert "仅用于理解当前问题的指代" in result
