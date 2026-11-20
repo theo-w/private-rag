@@ -164,9 +164,10 @@ v4/v5 的评估集量的是“固定检索链路”的质量；v7 这份量的�
 | `database` | 6 | 只查运行时 SQL（`products` 表） | 必然拒答：评估库不入库业务数据 |
 | `mixed` | 5 | 文档 + SQL 各出一段证据 | 只能答出一半 |
 | `multi_step` | 4 | 先拿结果再决定下一步（比平均价、排序后取保存说明等） | 无法作答 |
+| `coreference` | 3 | 先靠对话历史还原指代，再决定查哪一侧（v7.3 新增） | 指代还原不了：固定链路压根不接 history 参数（只调 `retrieve`/`generate_answer`），c02/c03 的库侧必然查不到，c01 只能靠字面蒙 |
 | `refusal` | 4 | 文档和库里都没有 | 两组都应拒答 |
 
-共 26 条：22 可回答 + 4 应拒答。evidence 仍做逐字校验，出处为
+共 29 条：25 可回答 + 4 应拒答。evidence 仍做逐字校验，出处为
 `README.md` / `docs/beginner-guide.md` / `docs/ROADMAP.md` / `scripts/init_demo_db.py`。
 
 ### `expected_source`（本数据集新增的可选字段）
@@ -182,6 +183,27 @@ SQL 样本的证据权威文件与“引用应该指向谁”不是同一个东�
 `source` 只管证据校验，`source_hit` 改按 `expected_source` 判定；比较时会忽略 `#` 之后的片段
 （SQL 入库文档是 `label#主键`，运行时查询引用是 `label#sql_query`，来源身份都是 `label`）。
 省略该字段时行为与 v4/v5 完全一致。
+
+### `history`（v7.3 新增的可选字段）
+
+指代消解要有真实的前置轮次才量得出来——之前 26 条里 0 条带历史，所以「覆盖指代」只是文档上的说法。
+样本可以带 `history`，每项是一个 `[role, content]`：
+
+```json
+{"id": "c02", "question": "那它的保存方式是啥？",
+ "history": [["user", "橙子现在多少钱？"],
+             ["assistant", "橙子当前单价 12.5 元，记录更新时间是 2026-01-10。"]],
+ "...": "..."}
+```
+
+加载时的硬校验，不通过就是 `DatasetError` 而不是警告：项数必须是偶数、role 严格 `user`/`assistant`
+交替、content 非空、每项必须是二元组；可回答样本的 history 里还不得出现该样本 `evidence` 的原文——
+那等于把答案喂进提示词，指标就不干净了。
+
+运行时 history 原样传给 `agent.run(..., history=...)`：`run` / `run_stream` 早就支持历史，路由器、
+步进决策、最终作答三处提示词也都留着 `{history_section}`，缺的只是评估侧没人传。报告用 `history_turns`
+标出每条走了几轮（`samples_meta[i]` 与逐条 `samples[i]` 都有；固定链路没有这个概念，保持 `—`）。
+省略该字段的样本传空列表，与单轮等价，v7.3 之前那 26 条的行为一字未变。
 
 ### 为什么评估库不入库业务数据
 
@@ -216,7 +238,7 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --n
 - **路由受问法影响**：像“香蕉能不能放冰箱”这种读起来像生活常识的问题，决策模型会判成 `knowledge`
   而去查文档（保存方法其实在 `products.description` 里）；措辞带“价格/表/记录”的问题才会走 SQL。
   这是本数据集量出来的真实短板，不是评估脚本的问题。（v7.2 已按“库内数据可得性”重做路由，见本文末小节）
-- **单轮**：评估不传会话历史，指代消解类能力未覆盖。
+- **多轮**：样本可带 `history`（见上面小节），agentic 组会真的收到这段历史；不带该字段的样本仍是单轮，固定链路则始终不读历史。
 - 评估运行设置 `RAG_DISABLE_AGENT_TRACE=1`，不写 `storage/traces/agent.jsonl`，
   所以报告里的 `trace_id` 不能在演示轨迹里回放。
 - **`@3` 窗口截断**：`evidence_*@3`、`context_precision@3`、`mrr@3`、`source_hit` 都只看前 3 条上下文，
@@ -286,7 +308,7 @@ SELECT 列口径吃掉，所以这两类的收益要看 `answer_rate` 与引用�
   `evidence_hit@3` 0.333，full 0.167 / 0.167 / 0.167；单条平均耗时 agent 71.9 秒、`full` 17.2 秒，
   与全量 26 条的方向一致。
 
-## v7.2 路由与拒答复跑（2026-11-19）
+## v7.2 / v7.3 路由、拒答与指代消解复跑（2026-11-19 起）
 
 v7.1 报告里那 6 条没查到库的样本（d01/d04/d06/m01/m04/s01）与 3 条该拒答却作答的样本
 （r01/r02/r04）单独重跑，命令与产物：
@@ -328,7 +350,7 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
 `evidence` 也从同一份种子逐字校验——所以 d01/d04/d06 的改判里，有一部分等于「把标注答案搬到路由器眼前」。
 真实业务库的样例值不会刚好是用户要问的那项事实，因此这 9 条的提升幅度在本数据集上偏乐观：能确定的是
 机制本身（让路由器看见库里存着什么）有效，不是提升的具体数字。
-`none` 判据偏松的问题同日已经收紧，机制与复跑见下一节。另外 m01 的文档那一半仍然没查出来——模型把「这个项目」当成缺少对话上下文，而评估按单轮执行、本来就没覆盖指代消解。
+`none` 判据偏松的问题同日已经收紧，机制与复跑见下一节。另外 m01 的文档那一半仍然没查出来——模型把「这个项目」当成缺少对话上下文，而评估按单轮执行、本来就没覆盖指代消解（这一条 v7.3 已补：提示词写死消解规则，评估集补上带 `history` 的样本，见本文 v7.3 小节）。
 
 ### 全量 26 条复跑（2026-11-19，v7.2）
 
@@ -396,7 +418,7 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
 |---|---|---|---|---|
 | r01 橙子的产地和供应商联系方式 | `none`→`knowledge` | `no_retrieval`→`insufficient_evidence` | 0→2 | 仍拒答，但改为有据拒答 |
 | m03 最便宜的水果 + 精排给几条 | `mixed` | `final`→`planner_unavailable` | 2 | 否→是（本轮唯一退化） |
-| m01 | `database`→`mixed` | `final` | 1→2 | 否 |
+| m01 香蕉能不能放冰箱 + 本项目引用列表从哪儿来 | `database`→`mixed` | `final` | 1→2 | 否（两半都答对） |
 | d02 | `mixed`→`database` | `final` | 1 | 否 |
 | k02 | `knowledge` | `final`→`planner_unavailable` | 1 | 否，答案与基线一致 |
 | r03 | `mixed` | `insufficient_evidence`→`planner_unavailable` | 1→2 | 仍拒答 |
@@ -405,7 +427,85 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
 
 四条读数限制，引用这轮数字时一并带上：
 
-- 整体指标的回落恰好等于 m03 一条的分量（可答样本 22 条，1/22≈0.045，与四项 -0.045 对得上），不是普遍退化。
+- 整体指标的回落逐条核下来是两条样本各背一项，不是普遍退化：检索类五项（`evidence_hit@3`/`evidence_recall@3`/`context_precision@3`/`mrr@3`/`source_hit`）的 -0.045 全部来自 m01 一条（它这五项各自 1.000→0.000），`answer_rate` 的 -0.045 来自 m03 由不拒答变成拒答（可答样本 22 条，1/22≈0.045）。d05 的 `citation_rate` 0.000→1.000 是反向变化，也正是 `citation_rate` 0.955→1.000 的全部来源。
+- m01 那五个 0 是 `@3` 窗口口径判的，不是答错。这一轮它两半都答对（`mixed`、2 次工具调用，引用 `docs/beginner-guide.md`、`README.md` 与 `demo.products`），但 SQL 证据排在第 4 块，而 `evaluation.py:486` 只取 `contexts[:3]`、`source_hit` 只取 `source_uris[:3]`；基线那轮它只检索到 1 块证据、恰好就是 SQL 那一块，所以五项全 1.000。混合问题答两侧时证据块更多，后一侧常掉出前 3——答得更全反而被判 0。
 - m03 判的是 `mixed`，`none` 探测在这条上不会触发；它的退化发生在 JSON 解析失败那次运行里，SQL 只回了一条记录（香蕉 6.5）后模型按 v7.2 的充分性判定拒答「最便宜」这一半。与本轮改动没有因果路径，但也不把「无关」写成结论。
 - `planner_unavailable` 1→4 只作观察记录，不作归因（模型随机性与提示词改动同时在里面）；其中 k02 解析失败仍给出了与基线一致的答案，说明解析失败本身不必然导致退化。
 - 耗时上升同样含生成侧随机性（检索均值反而从 2.4 秒降到 1.9 秒），机制上的成本只有「真正无关的问题多一次 `kb_search`」，全局体现为平均工具调用 1.31→1.42。`no_evidence` 这个新增取值由单测覆盖，这一轮 26 条没有触发（r01 的验证检索有命中）。
+
+### 指代消解复跑（2026-11-20，`v7.3-coreference`）
+
+这一轮要量的不是分数是指代能不能还原：三处提示词（`ROUTER_PROMPT` / `STEP_PROMPT` / `FINAL_PROMPT`）写死
+「『这个项目』『本系统』一律指本系统自身，它的说明文档就在知识库里」「没有对话历史绝不是选 `none` 的理由」，
+步进决策另加一条——指代词在历史里找不到先行词时按本系统自身的行为与文档理解，不得以「缺少上下文」为由停止取证。
+评估侧补上真正的多轮：样本可带 `history`（见上面小节），`collect_agent_results` 把它传给
+`agent.run(..., history=...)`，报告用 `history_turns` 标出哪几条走了多轮；评估集从 26 条加到 29 条（3 条 `coreference`）。
+同一生成模型（`qwen3.8:27b-mlx`）、同一确定性指标口径，`n_errors` 0。
+
+```bash
+# 评估库要用本分支的文档重建（评估语料就是 README + docs/*.md，见下面限制最后一条）
+python3 scripts/init_demo_db.py && python3 scripts/prepare_eval_kb.py --recreate
+
+# Qdrant 本地模式独占 storage/eval/qdrant_storage，29 条无法并发，分 4 批顺序执行、每批独立落盘
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
+  --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 \
+  --ids k01,k02,k03,k04,k05,k06,k07 \
+  --output /tmp/v73_batch1.md --json-output /tmp/v73_batch1.json
+# 其余三批只换 --ids 与输出名：d01,d02,d03,d04,d05,d06,m01 / m02,m03,m04,m05,s01,s02,s03 / s04,c01,c02,c03,r01,r02,r03,r04
+```
+
+四批落盘后用一次性脚本重建 `SampleResult` 再调 `aggregate_results` / `build_report` 重算聚合（脚本未入库，
+报告 `meta.run_note` 记了这件事），产物 `eval/reports/v7_3_coreference_report.md` / `.json`。之所以这样切：
+`evaluate.py` 只在进程结束时写报告，中途被打断什么都留不下——上一轮就是这么丢的。
+
+| 指标 | none 收紧后（26 条） | v7.3 全量（29 条） | v7.3 同 26 条子集 | 子集差 |
+|---|---:|---:|---:|---:|
+| `answer_rate` | 0.955 | 0.960 | 0.955 | 0 |
+| `refusal_accuracy` | 1.000 | 1.000 | 1.000 | 0 |
+| `source_hit` | 0.955 | 0.960 | 0.955 | 0 |
+| `evidence_hit@3` / `evidence_recall@3` | 0.818 | 0.800 | 0.773 | -0.045 |
+| `context_precision@3` | 0.576 | 0.560 | 0.561 | -0.015 |
+| `mrr@3` | 0.765 | 0.747 | 0.742 | -0.023 |
+| `citation_rate` / `citation_validity` | 1.000 | 0.960 | 0.955 | -0.045 |
+| `avg_context_chars` | 1432 | 1696 | 1800 | +368 |
+| `avg_tool_calls` / `avg_tool_steps` | 1.42 / 3.62 | 1.38 / 3.55 | 1.42 / 3.58 | 0 / -0.04 |
+| 检索均值 / 生成均值 | 1.9 秒 / 60.9 秒 | 2.1 秒 / 87.7 秒 | 2.1 秒 / 87.0 秒 | +0.2 / +26.0 秒 |
+| 单条平均耗时 | 62.8 秒 | 89.8 秒 | 89.1 秒 | +26.3 秒 |
+| 可回答 / 应拒答 / 错误 | 22 / 4 / 0 | 25 / 4 / 0 | 22 / 4 / 0 | — |
+
+三条新样本是本轮的验收对象，全都还原成功了：
+
+| 样本 | 指代 | 意图 | `stop_reason` | 实际取证 | 读数 |
+|---|---|---|---|---|---|
+| c01 | 「那一步」←上一轮的精排 | `knowledge` | `planner_unavailable` | 1 次 `kb_search` | `evidence_hit@3` 1.000、`mrr@3` 0.333、`citation_rate` 1.000；答案正确（精排始终用原问题是「避免检索跑偏」，引 [2][3]） |
+| c02 | 「它」←上一轮的橙子 | `database` | `final` | 1 次 `sql_query` | 检索五项全 1.000，答案「表皮较厚，常温可存放一周左右」[1] 指向 `demo.products#sql_query` |
+| c03 | 「这个项目」+「刚才那条记录」 | `mixed` | `final` | 1 次 `kb_search`（没回查 SQL） | `evidence_hit@3` 1.000（该样本 `expected_source` 只标文档侧）；引用列表那一半正确，时间戳那一半抄的历史 |
+
+同 26 条子集 22 条逐条没变，变了 4 条，四项指标各自的变化都能落到具体一条上：
+
+| 样本 | 变化 | 机制 |
+|---|---|---|
+| m01 | 检索五项 0.000→1.000（含 `source_hit`） | 上一轮它 SQL 证据排第 4 被 `@3` 判 0，这轮 SQL 证据排到第 1 块，五项一起回来 |
+| m04 | `source_hit` 与检索三项 1.000→0.000 | 同一条 `@3` 口径反过来：它的 SQL 证据（苹果那条 `description`）这轮排在第 4 块，回答里 `[4]` 引用正确、两半都答对 |
+| k06 | `evidence_hit@3`/`mrr@3`/`context_precision@3` →0.000 | gold 块（`docs/ROADMAP.md` 的「## v7 详细验收（本分支）」小节）本身一字未改，用 agent 组同参（`top_k=3`、混合召回+精排+父块）复探，它排第 4；`top_k=8` 时能召回，`top_k=3` 就被窗口切掉。答案仍正确且引了 ROADMAP |
+| d05 | `citation_rate`/`citation_validity` 1.000→0.000 | 回答被截断在 18 个字（「根据知识库记录，猕猴桃的描述明确提到」），没吐引用标记；`generate_final_answer` 没设 `num_predict`，走 Ollama 服务端默认输出预算，思考型模型的推理 token 会吃掉它——基线那轮同一条也只有 91 字、同样在半句处断 |
+
+分布：意图 26 条子集 `knowledge`10 / `database`10 / `mixed`6（与基线同分布），加 3 条新样本后 `knowledge`11 / `database`11 / `mixed`7；
+`stop_reason` 子集 `final`19 / `insufficient_evidence`3 / `planner_unavailable`3 / `context_budget`1（基线 `final`19 / `planner_unavailable`4 /
+`insufficient_evidence`2 / `context_budget`1），全量 `final`21 / `planner_unavailable`4 / `insufficient_evidence`3 / `context_budget`1。
+4 条应拒答样本仍全部以哨兵文本开头（r01/r02/r03 走 `insufficient_evidence`，r04 走 `context_budget`），
+`history_turns` 只有 c01/c02/c03 为 2，其余为 0。
+
+六条读数限制，引用这轮数字时一并带上：
+
+- **条目从 26 变 29，整体值不可直接比。** 上表并列了「同 26 条子集」，与基线的比较只认那一列。
+- **`@3` 窗口这轮反过来咬了两口。** m01 因为 SQL 证据从第 4 块挪到第 1 块而五项全回，m04 因为同一机制从第 1 挪到第 4 而五项判 0，
+  k06 的 gold 块实测排第 4——三条都是窗口口径，答案本身都对。这条口径本轮明确不动。
+- **混合样本的 `expected_source` 只标一侧**，c03 标的是文档侧，所以 SQL 那一半没有任何检索指标量得到，
+  它的 `evidence_hit@3` 1.000 不等于两半都查过。
+- **c03 的时间戳那一半是从对话历史直接抄的**（回答自己写着「对话历史中已给出」），没有回查 SQL——历史被当成事实来源
+  而不是指代线索。这是本轮新暴露的行为，v7.3 没修，ROADMAP 上留了一条未勾项。
+- **同子集耗时 +26.3 秒**（62.8→89.1），成本几乎全在生成侧（60.9→87.0 秒），检索均值只 +0.2 秒；提示词变长与模型
+  随机性同时在里面，只作观察记录、不作归因。`planner_unavailable` 全量 4 条与基线持平，c01 落在这一档但走关键词回退仍答对。
+- **评估语料就是本仓库文档**（`config/sources.eval.yaml` 只入库 `README.md` + `docs/*.md`），本分支改过 README 与 ROADMAP
+  的几行并重建了评估库，所以这轮与基线不是同一份语料快照，检索排名的差异里含这一项——k06/m04 的排名变化不能全部记到提示词改动头上。

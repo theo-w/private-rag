@@ -12,7 +12,14 @@ import pytest
 
 import private_rag.agent.prompts as prompts_module
 from private_rag.agent.planner import LlmPlanner
-from private_rag.agent.prompts import PlannerError, build_final_prompt, build_route_prompt, heuristic_route, parse_decision
+from private_rag.agent.prompts import (
+    PlannerError,
+    build_final_prompt,
+    build_route_prompt,
+    build_step_prompt,
+    heuristic_route,
+    parse_decision,
+)
 from private_rag.generation import REFUSAL
 from private_rag.config import AGENT_PLANNER_TOKENS
 
@@ -211,3 +218,35 @@ class TestHeuristicCatalogHints:
 
         assert intent == "knowledge"
         assert action["tool"] == "kb_search"
+
+
+class TestCoreferenceResolution:
+    """「本项目/本系统」被当成缺少对话上下文，是 v7.2 那轮 m01 文档那一半没取证的直接成因。"""
+
+    def test_router_prompt_resolves_self_reference_without_history(self):
+        prompt = build_route_prompt("这个项目的引用列表从哪儿来", "工具清单", None)
+
+        assert "「这个项目」「本系统」" in prompt
+        assert "没有对话历史绝不是选 none 的理由" in prompt
+
+    def test_step_prompt_forbids_missing_context_as_a_stop_reason(self):
+        prompt = build_step_prompt("那它的保存方式呢", "工具清单", "证据", ["已查 1 次"], None)
+
+        assert "不得以「缺少上下文」" in prompt
+        # 指代不明不是证据不足，不能借第 1 条提前收工
+        assert "不属于第 1 条说的证据不足" in prompt
+
+    def test_final_prompt_denies_missing_history_as_a_refusal_reason(self):
+        prompt = build_final_prompt("那它的保存方式呢", "证据", None)
+
+        assert "「没有对话历史」不是拒答理由" in prompt
+
+    def test_new_rules_do_not_leak_eval_corpus_entities(self):
+        # 与路由提示词同一条底线：提示词里出现评估集的实体与表名，指标就不干净了
+        for prompt in (
+            build_route_prompt("问题", "工具清单", None),
+            build_step_prompt("问题", "工具清单", "证据", [], None),
+            build_final_prompt("问题", "证据", None),
+        ):
+            for leaked in ("products", "香蕉", "猕猴桃", "橙子", "demo.", "精排", "引用列表"):
+                assert leaked not in prompt

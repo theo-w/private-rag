@@ -695,15 +695,16 @@ def test_env_path_resolves_relative_and_absolute(monkeypatch):
 def test_v7_agent_dataset_is_valid():
     path = Path(config.ROOT) / "eval" / "v7_agent_qa.jsonl"
     samples = load_dataset(path)
-    assert len(samples) == 26
-    assert sum(sample.answerable for sample in samples) == 22
+    assert len(samples) == 29
+    assert sum(sample.answerable for sample in samples) == 25
     assert sum(not sample.answerable for sample in samples) == 4
-    assert len({sample.id for sample in samples}) == 26
+    assert len({sample.id for sample in samples}) == 29
     assert {sample.category for sample in samples} == {
         "knowledge",
         "database",
         "mixed",
         "multi_step",
+        "coreference",
         "refusal",
     }
     # v7 集不适用 v4 的固定 40 条分布校验
@@ -715,6 +716,15 @@ def test_v7_agent_dataset_is_valid():
     assert all(s.source == "scripts/init_demo_db.py" for s in db_samples)
     knowledge = [s for s in samples if s.category == "knowledge"]
     assert all(s.expected_source == "" for s in knowledge)
+    # 指代消解样本必须真的带历史，否则「覆盖了多轮」只是文档上的说法
+    coreference = [s for s in samples if s.category == "coreference"]
+    assert len(coreference) == 3
+    assert all(len(s.history) >= 2 for s in coreference)
+    assert all(
+        s.history[0][0] == "user" and s.history[1][0] == "assistant" for s in coreference
+    )
+    # 三条里只有一条的得分侧依赖运行时 SQL（c02），其余按文档来源判定
+    assert sum(1 for s in coreference if s.expected_source == "demo.products") == 1
 
 
 def test_source_matches_ignores_fragment():
@@ -842,8 +852,8 @@ class FakeAgent:
         self.error = error
         self.calls: list[dict] = []
 
-    def run(self, question, *, options=None):
-        self.calls.append({"question": question, "options": options})
+    def run(self, question, *, options=None, history=None):
+        self.calls.append({"question": question, "options": options, "history": history})
         if self.error:
             raise self.error
         return self.result
@@ -933,3 +943,95 @@ def test_aggregate_and_report_render_agent_metrics():
     assert "| `agent` | agentic |" in markdown
     assert "--agent-sources config/sources.eval.agent.yaml" in markdown
     assert "avg_tool_calls" in markdown
+
+
+def test_history_field_defaults_empty_and_validated(tmp_path: Path):
+    needle = "Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储"
+    base = {
+        "id": "c10",
+        "question": "那一步为什么用原问题？",
+        "reference": "避免检索跑偏。",
+        "evidence": [needle],
+        "source": "README.md",
+        "category": "coreference",
+        "answerable": True,
+    }
+    path = tmp_path / "qa.jsonl"
+
+    # 省略 history 时保持空元组：报告里 history_turns 为 0，链路上等价于单轮
+    path.write_text(json.dumps(base, ensure_ascii=False) + "\n", encoding="utf-8")
+    assert load_dataset(path)[0].history == ()
+
+    path.write_text(
+        json.dumps(
+            {**base, "history": [["user", "精排是干什么的？"], ["assistant", "逐张比较候选。"]]},
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert load_dataset(path)[0].history == (
+        ("user", "精排是干什么的？"),
+        ("assistant", "逐张比较候选。"),
+    )
+
+    def expect_error(history, match):
+        path.write_text(
+            json.dumps({**base, "history": history}, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(DatasetError, match=match):
+            load_dataset(path)
+
+    expect_error([["user", "只有一轮"]], "成对")
+    expect_error([["assistant", "a"], ["user", "b"]], "role 必须是 user")
+    expect_error([["user", "a"], ["assistant", "   "]], "content 不能为空")
+    expect_error([["user", "a", "多余一项"], ["assistant", "b"]], r"\[role, content\] 二元组")
+    expect_error("history 写成字符串", "必须是数组")
+    # 历史里抄一份 evidence 原文，等于把答案喂进提示词
+    expect_error([["user", "为什么？"], ["assistant", needle]], "等于把答案喂进提示词")
+
+
+def test_collect_agent_results_forwards_history_to_agent():
+    agent = FakeAgent(_fake_agent_result())
+    multi = EvalSample(
+        id="c02",
+        question="那它的保存方式是啥？",
+        reference="橙子表皮较厚。",
+        evidence=("表皮较厚",),
+        source="scripts/init_demo_db.py",
+        category="coreference",
+        answerable=True,
+        expected_source="demo.products",
+        history=(("user", "橙子现在多少钱？"), ("assistant", "橙子当前单价 12.5 元。")),
+    )
+
+    results = collect_agent_results(agent, [_agent_sample(), multi], CONFIGS["agent"])
+
+    # 单轮样本也显式传空列表：链路上「没历史」与「传了空历史」是同一件事，但要保证参数真的被用到
+    assert agent.calls[0]["history"] == []
+    assert agent.calls[1]["history"] == [
+        ("user", "橙子现在多少钱？"),
+        ("assistant", "橙子当前单价 12.5 元。"),
+    ]
+    assert results[0].history_turns == 0
+    assert results[1].history_turns == 2
+
+
+def test_report_exposes_history_turns():
+    sample = EvalSample(
+        id="c01",
+        question="那一步为什么用原问题？",
+        reference="避免检索跑偏。",
+        evidence=("Ollama 负责 embedding 与生成",),
+        source="README.md",
+        category="coreference",
+        answerable=True,
+        history=(("user", "精排挑几张？"), ("assistant", "3 张。")),
+    )
+    agent = FakeAgent(_fake_agent_result())
+    results = collect_agent_results(agent, [sample], CONFIGS["agent"])
+    report = build_report({"dataset": "x.jsonl", "configs": ["agent"]}, [sample], results)
+
+    assert report["samples_meta"][0]["history_turns"] == 2
+    assert report["samples"][0]["history_turns"] == 2
