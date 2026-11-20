@@ -490,7 +490,7 @@ curl -s http://127.0.0.1:8000/api/v1/traces/<trace_id> | python3 -m json.tool
 
 ### v7 评估（agentic vs 固定链路）
 
-v4/v5 的评估集量的是固定链路的质量；v7 这份 `eval/v7_agent_qa.jsonl`（26 条 = 22 可回答 + 4 应拒答）按**回答需要哪个工具**分类，直接量 agentic 多出了什么：
+v4/v5 的评估集量的是固定链路的质量；v7 这份 `eval/v7_agent_qa.jsonl`（29 条 = 25 可回答 + 4 应拒答）按**回答需要哪个工具**分类，直接量 agentic 多出了什么：
 
 | 类别 | 条数 | 需要 | 固定链路应该怎样 |
 |---|---:|---|---|
@@ -498,6 +498,7 @@ v4/v5 的评估集量的是固定链路的质量；v7 这份 `eval/v7_agent_qa.j
 | `database` | 6 | 只查运行时 SQL（`products` 表） | 必然拒答 |
 | `mixed` | 5 | 文档 + SQL 各出一段证据 | 只能答出一半 |
 | `multi_step` | 4 | 先拿结果再决定下一步 | 无法作答 |
+| `coreference` | 3 | 先靠对话历史还原指代（v7.3 新增，样本带 `history` 字段） | 指代还原不了：固定链路压根不接 history 参数（只调 `retrieve`/`generate_answer`），c02/c03 的库侧必然查不到，c01 只能靠字面蒙 |
 | `refusal` | 4 | 文档与库里都没有 | 两组都应拒答 |
 
 **评估库仍只入库项目文档**，SQL 工具由一份只供运行时、不参与入库的配置单独挂上（`config/sources.eval.agent.yaml`，`allow_runtime_query: true` + `runtime_tables: [products]`）。因此 `database` 类问题在固定链路上必然查不到——这正是要量的差值本身，不是数据泄漏；`data/sql/demo.db` 不存在时评估直接报错退出，不会出一份「看起来能跑」的报告。
@@ -512,7 +513,9 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent,ful
 python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --no-agent-sql --skip-ragas
 ```
 
-`agent` 组的口径与固定链路不同义，报告的限制小节逐条写明：耗时是整条循环的墙钟时间（`avg_retrieval_ms` 只记工具执行耗时，其余归 `avg_generation_ms`）；`avg_tool_calls` / `avg_tool_steps` 只有 agentic 组有值；`evidence_hit` 取决于模型 SELECT 了哪些列（只取 `name`/`price` 时答案可以全对但证据判 0）；评估按单轮执行，不覆盖指代消解。评估运行会设 `RAG_DISABLE_AGENT_TRACE=1`，不把评估样本写进演示轨迹。
+`agent` 组的口径与固定链路不同义，报告的限制小节逐条写明：耗时是整条循环的墙钟时间（`avg_retrieval_ms` 只记工具执行耗时，其余归 `avg_generation_ms`）；`avg_tool_calls` / `avg_tool_steps` 只有 agentic 组有值；`evidence_hit` 取决于模型 SELECT 了哪些列（只取 `name`/`price` 时答案可以全对但证据判 0）；默认单轮，但带 `history` 字段的样本（v7.3 起 3 条指代消解样本）会把对话历史原样传给 agentic 链路，报告用 `history_turns` 标出哪几条走了多轮。评估运行会设 `RAG_DISABLE_AGENT_TRACE=1`，不把评估样本写进演示轨迹。
+
+**v7.3 指代消解实跑**（2026-11-20，29 条 = 25 可回答 + 4 应拒答，只跑确定性指标）：3 条带 `history` 的指代样本全部还原成功——c01 按上一轮的「精排」答对、c02 把「它」还原成橙子并走 `sql_query`、c03 判 `mixed`；同 26 条子集与上一轮比 `answer_rate`/`source_hit`/`refusal_accuracy` 持平，`evidence_hit@3` -0.045 与 `citation_rate` -0.045 各自都能落到单条样本上（`@3` 窗口与生成截断），逐条机制见 `eval/README.md`，报告 `eval/reports/v7_3_coreference_report.md`。
 
 **本机实跑结果**（2026-11-19，26 条 × `agent`/`full`，只跑确定性指标，`git_commit = a6e2bd8`，完整报告 `eval/reports/v7_agent_report.md`）：
 
@@ -810,7 +813,7 @@ scripts/prepare_eval_kb.py 构建评估专用知识库
 scripts/evaluate.py       策略评估与报告 CLI
 eval/project_rag_qa.jsonl 40 条固定标注问答（v4）
 eval/v5_paraphrase_qa.jsonl 18 条口语化/复杂问题（v5）
-eval/v7_agent_qa.jsonl    26 条按工具分类的 agentic 问答（v7）
+eval/v7_agent_qa.jsonl    29 条按工具分类的 agentic 问答（v7，含 3 条带对话历史的指代样本）
 eval/reports/             v4/v5/v7 Markdown / JSON 报告
 tests/                    pytest 单测 + smoke_test.py
 docs/ROADMAP.md           v1–v7 路线与验收标准

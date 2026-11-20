@@ -13,7 +13,8 @@
 | v6.1 | `v6.1-readonly-render` | 只读公网演示：v6 入库产物导出快照，小服务暴露语料与 BM25 检索，问答明确关闭 | ✅ 已部署 (<https://private-rag-readonly.onrender.com>) | 公网可看到扫描件 OCR 文本、表格文档与页码/表格名引用；不加载模型，问答返回 409 |
 | v7 | `claude/heuristic-edison-ebcf0b` | Agentic RAG：意图路由、SQL/工具调用、检索-行动循环、可观测 trace | ✅ 本分支完成 | 业务问题能自动选择知识库或工具；trace 可回放每条决策 |
 | v7.1 | `v7.1` | SSE 流式 Agentic 输出、演示页 Agentic 开关、列表/表格感知切分、v7 评估集与量化对比 | ✅ 本分支完成 | 311 测试通过；SSE 端点可流式输出 agentic 轨迹并写回会话历史；demo.html 支持 Agentic 模式；列表/表格切分测试通过；v7 agentic 评估集 26 条 + `agent`/`full` 对比报告（agentic `answer_rate` 0.909 vs 0.318、`source_hit` 0.591 vs 0.318、单条耗时 71.2s vs 17.0s），Ragas 子集 6 条另见 `eval/reports/v7_agent_ragas_report.md` |
-| v7.2 | `v7.2` | 意图路由与拒答策略：数据可得性驱动路由、证据充分性拒答 | ✅ 本分支完成 | 343 测试通过（同日收紧 `none` 判据后）；`sql_query` 工具描述带上库内数据目录（列名 + 有界样例值，`RAG_AGENT_CATALOG_CHARS` / `RAG_AGENT_CATALOG_SAMPLES` 可关），路由判据改为「回答所需的事实住在哪一侧」；证据充分性由步进决策声明，判不足直接拒答并给 `stop_reason=insufficient_evidence`；v7 评估集 26 条复跑 `refusal_accuracy` 0.250→1.000、`source_hit` 0.591→1.000、`evidence_hit@3` 0.409→0.864、单条耗时 71.2s→51.9s，`knowledge` 类 7 条持平无回归，报告 `eval/reports/v7_2_agent_report.md`；同日在同一条线上收紧 `none` 判据（分支 `v7.2-none-gate`：判 `none` 先做一次验证检索，拒答必须建立在证据上，`RAG_DISABLE_AGENT_NONE_PROBE` 可关），复跑 26 条 `none`/`no_retrieval` 双双归零、`refusal_accuracy` 1.000 持平、`citation_rate` 0.955→1.000，报告 `eval/reports/v7_2_nonegate_report.md`；指代消解（m01）仍未覆盖 |
+| v7.2 | `v7.2` | 意图路由与拒答策略：数据可得性驱动路由、证据充分性拒答 | ✅ 本分支完成 | 343 测试通过（同日收紧 `none` 判据后）；`sql_query` 工具描述带上库内数据目录（列名 + 有界样例值，`RAG_AGENT_CATALOG_CHARS` / `RAG_AGENT_CATALOG_SAMPLES` 可关），路由判据改为「回答所需的事实住在哪一侧」；证据充分性由步进决策声明，判不足直接拒答并给 `stop_reason=insufficient_evidence`；v7 评估集 26 条复跑 `refusal_accuracy` 0.250→1.000、`source_hit` 0.591→1.000、`evidence_hit@3` 0.409→0.864、单条耗时 71.2s→51.9s，`knowledge` 类 7 条持平无回归，报告 `eval/reports/v7_2_agent_report.md`；同日在同一条线上收紧 `none` 判据（分支 `v7.2-none-gate`：判 `none` 先做一次验证检索，拒答必须建立在证据上，`RAG_DISABLE_AGENT_NONE_PROBE` 可关），复跑 26 条 `none`/`no_retrieval` 双双归零、`refusal_accuracy` 1.000 持平、`citation_rate` 0.955→1.000，报告 `eval/reports/v7_2_nonegate_report.md`；指代消解见下一行 v7.3 |
+| v7.3 | `v7.3-coreference` | 指代消解：提示词写死「本项目/本系统」的消解规则，评估补上真正带对话历史的多轮样本 | ✅ 本分支完成 | 350 测试通过；`ROUTER_PROMPT`/`STEP_PROMPT`/`FINAL_PROMPT` 三处写死「『这个项目』『本系统』指本系统自身、它的说明文档就在知识库里」「没有对话历史绝不是选 `none` 的理由」；评估集 26→29 条（新增 `coreference` 3 条带 `history`），`EvalSample.history` 做严格校验并真的传给 `agent.run(..., history=...)`，报告新增 `history_turns`；三条指代样本全部还原（c01 文档侧、c02 走 `sql_query`、c03 判 `mixed`），同 26 条子集 `answer_rate`/`source_hit`/`refusal_accuracy` 与上一轮持平（0.955/0.955/1.000），`evidence_hit@3` -0.045 是 k06 与 m04 各 -1、m01 +1 的净额（三条都是 `@3` 窗口口径、答案本身正确），`citation_rate` -0.045 全部来自 d05 一条被生成预算截断在 18 字；4 条应拒答样本仍全部哨兵拒答，报告 `eval/reports/v7_3_coreference_report.md` |
 
 ## v2 详细验收（已完成）
 
@@ -123,7 +124,7 @@
       （先前只写了 `FakeRuntime.run_stream()`，没有任何测试真的请求这个端点，这条勾当时是虚的）
 - [x] 列表/表格感知切分：`_split_by_markdown_structure()` 将列表/表格/代码块视为原子单元
 - [x] 切分测试：`test_list_preserved_as_unit`、`test_table_preserved_as_unit`、`test_heading_forces_boundary`
-- [x] v7 agentic 评估集 `eval/v7_agent_qa.jsonl` 26 条（knowledge 7 / database 6 / mixed 5 / multi_step 4 / refusal 4），
+- [x] v7 agentic 评估集 `eval/v7_agent_qa.jsonl` 26 条（knowledge 7 / database 6 / mixed 5 / multi_step 4 / refusal 4；v7.3 起 29 条，新增 `coreference` 3 条带对话历史的指代样本），
       evidence 逐字校验；按“需要哪个工具”分类，而不是按文档章节分类
 - [x] 评估框架接入 agentic 配置组：`ConfigSpec.is_agent` + `CONFIGS["agent"]` + `collect_agent_results`，
       agentic 与固定链路共用同一套确定性指标；`SampleResult` 增加 `intent/stop_reason/tool_calls/tool_steps/trace_id`
@@ -202,10 +203,21 @@ v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上
       检索就拒答」这条路径在全量评估里不再出现；r01 从「判 `none`、零检索、闷头拒答」变成「查两次、按缺口
       拒答并写明缺什么」；4 条应拒答样本仍全部拒答（`refusal_accuracy` 1.000 持平），
       `citation_rate`/`citation_validity` 0.955→1.000。观察记录（只作观察、不归因）：`planner_unavailable`
-      1→4，`answer_rate`/`source_hit` 1.000→0.955 与 `evidence_hit@3` 0.864→0.818 恰好等于 m03 一条的分量
-      （可答样本 22 条），而 m03 判的是 `mixed`、`none` 探测不在它身上触发；`no_evidence` 由单测覆盖、这轮
-      26 条没触发。逐条对比与读数限制见 `eval/README.md`
-- [ ] m01 的文档那一半仍没查出来（模型把「这个项目」当成缺少对话上下文）；评估按单轮执行，指代消解本就未覆盖
+      1→4；`evidence_hit@3` 0.864→0.818 等检索类五项的 -0.045 逐条核下来来自 m01 一条（五项 1.000→0.000——它这一轮
+      两半都答对，但 SQL 证据排在第 4 块，`evaluation.py:486` 只取前 3 块），`answer_rate` 的 -0.045 来自 m03 改成
+      拒答（可答样本 22 条，1/22≈0.045），两条判的都是 `mixed`、`none` 探测不在它们身上触发；`no_evidence` 由单测
+      覆盖、这轮 26 条没触发。逐条对比与读数限制见 `eval/README.md`
+- [x] m01 的文档那一半与指代消解已覆盖（`v7.3-coreference`）：机制侧写死三处提示词规则——「这个项目」「本系统」指本系统自身、
+      它的说明文档就在知识库里；没有对话历史绝不是选 `none` 的理由；指代词在历史里找不到先行词时按本系统自身的行为与文档理解，
+      不得以「缺少上下文」「无法确定所指」为由停止取证。评估侧补上真正的多轮——`EvalSample.history`（成对 `[role, content]` 严格
+      校验，可回答样本禁止 history 含 evidence 原文）由 `collect_agent_results` 传给 `agent.run(..., history=...)`，评估集加 3 条
+      `coreference` 样本（c01 文档侧指代、c02 库侧指代、c03 混合），报告用 `history_turns` 标出走了多轮的条目。
+      29 条复跑（`eval/reports/v7_3_coreference_report.md`，`n_errors` 0）：c02 把「它」还原成橙子并走 `sql_query`（检索五项全 1.000）、
+      c01 按上一轮的精排答对（决策 JSON 解析失败走关键词回退，答案仍正确）、c03 判 `mixed`；m01 这轮 SQL 证据排到第 1 块，
+      上一轮被 `@3` 判掉的五项全部回到 1.000；同 26 条子集 `answer_rate`/`source_hit`/`refusal_accuracy` 与上一轮持平
+- [ ] 模型会把对话历史当成事实来源：c03 问「刚才那条记录的更新时间」，回答直接抄历史里的 2026-01-15（回答里明写
+      「对话历史中已给出」），整条只调了 1 次 `kb_search`、没回查 SQL，SQL 侧没有任何证据。v7.3 保证的是指代能还原，
+      不是还原后一定重新取证；而这条样本的 `expected_source` 只标文档侧，检索指标量不到这个缺口
 
 ## 分支与提交约定
 

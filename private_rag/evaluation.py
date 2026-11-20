@@ -42,6 +42,8 @@ CATEGORIES = (
     "database",
     "mixed",
     "multi_step",
+    # v7.3 起单独成组：标记「要靠对话历史还原指代」的样本，与「需要哪个工具」那一维度并列
+    "coreference",
     "refusal",
 )
 EXPECTED_TOTAL = 40
@@ -132,6 +134,10 @@ class EvalSample:
     # （种子脚本里逐字含业务数据），而引用指向 SQL 源标签，两者必须能分开表达，
     # 否则 source_hit 会恒为 0 —— 那是口径缺陷，不是检索缺陷。
     expected_source: str = ""
+    # 前置对话轮次，形如 (("user", "..."), ("assistant", "..."))；只用于还原指代，
+    # 不作为事实依据。空元组表示单轮样本。加载时校验成对出现、role 合法、content 非空，
+    # 运行时原样传给 agent.run 的 history 参数。
+    history: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -229,6 +235,8 @@ class SampleResult:
     tool_calls: Optional[int] = None
     tool_steps: Optional[int] = None
     trace_id: str = ""
+    # 该样本带了几轮历史；固定链路保持 None，报告显示为「—」
+    history_turns: Optional[int] = None
 
 
 def normalize_text(text: str) -> str:
@@ -271,8 +279,9 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
         "category",
         "answerable",
     }
-    # expected_source 是可选字段：只在证据权威文件与期望引用不是同一个东西时使用
-    optional = {"expected_source"}
+    # expected_source 与 history 都是可选字段：前者只在证据权威文件与期望引用不是同一个东西
+    # 时使用，后者给需要还原指代的样本提供前置对话轮次
+    optional = {"expected_source", "history"}
     allowed = required | optional
 
     lines = dataset_path.read_text(encoding="utf-8").splitlines()
@@ -301,6 +310,7 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
         category = data["category"]
         answerable = data["answerable"]
         expected_source = data.get("expected_source", "")
+        history = data.get("history", [])
 
         if not isinstance(sample_id, str) or not sample_id.strip():
             raise DatasetError(f"第 {line_number} 行 id 非法")
@@ -325,6 +335,30 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
         ):
             raise DatasetError(f"第 {line_number} 行 evidence 必须是非空字符串数组")
 
+        if not isinstance(history, list):
+            raise DatasetError(f"第 {line_number} 行 history 必须是数组")
+        if len(history) % 2 != 0:
+            raise DatasetError(
+                f"第 {line_number} 行 history 必须是 user/assistant 成对的轮次，当前 {len(history)} 项"
+            )
+        turns: list[tuple[str, str]] = []
+        for position, turn in enumerate(history):
+            if (
+                not isinstance(turn, list)
+                or len(turn) != 2
+                or not all(isinstance(item, str) for item in turn)
+            ):
+                raise DatasetError(f"第 {line_number} 行 history[{position}] 必须是 [role, content] 二元组")
+            role, content = turn
+            expected_role = "user" if position % 2 == 0 else "assistant"
+            if role != expected_role:
+                raise DatasetError(
+                    f"第 {line_number} 行 history[{position}] 的 role 必须是 {expected_role}，实际 {role!r}"
+                )
+            if not content.strip():
+                raise DatasetError(f"第 {line_number} 行 history[{position}] 的 content 不能为空")
+            turns.append((role, content.strip()))
+
         if answerable:
             if category == "refusal":
                 raise DatasetError(f"第 {line_number} 行可回答样本不能属于 refusal 类别")
@@ -348,6 +382,14 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
                     raise DatasetError(
                         f"第 {line_number} 行 evidence 未出现在 {source}：{phrase!r}"
                     )
+            # 历史里出现 evidence 原文，等于把答案直接喂进提示词，指标就不干净了
+            history_blob = normalize_text("".join(content for _, content in turns))
+            for phrase in evidence:
+                leaked = normalize_text(phrase)
+                if leaked and leaked in history_blob:
+                    raise DatasetError(
+                        f"第 {line_number} 行 history 含 evidence 原文，等于把答案喂进提示词：{phrase!r}"
+                    )
         else:
             if category != "refusal":
                 raise DatasetError(f"第 {line_number} 行拒答样本的 category 必须是 refusal")
@@ -369,6 +411,7 @@ def load_dataset(path: Path | str = DEFAULT_DATASET) -> list[EvalSample]:
                 category=category,
                 answerable=answerable,
                 expected_source=expected_source.strip(),
+                history=tuple(turns),
             )
         )
 
@@ -721,6 +764,7 @@ def collect_agent_results(
             used_rerank=spec.use_rerank,
             used_parent=spec.use_parent,
             query_rewrite=spec.query_rewrite,
+            history_turns=len(sample.history),
         )
         started = time.perf_counter()
         try:
@@ -733,7 +777,10 @@ def collect_agent_results(
                 use_parent=spec.use_parent,
                 query_rewrite=spec.query_rewrite,
             )
-            agent_result = agent.run(sample.question, options=options)
+            # 历史原样透传：评估要测的就是「带历史时指代能不能还原」，单轮样本传空列表
+            agent_result = agent.run(
+                sample.question, options=options, history=list(sample.history)
+            )
             steps = list(getattr(agent_result, "steps", []) or [])
             elapsed_ms = float(getattr(agent_result, "elapsed_ms", 0) or 0)
             tool_ms = sum(
@@ -1041,6 +1088,7 @@ def _result_to_dict(result: SampleResult) -> dict:
         "tool_calls": result.tool_calls,
         "tool_steps": result.tool_steps,
         "trace_id": result.trace_id,
+        "history_turns": result.history_turns,
         "retrieval_ms": round(result.retrieval_ms, 2),
         "generation_ms": round(result.generation_ms, 2),
         "generation_cached": result.generation_cached,
@@ -1075,6 +1123,7 @@ def build_report(
                 "category": sample.category,
                 "answerable": sample.answerable,
                 "expected_source": sample.source,
+                "history_turns": len(sample.history),
             }
             for sample in samples
         ],
@@ -1590,7 +1639,10 @@ def render_markdown(report: dict) -> str:
                 "- `avg_tool_calls` / `avg_tool_steps` 只是旁证："
                 "`multi_step` 类样本没有单独判定模型是否真的分了两次查询"
                 "（单条子查询 SQL 也能一次做对）。",
-                "- 评估按单轮问答执行，不传会话历史，指代消解类能力未覆盖。",
+                "- 评估集支持多轮：样本可带 `history`（`[role, content]` 成对轮次），评估时原样传给 "
+                "`agent.run` 的 history 参数，报告用 `history_turns` 标出哪几条走了多轮；"
+                "不带该字段的样本传空列表，与单轮等价。加载时校验 role 必须 user/assistant 交替、"
+                "content 非空，且 history 里不得出现 evidence 原文——那等于把答案喂进提示词。",
                 "- 评估运行设置 `RAG_DISABLE_AGENT_TRACE=1`，不写 "
                 "`storage/traces/agent.jsonl`，避免把评估样本混进演示轨迹；"
                 "因此报告里的 `trace_id` 不能逐条回放。",
