@@ -492,7 +492,7 @@ curl -s http://127.0.0.1:8000/api/v1/traces/<trace_id> | python3 -m json.tool
 - 决策模型不可用 → 路由退回关键词判断，循环按启发式继续。
 - 工具执行失败（含被护栏拒绝） → 失败原因作为观察回灌给模型，它可以换个 SQL 或改用知识库。
 - 一条证据都没收集到 → 返回既有拒答文本，不编造答案。
-- agentic 运行时装配失败（例如 `sources.yaml` 写坏了） → 只有 `/api/v1/chat/agent` 返回 503 `agent_unavailable`，`/chat` 与 `/chat/stream` 不受影响。
+- agentic 运行时装配失败（例如 `sources.yaml` 写坏了、或 SQL 源连不上）→ 只有 `/api/v1/chat/agent` 返回 503 `agent_unavailable`，`/chat` 与 `/chat/stream` 不受影响。连不上库时日志会先记一条 ERROR，写明是哪个源、缺哪个 SQLite 文件；演示库 `data/sql/demo.db` 被 gitignore 掉了，新克隆与新 worktree 要先跑 `python3 scripts/init_demo_db.py`——否则 `data/sql/` 目录已存在时 sqlite 会静默建出 0 字节空库，`sql_query` 看着注册成功但表一张都没有，运行时只报 `no such table`，日志同样会在连库前点破。
 - `sources.yaml` 不存在（新克隆默认就没有）→ agentic 只注册 `kb_search`，启动日志给出缺失路径与修复命令（默认路径缺失记 WARNING，显式指定的路径不存在记 ERROR），服务不会因此起不来；查库类问题会答不出来。
 
 每一次 agentic 问答追加一行 JSON 到 `storage/traces/agent.jsonl`（已 gitignore），记录意图、每步的工具与参数、观察、返回行数与耗时，以及最终引用。`trace_id` 同时出现在 `meta` 与响应头之外，可据此逐条回放。

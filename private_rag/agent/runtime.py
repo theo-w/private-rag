@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, Optional, Sequence
 
-from sqlalchemy import create_engine, inspect as sa_inspect, text
+from sqlalchemy import create_engine, inspect as sa_inspect, make_url, text
 
 from private_rag.agent.planner import LlmPlanner, Planner, RouteDecision
 from private_rag.agent.prompts import generate_final_answer, heuristic_route, stream_final_answer
@@ -49,7 +49,7 @@ from private_rag.generation import REFUSAL, History
 from private_rag.ingestion.sql import redact_dsn
 from private_rag.models import Citation
 from private_rag.qa import RetrievalOptions
-from private_rag.sources import ConfigError, SqlSource, load_sources_config
+from private_rag.sources import ConfigError, SqlSource, load_sources_config, normalize_sqlite_dsn
 
 logger = logging.getLogger(__name__)
 
@@ -844,6 +844,72 @@ def _log_missing_sources(path: Path, *, explicit: bool) -> None:
     )
 
 
+def _missing_sqlite_file(dsn: str) -> Optional[Path]:
+    """DSN 指向本机的 SQLite 文件而文件不在时返回该路径，其他情况返回 None。
+
+    演示库 data/sql/demo.db 已 gitignore，新克隆与新 worktree 里必然不存在，
+    这是「连不上库」最常见的成因，值得单独指出来。
+    """
+    try:
+        url = make_url(dsn)
+    except Exception:
+        return None
+    if not url.drivername.startswith("sqlite") or not url.database or url.database == ":memory:":
+        return None
+    path = Path(url.database).expanduser()
+    if not path.is_absolute():
+        # 用配置层同一个解析规则，免得从别处启动时这里指向另一个文件
+        path = Path(normalize_sqlite_dsn(dsn)[len("sqlite:///"):]).expanduser()
+    return None if path.exists() else path
+
+
+def _sqlite_db_hint(path: Optional[Path]) -> list[str]:
+    """SQLite 文件不在时给具体线索；演示库这种直接点名初始化脚本。"""
+    if path is None:
+        return ["        请确认数据库服务是否在运行、DSN 与账号是否正确"]
+    lines = [f"        SQLite 文件不存在：{path}"]
+    if path.name == "demo.db" and path.parent.name == "sql":
+        lines.append(
+            "        演示库不入库（data/sql/*.db 在 .gitignore 里），先生成再启动："
+            "python3 scripts/init_demo_db.py"
+        )
+    else:
+        lines.append("        请确认这个 SQLite 文件的路径是否正确")
+    return lines
+
+
+def _log_missing_sqlite_db(label: str, dsn: str, path: Path) -> None:
+    """文件不在但连接会静默建出空库，这一层不拦，问题会推迟到运行时才露。
+
+    sqlite 对「目录在、文件不在」的 DSN 会创建 0 字节空库，于是装配看着成功，
+    工具描述里的表却一张都不存在，模型只能反复撞上 no such table。这里在连库前说破。
+    """
+    logger.error(
+        "SQL 源 %s（DSN %s）连库前就查不到数据库文件\n%s\n"
+        "        后果：sqlite 会静默建出一个 0 字节空库，sql_query 照常注册，"
+        "但表一张都没有，运行时查询必然报 no such table\n"
+        "        本次装配不中断，/chat/agent 仍在，只是查库类问题答不对",
+        label,
+        redact_dsn(dsn),
+        "\n".join(_sqlite_db_hint(path)),
+    )
+
+
+def _log_unreachable_sql_source(label: str, dsn: str, exc: Exception) -> None:
+    """连不上 SQL 源时把下一步说清，别让它看起来跟配置没配好一模一样。
+
+    只加日志，异常照原样抛出去：装配失败仍然只让 /chat/agent 返回 503，
+    要不要继续降级由调用方决定，这里不替它改语义。
+    """
+    detail = f"{type(exc).__name__}: {exc}".splitlines()[0][:200]
+    lines = [
+        f"连不上 SQL 源 {label}（DSN {redact_dsn(dsn)}）：{detail}",
+        "        后果：agentic 运行时装配中断，/chat/agent 会返回 503；kb_search 链路与 /health 不受影响",
+    ]
+    lines.extend(_sqlite_db_hint(_missing_sqlite_file(dsn)))
+    logger.error("\n".join(lines))
+
+
 def build_agent_runtime(
     engine: Any,
     *,
@@ -889,14 +955,24 @@ def build_agent_runtime(
                     logger.warning("跳过 SQL 源 %s：无法确定可查表", source.label or redact_dsn(source.dsn))
                     continue
                 label = source.label or redact_dsn(source.dsn)
-                catalog, catalog_terms = _data_catalog(source.dsn, tables)
+                missing_db = _missing_sqlite_file(source.dsn)
+                if missing_db is not None:
+                    # 连下去只会静默建出空库，等到运行时只剩 no such table
+                    _log_missing_sqlite_db(label, source.dsn, missing_db)
+                try:
+                    catalog, catalog_terms = _data_catalog(source.dsn, tables)
+                    schema_hint = _schema_hint(source.dsn, tables)
+                except Exception as exc:
+                    # 以前这里只留下一串 sqlalchemy 的栈，看起来跟配置没配好一模一样
+                    _log_unreachable_sql_source(label, source.dsn, exc)
+                    raise
                 tools.append(
                     SqlQueryTool(
                         dsn=source.dsn,
                         label=label,
                         allowed_tables=tables,
                         max_rows=sql_rows,
-                        schema_hint=_schema_hint(source.dsn, tables),
+                        schema_hint=schema_hint,
                         catalog=catalog,
                         catalog_terms=catalog_terms,
                     )

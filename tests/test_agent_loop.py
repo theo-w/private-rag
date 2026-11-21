@@ -640,6 +640,49 @@ class TestRuntimeAssembly:
         assert str(tmp_path / "sources.yaml") in text
         assert "sql_query 未注册" in text
 
+    # 连不上库跟「配置没配好」是两回事，日志要分开说
+
+    def test_unreachable_demo_db_points_at_init_script(self, tmp_path, caplog):
+        # 新 worktree 的真实情形：data/sql/demo.db 被 gitignore 掉了，装配必然连不上
+        missing = tmp_path / "sql" / "demo.db"
+        with caplog.at_level(logging.INFO, logger="private_rag.agent.runtime"):
+            with pytest.raises(Exception):  # 语义不变：装配失败仍由调用方兜成 503
+                self.agent(
+                    tmp_path,
+                    sources_yaml(missing, opt_in="    allow_runtime_query: true\n"),
+                )
+        text = "\n".join(r.getMessage() for r in self.runtime_records(caplog))
+        assert "连不上 SQL 源" in text
+        assert str(missing) in text
+        assert "init_demo_db.py" in text
+
+    def test_unreachable_db_that_exists_gives_generic_hint(self, tmp_path, caplog):
+        # 路径存在但打不开（这里是个目录），只能给通用检查项，不该乱猜演示库
+        with caplog.at_level(logging.INFO, logger="private_rag.agent.runtime"):
+            with pytest.raises(Exception):
+                self.agent(
+                    tmp_path, sources_yaml(tmp_path, opt_in="    allow_runtime_query: true\n")
+                )
+        text = "\n".join(r.getMessage() for r in self.runtime_records(caplog))
+        assert "连不上 SQL 源" in text
+        assert "demo.products" in text  # 说清是哪个源
+        assert "init_demo_db" not in text
+
+    def test_missing_sqlite_file_says_empty_db_will_be_created(self, tmp_path, caplog):
+        # 目录在、文件不在：sqlite 会建出 0 字节空库，装配看着是成功的
+        (tmp_path / "sql").mkdir()
+        missing = tmp_path / "sql" / "demo.db"
+        with caplog.at_level(logging.INFO, logger="private_rag.agent.runtime"):
+            agent = self.agent(
+                tmp_path,
+                sources_yaml(missing, opt_in="    allow_runtime_query: true\n"),
+            )
+        assert agent.registry.names() == ["kb_search", "sql_query"]  # 语义不变，只是不再静默
+        text = "\n".join(r.getMessage() for r in self.runtime_records(caplog))
+        assert str(missing) in text
+        assert "no such table" in text
+        assert "init_demo_db.py" in text
+
 
 class TestEvidenceSufficiency:
     """拒答策略：证据撑不起问题要的结论时，宁可不答。"""
