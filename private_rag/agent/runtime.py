@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, Optional, Sequence
 
-from sqlalchemy import create_engine, inspect as sa_inspect, text
+from sqlalchemy import create_engine, inspect as sa_inspect, make_url, text
 
 from private_rag.agent.planner import LlmPlanner, Planner, RouteDecision
 from private_rag.agent.prompts import generate_final_answer, heuristic_route, stream_final_answer
@@ -49,11 +49,16 @@ from private_rag.generation import REFUSAL, History
 from private_rag.ingestion.sql import redact_dsn
 from private_rag.models import Citation
 from private_rag.qa import RetrievalOptions
-from private_rag.sources import ConfigError, SqlSource, load_sources_config
+from private_rag.sources import ConfigError, SqlSource, load_sources_config, normalize_sqlite_dsn
 
 logger = logging.getLogger(__name__)
 
 MAX_SQL_HINT_CHARS = 400
+
+# 配置缺失时直接写进日志、可照抄执行的修复命令（路径相对仓库根目录）
+SOURCES_FIX_COMMAND = (
+    "RAG_AGENT_SOURCES_CONFIG=config/sources.demo.yaml python3 scripts/serve.py --port 8001"
+)
 
 
 @dataclass
@@ -818,6 +823,93 @@ def _schema_hint(dsn: str, tables: Sequence[str], max_columns: int = 14) -> str:
         engine.dispose()
 
 
+def _log_missing_sources(path: Path, *, explicit: bool) -> None:
+    """sources 配置拿不到时把话说全：缺哪个文件、后果是什么、怎么修。
+
+    默认路径缺失只记 WARNING——只用文档知识库的用法本来就不需要这份配置，服务该照常起；
+    用户显式指定了路径却找不到，那是配错了，记 ERROR。两种情况都不让启动失败。
+    """
+    head = (
+        f"指定的 sources 配置不存在：{path}"
+        if explicit
+        else f"未找到默认 sources 配置：{path}（仓库默认不带这个文件，需要从模板复制）"
+    )
+    (logger.error if explicit else logger.warning)(
+        "agentic 查库能力不可用，sql_query 未注册：%s\n"
+        "        后果：agentic 问答只有 kb_search，判到查库意图也拿不到业务数据\n"
+        "        只用文档知识库可忽略本提示（服务照常起，/health 仍可探活）；需要查库任选一种：\n"
+        f"            {SOURCES_FIX_COMMAND}\n"
+        f"            cp config/sources.example.yaml {path}",
+        head,
+    )
+
+
+def _missing_sqlite_file(dsn: str) -> Optional[Path]:
+    """DSN 指向本机的 SQLite 文件而文件不在时返回该路径，其他情况返回 None。
+
+    演示库 data/sql/demo.db 已 gitignore，新克隆与新 worktree 里必然不存在，
+    这是「连不上库」最常见的成因，值得单独指出来。
+    """
+    try:
+        url = make_url(dsn)
+    except Exception:
+        return None
+    if not url.drivername.startswith("sqlite") or not url.database or url.database == ":memory:":
+        return None
+    path = Path(url.database).expanduser()
+    if not path.is_absolute():
+        # 用配置层同一个解析规则，免得从别处启动时这里指向另一个文件
+        path = Path(normalize_sqlite_dsn(dsn)[len("sqlite:///"):]).expanduser()
+    return None if path.exists() else path
+
+
+def _sqlite_db_hint(path: Optional[Path]) -> list[str]:
+    """SQLite 文件不在时给具体线索；演示库这种直接点名初始化脚本。"""
+    if path is None:
+        return ["        请确认数据库服务是否在运行、DSN 与账号是否正确"]
+    lines = [f"        SQLite 文件不存在：{path}"]
+    if path.name == "demo.db" and path.parent.name == "sql":
+        lines.append(
+            "        演示库不入库（data/sql/*.db 在 .gitignore 里），先生成再启动："
+            "python3 scripts/init_demo_db.py"
+        )
+    else:
+        lines.append("        请确认这个 SQLite 文件的路径是否正确")
+    return lines
+
+
+def _log_missing_sqlite_db(label: str, dsn: str, path: Path) -> None:
+    """文件不在但连接会静默建出空库，这一层不拦，问题会推迟到运行时才露。
+
+    sqlite 对「目录在、文件不在」的 DSN 会创建 0 字节空库，于是装配看着成功，
+    工具描述里的表却一张都不存在，模型只能反复撞上 no such table。这里在连库前说破。
+    """
+    logger.error(
+        "SQL 源 %s（DSN %s）连库前就查不到数据库文件\n%s\n"
+        "        后果：sqlite 会静默建出一个 0 字节空库，sql_query 照常注册，"
+        "但表一张都没有，运行时查询必然报 no such table\n"
+        "        本次装配不中断，/chat/agent 仍在，只是查库类问题答不对",
+        label,
+        redact_dsn(dsn),
+        "\n".join(_sqlite_db_hint(path)),
+    )
+
+
+def _log_unreachable_sql_source(label: str, dsn: str, exc: Exception) -> None:
+    """连不上 SQL 源时把下一步说清，别让它看起来跟配置没配好一模一样。
+
+    只加日志，异常照原样抛出去：装配失败仍然只让 /chat/agent 返回 503，
+    要不要继续降级由调用方决定，这里不替它改语义。
+    """
+    detail = f"{type(exc).__name__}: {exc}".splitlines()[0][:200]
+    lines = [
+        f"连不上 SQL 源 {label}（DSN {redact_dsn(dsn)}）：{detail}",
+        "        后果：agentic 运行时装配中断，/chat/agent 会返回 503；kb_search 链路与 /health 不受影响",
+    ]
+    lines.extend(_sqlite_db_hint(_missing_sqlite_file(dsn)))
+    logger.error("\n".join(lines))
+
+
 def build_agent_runtime(
     engine: Any,
     *,
@@ -827,16 +919,32 @@ def build_agent_runtime(
     sql_rows: int = AGENT_SQL_ROWS,
     allow_sql: bool = True,
 ) -> AgentRuntime:
-    """按 sources.yaml 装配工具：知识库检索始终可用，运行时 SQL 需显式开启。"""
+    """按 sources.yaml 装配工具：知识库检索始终可用，运行时 SQL 需显式开启。
+
+    拿不到配置（文件不存在或写坏了）只降级成 kb_search 并打日志，不抛异常：
+    只有文档知识库的用法本来就没有这份配置，不该因此起不了服务。
+    """
     tools: list[Tool] = [KnowledgeSearchTool(engine)]
 
     path = Path(sources_path) if sources_path is not None else Path(DEFAULT_SOURCES_CONFIG)
-    if allow_sql and path.exists():
+    # app.py 传进来的路径本来就等于默认值，所以「是不是用户指定的」只能看有没有偏离默认
+    explicit = sources_path is not None and path != Path(DEFAULT_SOURCES_CONFIG)
+    if not allow_sql:
+        pass  # 调用方明确不要 SQL，不该拿配置缺失去吵
+    elif not path.exists():
+        # 以前这里直接跳过，日志只剩「已装配工具：kb_search」，使用者以为系统不支持查库
+        _log_missing_sources(path, explicit=explicit)
+    else:
         try:
             config = load_sources_config(path)
         except ConfigError as exc:
-            logger.warning("读取 sources 配置失败，运行时 SQL 不可用：%s", exc)
+            logger.error(
+                "sources 配置读取失败，sql_query 未注册、agentic 无法查库：%s ｜ 配置路径：%s",
+                exc,
+                path,
+            )
         else:
+            registered = 0
             for source in config.sources:
                 if not isinstance(source, SqlSource) or not source.allow_runtime_query:
                     continue
@@ -847,17 +955,35 @@ def build_agent_runtime(
                     logger.warning("跳过 SQL 源 %s：无法确定可查表", source.label or redact_dsn(source.dsn))
                     continue
                 label = source.label or redact_dsn(source.dsn)
-                catalog, catalog_terms = _data_catalog(source.dsn, tables)
+                missing_db = _missing_sqlite_file(source.dsn)
+                if missing_db is not None:
+                    # 连下去只会静默建出空库，等到运行时只剩 no such table
+                    _log_missing_sqlite_db(label, source.dsn, missing_db)
+                try:
+                    catalog, catalog_terms = _data_catalog(source.dsn, tables)
+                    schema_hint = _schema_hint(source.dsn, tables)
+                except Exception as exc:
+                    # 以前这里只留下一串 sqlalchemy 的栈，看起来跟配置没配好一模一样
+                    _log_unreachable_sql_source(label, source.dsn, exc)
+                    raise
                 tools.append(
                     SqlQueryTool(
                         dsn=source.dsn,
                         label=label,
                         allowed_tables=tables,
                         max_rows=sql_rows,
-                        schema_hint=_schema_hint(source.dsn, tables),
+                        schema_hint=schema_hint,
                         catalog=catalog,
                         catalog_terms=catalog_terms,
                     )
+                )
+                registered += 1
+            if registered == 0:
+                # 配置在、但一个 sql 源都没授权，也要说清为什么只有 kb_search
+                logger.info(
+                    "sources 配置 %s 里没有 allow_runtime_query: true 的 sql 源，"
+                    "agentic 只注册 kb_search；需要查库请给对应 sql 源加这个开关",
+                    path,
                 )
 
     return AgentRuntime(ToolRegistry(tools), planner=planner, model=model)

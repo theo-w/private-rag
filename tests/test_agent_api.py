@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict
 
 from fastapi.testclient import TestClient
@@ -393,6 +394,24 @@ class TestAgentChatValidation:
             response = chat(client)
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "agent_unavailable"
+
+    def test_startup_log_explains_missing_sql_source(self, tmp_path, caplog):
+        # 起服务时最该看见的一条：sql_query 没注册，日志要给出缺的路径和能照抄的修复命令
+        missing = tmp_path / "sources.yaml"
+        app = create_app(
+            engine=FakeEngine(),
+            session_store=SessionStore(),
+            agent_sources_path=missing,
+        )
+        with caplog.at_level(logging.WARNING, logger="private_rag"):
+            with TestClient(app) as client:
+                # 配置缺失不影响起停：/health 照常 200
+                assert client.get("/health").status_code == 200
+        text = caplog.text
+        assert str(missing) in text
+        assert "sql_query 未注册" in text
+        assert "RAG_AGENT_SOURCES_CONFIG=config/sources.demo.yaml" in text
+        assert "只装配了文档检索" in text  # app 层那句「已装配工具」不能再写成「可用」
 
     def test_knowledge_base_not_ready(self, tmp_path):
         client, _ = build_client(tmp_path, ready=False)

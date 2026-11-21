@@ -58,7 +58,15 @@ async def lifespan(app: FastAPI):
                 sources_path=app.state.agent_sources_path,
             )
             app.state.agent_tools = app.state.agent_runtime.registry.names()
-            logger.info("agentic 问答可用，已装配工具：%s", "、".join(app.state.agent_tools) or "无")
+            tools_text = "、".join(app.state.agent_tools) or "无"
+            if "sql_query" in app.state.agent_tools:
+                logger.info("agentic 问答可用，已装配工具：%s", tools_text)
+            else:
+                # 只有 kb_search 时不能写成「可用」，否则看不出查库能力压根没装配
+                logger.warning(
+                    "agentic 问答只装配了文档检索（工具：%s），查库类问题答不了；原因与修复命令见上面的日志",
+                    tools_text,
+                )
         except Exception:
             # 装配失败只让 /chat/agent 返回 503，不影响既有 /chat 链路
             logger.exception("初始化 agentic 运行时失败，/chat/agent 将返回 503")
