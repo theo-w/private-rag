@@ -15,7 +15,7 @@
 | v7.1 | `v7.1` | SSE 流式 Agentic 输出、演示页 Agentic 开关、列表/表格感知切分、v7 评估集与量化对比 | ✅ 本分支完成 | 311 测试通过；SSE 端点可流式输出 agentic 轨迹并写回会话历史；demo.html 支持 Agentic 模式；列表/表格切分测试通过；v7 agentic 评估集 26 条 + `agent`/`full` 对比报告（agentic `answer_rate` 0.909 vs 0.318、`source_hit` 0.591 vs 0.318、单条耗时 71.2s vs 17.0s），Ragas 子集 6 条另见 `eval/reports/v7_agent_ragas_report.md` |
 | v7.2 | `v7.2` | 意图路由与拒答策略：数据可得性驱动路由、证据充分性拒答 | ✅ 本分支完成 | 343 测试通过（同日收紧 `none` 判据后）；`sql_query` 工具描述带上库内数据目录（列名 + 有界样例值，`RAG_AGENT_CATALOG_CHARS` / `RAG_AGENT_CATALOG_SAMPLES` 可关），路由判据改为「回答所需的事实住在哪一侧」；证据充分性由步进决策声明，判不足直接拒答并给 `stop_reason=insufficient_evidence`；v7 评估集 26 条复跑 `refusal_accuracy` 0.250→1.000、`source_hit` 0.591→1.000、`evidence_hit@3` 0.409→0.864、单条耗时 71.2s→51.9s，`knowledge` 类 7 条持平无回归，报告 `eval/reports/v7_2_agent_report.md`；同日在同一条线上收紧 `none` 判据（分支 `v7.2-none-gate`：判 `none` 先做一次验证检索，拒答必须建立在证据上，`RAG_DISABLE_AGENT_NONE_PROBE` 可关），复跑 26 条 `none`/`no_retrieval` 双双归零、`refusal_accuracy` 1.000 持平、`citation_rate` 0.955→1.000，报告 `eval/reports/v7_2_nonegate_report.md`；指代消解见下一行 v7.3 |
 | v7.3 | `v7.3-coreference` | 指代消解：提示词写死「本项目/本系统」的消解规则，评估补上真正带对话历史的多轮样本 | ✅ 本分支完成 | 350 测试通过；`ROUTER_PROMPT`/`STEP_PROMPT`/`FINAL_PROMPT` 三处写死「『这个项目』『本系统』指本系统自身、它的说明文档就在知识库里」「没有对话历史绝不是选 `none` 的理由」；评估集 26→29 条（新增 `coreference` 3 条带 `history`），`EvalSample.history` 做严格校验并真的传给 `agent.run(..., history=...)`，报告新增 `history_turns`；三条指代样本全部还原（c01 文档侧、c02 走 `sql_query`、c03 判 `mixed`），同 26 条子集 `answer_rate`/`source_hit`/`refusal_accuracy` 与上一轮持平（0.955/0.955/1.000），`evidence_hit@3` -0.045 是 k06 与 m04 各 -1、m01 +1 的净额（三条都是 `@3` 窗口口径、答案本身正确），`citation_rate` -0.045 全部来自 d05 一条被生成预算截断在 18 字；4 条应拒答样本仍全部哨兵拒答，报告 `eval/reports/v7_3_coreference_report.md` |
-| v7.4 | `v7.4-two-sided-source` | 评估口径改双侧：混合问题「到底查了几侧」变成可测读数 | ✅ 本分支完成 | 357 测试通过（+4 修法 A 单测）；评估集加可选字段 `expected_sources`（声明「文档侧 + SQL 侧」），新确定性读数 `both_sides_hit` 要求声明的每一侧都在**全量**引用列表里出现才判 1（不套 `@3` 窗口，只统计声明双侧的 6 条，其余记 `None` 不进均值），`source_hit`/`evidence_hit@3`/`citation_rate` 的定义与逐条取值一字未改，v7 / v7.2 / v7.3 报告仍可比；只引到一侧的双侧样本单独进「失败与关注案例」并写「只取到一侧证据」；按新口径回算 v7.3 那轮得 5/6 = 0.833（判 0 的正是 c03，同一条在旧指标下 `source_hit` 与 `evidence_hit@3` 全满分），本轮 29 条实跑 6/6 = 1.000（c03 这轮真的回查了 SQL，缺口是间歇的；c03 与 m04 的 SQL 引用都排在第 4 位，坐实了新读数不套 `@3` 窗口的必要性），`source_hit` 0.960 持平（两轮同为 m04 一条未命中），`mrr@3` 0.747→0.727 的变化全部来自 k05 一条排位后移，单条平均 89.8 秒→82.6 秒，报告 `eval/reports/v7_4_two_sided_report.md`；修法 A（提示词硬规则）已做：STEP_PROMPT 规则 1 限定 sufficient 只看「已收集的证据」（不含历史），新增规则 10 禁止 mixed 查询在任一侧无证据时选 final；FINAL_PROMPT 新增规则 7 要求历史里的事实必须先查证据，历史段渲染加上「不能作为事实依据」标注。A/B 重复采样 5×修法 A vs 5×无修法 A：修法 A 将 c03 的 SQL 回查率从 20%（1/5）提升到 100%（5/5），修法 A 有效；修法 C（运行时硬门禁）仍为未勾项，作为修法 A 不奏效时的兜底 |
+| v7.4 | `v7.4-two-sided-source` | 评估口径改双侧：混合问题「到底查了几侧」变成可测读数 | ✅ 本分支完成 | 357 测试通过（+4 修法 A 单测）；评估集加可选字段 `expected_sources`（声明「文档侧 + SQL 侧」），新确定性读数 `both_sides_hit` 要求声明的每一侧都在**全量**引用列表里出现才判 1（不套 `@3` 窗口，只统计声明双侧的 6 条，其余记 `None` 不进均值），`source_hit`/`evidence_hit@3`/`citation_rate` 的定义与逐条取值一字未改，v7 / v7.2 / v7.3 报告仍可比；只引到一侧的双侧样本单独进「失败与关注案例」并写「只取到一侧证据」；按新口径回算 v7.3 那轮得 5/6 = 0.833（判 0 的正是 c03，同一条在旧指标下 `source_hit` 与 `evidence_hit@3` 全满分），本轮 29 条实跑 6/6 = 1.000（c03 这轮真的回查了 SQL，缺口是间歇的；c03 与 m04 的 SQL 引用都排在第 4 位，坐实了新读数不套 `@3` 窗口的必要性），`source_hit` 0.960 持平（两轮同为 m04 一条未命中），`mrr@3` 0.747→0.727 的变化全部来自 k05 一条排位后移，单条平均 89.8 秒→82.6 秒，报告 `eval/reports/v7_4_two_sided_report.md`；修法 A（提示词硬规则）已做：STEP_PROMPT 规则 1 限定 sufficient 只看「已收集的证据」（不含历史），新增规则 10 禁止 mixed 查询在任一侧无证据时选 final；FINAL_PROMPT 新增规则 7 要求历史里的事实必须先查证据，历史段渲染加上「不能作为事实依据」标注。A/B 重复采样 5×修法 A vs 5×无修法 A：修法 A 将 c03 的 SQL 回查率从 20%（1/5）提升到 100%（5/5），修法 A 有效；修法 C（运行时硬门禁）仍为未勾项，作为修法 A 不奏效时的兜底。**读数出处复核（2026-11-21）**：上面「本轮 29 条实跑 6/6 = 1.000」测于 `2e912379f`，是 `d43b314` 的祖先、早于修法 A，不能当修法 A 的依据；A/B 两组的 `meta.git_commit` 同为 `d43b314`，记录本身区分不了两组提示词，而被验证的规则又在 `978a63f` 里被顺手删掉、本分支已恢复，经过见下方「修法 A 的读数出处与一次提示词回退」 |
 
 ## v2 详细验收（已完成）
 
@@ -229,8 +229,31 @@ v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上
       本轮 29 条实跑读数与逐条对比见 `eval/reports/v7_4_two_sided_report.md` 与 `eval/README.md`
 - [x] 修法 A 提示词硬规则：STEP_PROMPT 规则 1 限定 sufficient 只看「已收集的证据」（不含历史），新增规则 10 禁止 mixed 查询在任一侧无证据时选 final；FINAL_PROMPT 新增规则 7 要求历史里的事实必须先查证据，历史段渲染加上「不能作为事实依据」标注（与固定链路一致）。c03 问「刚才那条记录的更新时间」，回答直接抄历史里的 2026-01-15（回答里明写
       「对话历史中已给出」），整条只调了 1 次 `kb_search`、没回查 SQL，SQL 侧没有任何证据。v7.3 保证的是指代能还原，
-      不是还原后一定重新取证。（v7.4 已把口径改成双侧：`expected_sources` + `both_sides_hit` 现在量得到这个缺口，
-      本条仍未勾，因为它要修的是「抄历史不回查」这个行为本身，不是让它可测）
+      不是还原后一定重新取证。（v7.4 先把口径改成双侧，`expected_sources` + `both_sides_hit` 让这个缺口可测；本条
+      修的是「抄历史不回查」这个行为本身，不是让它可测，所以 `d43b314` 落地这三条硬规则后才勾上。这句话是条目
+      还 unchecked 时写的草稿，勾打上后没跟着改，读数出处复核见下一条）
+- **修法 A 的读数出处与一次提示词回退**（复核于 2026-11-21，本分支只改了 `private_rag/agent/prompts.py` 一个文件）：
+  - **规则被回退过**：上一条那三条硬规则在 `978a63f`（标题是「A/B 重复采样验证修法 A 效果」）里被删掉了——该提交
+        往仓库加了 20 个 `eval/reports/c03_[ab]_run*.{json,md}` 文件，同时把 `prompts.py` 改回 `d43b314` 父提交的
+        逐字节相同内容，即 STEP 规则 1 的「对话历史不算事实依据」、整条规则 10、FINAL 规则 7、历史段那句
+        「不能作为事实依据」标注。该状态下 `tests/test_agent_planner.py::TestCoreferenceResolution` 四条单测失败、
+        全量 353 通过（本表 v7.4 那行写的「357 测试通过（+4 修法 A 单测）」当时不成立）。已用
+        `git checkout d43b314 -- private_rag/agent/prompts.py` 恢复，恢复后全量 357 通过。
+  - **独立复现**：误删状态复采 c03 五次得 1/5（`tool_calls` 全为 1），恢复后复采五次得 5/5（`tool_calls` 全为 2），
+        与已提交的 A/B 两组一致，修法 A 的方向与幅度复现了。但每边只有 5 次，且下面第三条说明无规则时测出过
+        满分，所以这条读数只能读成「缺口有无受这三条规则影响很大」，不能读成稳定速率。
+  - **出处记不清**：A/B 十个文件的 `meta.git_commit` 都是 `d43b314`，B 组是在工作区临时删掉规则跑出来的，而
+        `git_commit` 只写 HEAD、全仓没有工作区是否干净的标记，光看仓库区分不了两组，只能靠行为差异反推。头部读数
+        `eval/reports/v7_4_two_sided_report.json` 记 `2e912379f`，其 `prompts.py` 里三条硬规则的计数全为 0，而
+        `both_sides_hit` 字段要到后代提交 `28481a7` 才入库，说明这份报告跑在未提交的工作区上。结论：
+        6/6 = 1.000 测于修法 A 存在之前，不能当它的依据，只能佐证本表已写的「缺口是间歇的」；支撑修法 A 的只有
+        c03 那十个 A/B 文件。
+  - **隐患**：生成缓存键是 `(配置名, 问题, 召回 chunk id 元组, 上下文摘要, 模型)`，不含提示词
+        （`private_rag/evaluation.py:727`）。已提交的 A/B 十次 `generation_cached` 全为 False，那批数是真的；但以后
+        只要召回不变，改完提示词重跑会直接命中缓存里的旧答案，A/B 会得出「改了没效果」的假结论。提示词类 A/B
+        一律带 `--no-cache`，并把两组各自的提交号与提示词摘要写进 `run_note`，`git_commit` 另加一条 dirty 标记。
+  - 不受影响的读数：v4 / v5 / v7 / v7.2 / v7.3 五份报告都测于修法 A 之前、`both_sides_hit` 均为 `None`，
+        测的就是当时的代码，与这次回退无关。
 
 ## 分支与提交约定
 
