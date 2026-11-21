@@ -428,6 +428,14 @@ pip install pdfplumber rapidocr-onnxruntime
     runtime_tables: [products]      # 留空则由入库 query 的 FROM 子句推导
 ```
 
+默认配置文件 `config/sources.yaml` **不在仓库里**（仓库只放 `sources.demo.yaml` / `sources.example.yaml`），所以新克隆或新 worktree 里直接起服务时 `sql_query` 不会注册。这种情况不再静默：启动日志会打一条 WARNING，写明找不到的配置路径、`sql_query 未注册` 的后果，以及一条可直接照抄的修复命令
+
+```bash
+RAG_AGENT_SOURCES_CONFIG=config/sources.demo.yaml python3 scripts/serve.py --port 8001
+```
+
+只用文档知识库的用法本来就不需要这份配置，忽略这条提示即可（服务照常起、`/health` 仍可探活，不会因此启动失败）；如果显式指定的配置路径不存在、或配置存在但写坏了，则记 ERROR 并打出路径。
+
 `sql_query` 执行前先过只读护栏（`private_rag/agent/sql_guard.py`）：只允许单条 `SELECT`/`WITH`，出现写操作或元数据关键字直接拒绝，表必须在白名单内（`WITH` 定义的临时视图名不算表），并强制一个不超过 `AGENT_SQL_ROWS` 的 `LIMIT`；护栏改写后的 SQL 与实际行数都会写进轨迹。**护栏是纵深防御的一层，不是沙箱**：这个 DSN 仍然应该使用只读数据库账号，`allow_runtime_query` 默认关闭也是这个原因。
 
 意图分成 `knowledge` / `database` / `mixed` / `none` 四类。`none` 表示与知识库无关，直接按既有约定返回拒答文本，不做任何检索。
@@ -485,6 +493,7 @@ curl -s http://127.0.0.1:8000/api/v1/traces/<trace_id> | python3 -m json.tool
 - 工具执行失败（含被护栏拒绝） → 失败原因作为观察回灌给模型，它可以换个 SQL 或改用知识库。
 - 一条证据都没收集到 → 返回既有拒答文本，不编造答案。
 - agentic 运行时装配失败（例如 `sources.yaml` 写坏了） → 只有 `/api/v1/chat/agent` 返回 503 `agent_unavailable`，`/chat` 与 `/chat/stream` 不受影响。
+- `sources.yaml` 不存在（新克隆默认就没有）→ agentic 只注册 `kb_search`，启动日志给出缺失路径与修复命令（默认路径缺失记 WARNING，显式指定的路径不存在记 ERROR），服务不会因此起不来；查库类问题会答不出来。
 
 每一次 agentic 问答追加一行 JSON 到 `storage/traces/agent.jsonl`（已 gitignore），记录意图、每步的工具与参数、观察、返回行数与耗时，以及最终引用。`trace_id` 同时出现在 `meta` 与响应头之外，可据此逐条回放。
 

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from typing import Any, Optional, Sequence
 
@@ -569,6 +570,75 @@ class TestRuntimeAssembly:
         agent = build_agent_runtime(object(), sources_path=tmp_path / "none.yaml", model="自定义模型")
         assert agent.model == "自定义模型"
         assert agent.planner is None  # 留空表示运行时按 LlmPlanner 走
+
+    # 配置拿不到时不再静默降级：日志要写清缺哪个文件、后果是什么、怎么修
+
+    @staticmethod
+    def runtime_records(caplog) -> list:
+        """只看 runtime 自己打的日志，不被第三方库的输出干扰。"""
+        return [r for r in caplog.records if r.name == "private_rag.agent.runtime"]
+
+    def test_missing_default_config_warns_with_path_and_fix(self, tmp_path, monkeypatch, caplog):
+        # 新克隆/新 worktree 的真实情形：没有 config/sources.yaml，app.py 传的路径就等于默认值
+        missing = tmp_path / "sources.yaml"
+        monkeypatch.setattr(runtime_module, "DEFAULT_SOURCES_CONFIG", missing)
+        with caplog.at_level(logging.INFO, logger="private_rag.agent.runtime"):
+            agent = build_agent_runtime(object(), sources_path=missing)
+        assert agent.registry.names() == ["kb_search"]  # 行为不变，只是不再静默
+        records = self.runtime_records(caplog)
+        text = "\n".join(r.getMessage() for r in records)
+        assert str(missing) in text  # 找不到的那个路径
+        assert "sql_query 未注册" in text
+        assert (
+            "RAG_AGENT_SOURCES_CONFIG=config/sources.demo.yaml python3 scripts/serve.py" in text
+        )
+        # 只用文档知识库本来就不需要这份配置，所以是提示不是错误
+        assert [r.levelno for r in records] == [logging.WARNING]
+
+    def test_missing_explicit_config_is_logged_as_error(self, tmp_path, caplog):
+        typo = tmp_path / "sources.yml"  # 路径是自己指的，指错了就是配错
+        with caplog.at_level(logging.INFO, logger="private_rag.agent.runtime"):
+            agent = build_agent_runtime(object(), sources_path=typo)
+        assert agent.registry.names() == ["kb_search"]
+        records = self.runtime_records(caplog)
+        text = "\n".join(r.getMessage() for r in records)
+        assert "指定的 sources 配置不存在" in text
+        assert str(typo) in text
+        assert max(r.levelno for r in records) == logging.ERROR
+
+    def test_allow_sql_false_stays_silent(self, tmp_path, caplog):
+        # 调用方明确不要 SQL，就别再拿配置缺失去吵
+        with caplog.at_level(logging.INFO, logger="private_rag.agent.runtime"):
+            agent = build_agent_runtime(
+                object(), sources_path=tmp_path / "不存在.yaml", allow_sql=False
+            )
+        assert agent.registry.names() == ["kb_search"]
+        assert self.runtime_records(caplog) == []
+
+    def test_loaded_config_without_optin_explains_kb_only(self, tmp_path, caplog):
+        with caplog.at_level(logging.INFO, logger="private_rag.agent.runtime"):
+            agent = self.agent(tmp_path, sources_yaml(make_db(tmp_path)))
+        assert agent.registry.names() == ["kb_search"]
+        assert "allow_runtime_query" in "\n".join(
+            r.getMessage() for r in self.runtime_records(caplog)
+        )
+
+    def test_valid_optin_config_logs_no_missing_hint(self, tmp_path, caplog):
+        with caplog.at_level(logging.INFO, logger="private_rag.agent.runtime"):
+            agent = self.agent(
+                tmp_path,
+                sources_yaml(make_db(tmp_path), opt_in="    allow_runtime_query: true\n"),
+            )
+        assert agent.registry.names() == ["kb_search", "sql_query"]  # 带配置时行为不变
+        assert "未注册" not in "\n".join(r.getMessage() for r in self.runtime_records(caplog))
+
+    def test_broken_config_names_path_and_consequence(self, tmp_path, caplog):
+        with caplog.at_level(logging.INFO, logger="private_rag.agent.runtime"):
+            agent = self.agent(tmp_path, "sources:\n  - type: sql\n    dsn: sqlite:///x.db\n")
+        assert agent.registry.names() == ["kb_search"]
+        text = "\n".join(r.getMessage() for r in self.runtime_records(caplog))
+        assert str(tmp_path / "sources.yaml") in text
+        assert "sql_query 未注册" in text
 
 
 class TestEvidenceSufficiency:

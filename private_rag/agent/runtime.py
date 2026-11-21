@@ -55,6 +55,11 @@ logger = logging.getLogger(__name__)
 
 MAX_SQL_HINT_CHARS = 400
 
+# 配置缺失时直接写进日志、可照抄执行的修复命令（路径相对仓库根目录）
+SOURCES_FIX_COMMAND = (
+    "RAG_AGENT_SOURCES_CONFIG=config/sources.demo.yaml python3 scripts/serve.py --port 8001"
+)
+
 
 @dataclass
 class AgentOptions:
@@ -818,6 +823,27 @@ def _schema_hint(dsn: str, tables: Sequence[str], max_columns: int = 14) -> str:
         engine.dispose()
 
 
+def _log_missing_sources(path: Path, *, explicit: bool) -> None:
+    """sources 配置拿不到时把话说全：缺哪个文件、后果是什么、怎么修。
+
+    默认路径缺失只记 WARNING——只用文档知识库的用法本来就不需要这份配置，服务该照常起；
+    用户显式指定了路径却找不到，那是配错了，记 ERROR。两种情况都不让启动失败。
+    """
+    head = (
+        f"指定的 sources 配置不存在：{path}"
+        if explicit
+        else f"未找到默认 sources 配置：{path}（仓库默认不带这个文件，需要从模板复制）"
+    )
+    (logger.error if explicit else logger.warning)(
+        "agentic 查库能力不可用，sql_query 未注册：%s\n"
+        "        后果：agentic 问答只有 kb_search，判到查库意图也拿不到业务数据\n"
+        "        只用文档知识库可忽略本提示（服务照常起，/health 仍可探活）；需要查库任选一种：\n"
+        f"            {SOURCES_FIX_COMMAND}\n"
+        f"            cp config/sources.example.yaml {path}",
+        head,
+    )
+
+
 def build_agent_runtime(
     engine: Any,
     *,
@@ -827,16 +853,32 @@ def build_agent_runtime(
     sql_rows: int = AGENT_SQL_ROWS,
     allow_sql: bool = True,
 ) -> AgentRuntime:
-    """按 sources.yaml 装配工具：知识库检索始终可用，运行时 SQL 需显式开启。"""
+    """按 sources.yaml 装配工具：知识库检索始终可用，运行时 SQL 需显式开启。
+
+    拿不到配置（文件不存在或写坏了）只降级成 kb_search 并打日志，不抛异常：
+    只有文档知识库的用法本来就没有这份配置，不该因此起不了服务。
+    """
     tools: list[Tool] = [KnowledgeSearchTool(engine)]
 
     path = Path(sources_path) if sources_path is not None else Path(DEFAULT_SOURCES_CONFIG)
-    if allow_sql and path.exists():
+    # app.py 传进来的路径本来就等于默认值，所以「是不是用户指定的」只能看有没有偏离默认
+    explicit = sources_path is not None and path != Path(DEFAULT_SOURCES_CONFIG)
+    if not allow_sql:
+        pass  # 调用方明确不要 SQL，不该拿配置缺失去吵
+    elif not path.exists():
+        # 以前这里直接跳过，日志只剩「已装配工具：kb_search」，使用者以为系统不支持查库
+        _log_missing_sources(path, explicit=explicit)
+    else:
         try:
             config = load_sources_config(path)
         except ConfigError as exc:
-            logger.warning("读取 sources 配置失败，运行时 SQL 不可用：%s", exc)
+            logger.error(
+                "sources 配置读取失败，sql_query 未注册、agentic 无法查库：%s ｜ 配置路径：%s",
+                exc,
+                path,
+            )
         else:
+            registered = 0
             for source in config.sources:
                 if not isinstance(source, SqlSource) or not source.allow_runtime_query:
                     continue
@@ -858,6 +900,14 @@ def build_agent_runtime(
                         catalog=catalog,
                         catalog_terms=catalog_terms,
                     )
+                )
+                registered += 1
+            if registered == 0:
+                # 配置在、但一个 sql 源都没授权，也要说清为什么只有 kb_search
+                logger.info(
+                    "sources 配置 %s 里没有 allow_runtime_query: true 的 sql 源，"
+                    "agentic 只注册 kb_search；需要查库请给对应 sql 源加这个开关",
+                    path,
                 )
 
     return AgentRuntime(ToolRegistry(tools), planner=planner, model=model)
