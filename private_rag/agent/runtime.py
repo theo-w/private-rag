@@ -38,6 +38,7 @@ from private_rag.config import (
     AGENT_CONTEXT_CHARS,
     AGENT_LLM_MODEL,
     AGENT_MAX_STEPS,
+    AGENT_MIXED_GATE,
     AGENT_NONE_PROBE,
     AGENT_SQL_ROWS,
     AGENT_TRACE_ENABLED,
@@ -226,6 +227,8 @@ class AgentRuntime:
         trace_enabled: bool = AGENT_TRACE_ENABLED,
         max_context_chars: int = AGENT_CONTEXT_CHARS,
         none_probe: bool = AGENT_NONE_PROBE,
+        intent: str = "",
+        mixed_gate: bool = AGENT_MIXED_GATE,
     ):
         self.registry = registry
         self.planner = planner
@@ -235,6 +238,9 @@ class AgentRuntime:
         self.max_context_chars = max(1000, max_context_chars)
         # 路由器判 none 时是否先做一次验证检索（关掉就退回判 none 直接拒答）
         self.none_probe = bool(none_probe)
+        # 修法 C：双侧查询门控——mixed 意图下代码级禁止一侧零证据就选 final
+        self.intent = str(intent or "")
+        self.mixed_gate = bool(mixed_gate)
 
     def _available(self, allow_sql: bool) -> ToolRegistry:
         """按选项过滤工具；关掉 SQL 时模型根本看不到这个工具。"""
@@ -253,6 +259,19 @@ class AgentRuntime:
                 if text_term and text_term not in hints:
                     hints.append(text_term)
         return hints
+
+    def _has_evidence_for(self, blocks: list[ToolBlock], tool_name: str) -> bool:
+        """检查证据块中是否有来自指定工具的记录。
+
+        修法 C 门控用：当 intent=mixed 时，检查两侧是否都有证据。
+        `ToolBlock.label` 通常包含工具名（如 "kb_search 来源" / "sql_query 来源"），
+        做子串匹配即可。
+        """
+        label = str(tool_name)
+        for block in blocks:
+            if label in (block.label or "") or label in (block.text or ""):
+                return True
+        return False
 
     def _none_probe(
         self, registry: ToolRegistry, question: str, intent: str
@@ -346,6 +365,7 @@ class AgentRuntime:
                 elapsed_ms=int((time.perf_counter() - route_started) * 1000),
             )
         intent = route.intent
+        self.intent = intent  # 修法 C：门控需要
 
         # 模型给了意图却没给出可用动作时，用启发式补一个，避免空跑一轮
         if intent != "none" and registry.get(route.tool) is None:
@@ -398,6 +418,29 @@ class AgentRuntime:
                     )
                     break
                 if decision.action == "final":
+                    # 修法 C：双侧查询门控——mixed 意图下任一侧零证据不许进 final
+                    if self.mixed_gate and self.intent == "mixed":
+                        kb_has = self._has_evidence_for(blocks, "kb_search")
+                        sql_has = self._has_evidence_for(blocks, "sql_query")
+                        if not kb_has or not sql_has:
+                            missing_tool = "kb_search" if not kb_has else "sql_query"
+                            observations.append(
+                                f"步骤{step_index + 1}：门控拦截 final——intent=mixed，"
+                                f"{missing_tool} 侧尚无证据，强制继续取证"
+                            )
+                            add_step(
+                                kind="stop",
+                                reason=f"门控拦截：{missing_tool} 侧零证据",
+                                observation=f"intent=mixed，{missing_tool} 侧尚无证据",
+                            )
+                            # 强制下一次循环调用缺失的工具
+                            pending = RouteDecision(
+                                intent=self.intent,
+                                action={"tool": missing_tool, "args": {}},
+                                reason=f"修法 C 门控：{missing_tool} 侧零证据，强制取证",
+                            )
+                            continue
+
                     forced_answer = decision.answer.strip()
                     final_reason = decision.reason or "模型认为证据已足够"
                     sufficient = bool(decision.sufficient)
@@ -605,6 +648,7 @@ class AgentRuntime:
                 "elapsed_ms": int((time.perf_counter() - route_started) * 1000),
             })
         intent = route.intent
+        self.intent = intent  # 修法 C：门控需要
 
         if intent != "none" and registry.get(route.tool) is None:
             intent, action, reason = heuristic_route(question, registry.names(), extra_hints=route_hints)
@@ -660,6 +704,29 @@ class AgentRuntime:
                     })
                     break
                 if decision.action == "final":
+                    # 修法 C：双侧查询门控——mixed 意图下任一侧零证据不许进 final
+                    if self.mixed_gate and self.intent == "mixed":
+                        kb_has = self._has_evidence_for(blocks, "kb_search")
+                        sql_has = self._has_evidence_for(blocks, "sql_query")
+                        if not kb_has or not sql_has:
+                            missing_tool = "kb_search" if not kb_has else "sql_query"
+                            observations.append(
+                                f"步骤{step_index + 1}：门控拦截 final——intent=mixed，"
+                                f"{missing_tool} 侧尚无证据，强制继续取证"
+                            )
+                            add_step(
+                                kind="stop",
+                                reason=f"门控拦截：{missing_tool} 侧零证据",
+                                observation=f"intent=mixed，{missing_tool} 侧尚无证据",
+                            )
+                            # 强制下一次循环调用缺失的工具
+                            pending = RouteDecision(
+                                intent=self.intent,
+                                action={"tool": missing_tool, "args": {}},
+                                reason=f"修法 C 门控：{missing_tool} 侧零证据，强制取证",
+                            )
+                            continue
+
                     forced_answer = decision.answer.strip()
                     final_reason = decision.reason or "模型认为证据已足够"
                     sufficient = bool(decision.sufficient)
