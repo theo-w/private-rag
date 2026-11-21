@@ -795,3 +795,146 @@ class TestDataDrivenFallbackRoute:
 
         assert result.intent == "knowledge"
         assert [step.tool for step in tool_steps(result)] == ["kb_search"]
+
+
+class TestMixedGate:
+    """修法 C：双侧查询门控——mixed 意图下任一侧零证据不许进 final。"""
+
+    def test_gate_rejects_final_when_kb_side_empty(self, tmp_path):
+        """kb_search 侧零证据时，门控强制调用 kb_search 而非接受 final。"""
+        kb = RecordingTool("kb_search")
+        sql = RecordingTool("sql_query")
+        planner = ScriptedPlanner(
+            route=RouteDecision(
+                intent="mixed",
+                action={"tool": "sql_query", "args": {"sql": "SELECT 1"}},
+                reason="双侧取证",
+            ),
+            decisions=[
+                # 模型选了 final，但 kb_search 侧没有证据
+                StepDecision(action="final", reason="齐了", answer="香蕉 3.5 元，冷藏保存[1][2]"),
+            ],
+        )
+        runtime = make_runtime(tmp_path, [kb, sql], planner)
+        result = runtime.run("香蕉多少钱，怎么保存")
+
+        # 门控拦截后强制查 kb_search，所以两个工具都调了
+        assert len(sql.calls) == 1
+        assert len(kb.calls) == 1
+        assert result.tool_calls == 2
+        # 门控步骤记录在轨迹里
+        stop_steps = [s for s in result.steps if s.kind == "stop"]
+        assert len(stop_steps) >= 1
+        assert "门控拦截" in stop_steps[0].reason
+
+    def test_gate_rejects_final_when_sql_side_empty(self, tmp_path):
+        """sql_query 侧零证据时，门控强制调用 sql_query。"""
+        kb = RecordingTool("kb_search")
+        sql = RecordingTool("sql_query")
+        planner = ScriptedPlanner(
+            route=RouteDecision(
+                intent="mixed",
+                action={"tool": "kb_search", "args": {"query": "香蕉保存"}},
+                reason="双侧取证",
+            ),
+            decisions=[
+                # 模型选了 final，但 sql_query 侧没有证据
+                StepDecision(action="final", reason="齐了", answer="冷藏保存[1]"),
+            ],
+        )
+        runtime = make_runtime(tmp_path, [kb, sql], planner)
+        result = runtime.run("香蕉多少钱，怎么保存")
+
+        assert len(kb.calls) == 1
+        assert len(sql.calls) == 1
+        assert result.tool_calls == 2
+
+    def test_gate_allows_final_when_both_sides_have_evidence(self, tmp_path):
+        """两侧都有证据时，门控放行 final。"""
+        kb = RecordingTool("kb_search")
+        sql = RecordingTool("sql_query")
+        planner = ScriptedPlanner(
+            route=RouteDecision(
+                intent="mixed",
+                action={"tool": "kb_search", "args": {"query": "香蕉保存"}},
+                reason="双侧取证",
+            ),
+            decisions=[
+                StepDecision(action="tool", tool="sql_query", args={"sql": "SELECT 1"}, reason="再查数值"),
+                StepDecision(action="final", reason="齐了", answer="香蕉 3.5 元，冷藏保存[1][2]"),
+            ],
+        )
+        runtime = make_runtime(tmp_path, [kb, sql], planner)
+        result = runtime.run("香蕉多少钱，怎么保存")
+
+        assert result.stop_reason == "final"
+        assert result.tool_calls == 2
+        # 没有门控拦截的 stop 步骤
+        stop_steps = [s for s in result.steps if s.kind == "stop"]
+        assert len(stop_steps) == 0
+
+    def test_gate_disabled_by_flag(self, tmp_path):
+        """门控开关关掉时，即使一侧零证据也放行 final。"""
+        kb = RecordingTool("kb_search")
+        sql = RecordingTool("sql_query")
+        planner = ScriptedPlanner(
+            route=RouteDecision(
+                intent="mixed",
+                action={"tool": "sql_query", "args": {"sql": "SELECT 1"}},
+                reason="双侧取证",
+            ),
+            decisions=[
+                StepDecision(action="final", reason="齐了", answer="香蕉 3.5 元，冷藏保存[1][2]"),
+            ],
+        )
+        runtime = make_runtime(tmp_path, [kb, sql], planner, mixed_gate=False)
+        result = runtime.run("香蕉多少钱，怎么保存")
+
+        # 门控关掉，final 直接通过，不强制查 kb_search
+        assert len(sql.calls) == 1
+        assert len(kb.calls) == 0
+        assert result.tool_calls == 1
+        assert result.stop_reason == "final"
+
+    def test_gate_non_mixed_intent_ignored(self, tmp_path):
+        """非 mixed 意图时，门控不生效。"""
+        kb = RecordingTool("kb_search")
+        planner = make_runtime(
+            tmp_path,
+            [kb],
+            ScriptedPlanner(
+                route=RouteDecision(
+                    intent="knowledge",
+                    action={"tool": "kb_search", "args": {"query": "问题"}},
+                    reason="文档类",
+                ),
+                decisions=[StepDecision(action="final", reason="够了", answer="答案[1]")],
+            ),
+        )
+        result = planner.run("问题")
+
+        assert result.stop_reason == "final"
+        assert result.tool_calls == 1
+
+    def test_gate_in_stream(self, tmp_path):
+        """run_stream 中门控行为一致。"""
+        kb = RecordingTool("kb_search")
+        sql = RecordingTool("sql_query")
+        planner = ScriptedPlanner(
+            route=RouteDecision(
+                intent="mixed",
+                action={"tool": "sql_query", "args": {"sql": "SELECT 1"}},
+                reason="双侧取证",
+            ),
+            decisions=[
+                StepDecision(action="final", reason="齐了", answer="香蕉 3.5 元，冷藏保存[1][2]"),
+            ],
+        )
+        runtime = make_runtime(tmp_path, [kb, sql], planner)
+        events = list(runtime.run_stream("香蕉多少钱，怎么保存"))
+
+        # 门控拦截后强制查 kb_search
+        step_events = [e for e in events if e["event"] == "step"]
+        assert len(step_events) == 2  # sql_query + kb_search
+        assert len(sql.calls) == 1
+        assert len(kb.calls) == 1

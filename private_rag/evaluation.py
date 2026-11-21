@@ -238,6 +238,8 @@ class SampleResult:
     stop_reason: str = ""
     tool_calls: Optional[int] = None
     tool_steps: Optional[int] = None
+    # 调用的工具名集合（如 {"kb_search", "sql_query"}），用于按意图分组统计
+    tool_names: frozenset[str] = field(default_factory=frozenset)
     trace_id: str = ""
     # 该样本带了几轮历史；固定链路保持 None，报告显示为「—」
     history_turns: Optional[int] = None
@@ -620,6 +622,35 @@ def aggregate_results(results: Sequence[SampleResult]) -> dict[str, Any]:
         "avg_tool_steps": _mean(
             [float(item.tool_steps) for item in results if item.tool_steps is not None]
         ),
+        # 按意图分组：修法 A 在位时，单侧问题是否过度检索（多跑 SQL）
+        "avg_tool_calls_knowledge": _mean(
+            [float(item.tool_calls) for item in results
+             if item.tool_calls is not None and item.intent == "knowledge"]
+        ),
+        "avg_tool_calls_database": _mean(
+            [float(item.tool_calls) for item in results
+             if item.tool_calls is not None and item.intent == "database"]
+        ),
+        "avg_tool_calls_mixed": _mean(
+            [float(item.tool_calls) for item in results
+             if item.tool_calls is not None and item.intent == "mixed"]
+        ),
+        "dual_tool_rate": _mean(
+            [1.0 if len(item.tool_names) >= 2 else 0.0 for item in results
+             if item.tool_calls is not None]
+        ),
+        "dual_tool_rate_knowledge": _mean(
+            [1.0 if len(item.tool_names) >= 2 else 0.0 for item in results
+             if item.tool_calls is not None and item.intent == "knowledge"]
+        ),
+        "dual_tool_rate_database": _mean(
+            [1.0 if len(item.tool_names) >= 2 else 0.0 for item in results
+             if item.tool_calls is not None and item.intent == "database"]
+        ),
+        "dual_tool_rate_mixed": _mean(
+            [1.0 if len(item.tool_names) >= 2 else 0.0 for item in results
+             if item.tool_calls is not None and item.intent == "mixed"]
+        ),
         "used_parent_rate": _mean(
             [1.0 if item.used_parent else 0.0 for item in results]
         ),
@@ -859,6 +890,11 @@ def collect_agent_results(
             result.stop_reason = str(getattr(agent_result, "stop_reason", "") or "")
             result.tool_calls = int(getattr(agent_result, "tool_calls", 0) or 0)
             result.tool_steps = len(steps)
+            result.tool_names = frozenset(
+                str(getattr(step, "tool", "") or "")
+                for step in steps
+                if getattr(step, "kind", "") == "tool"
+            )
             result.trace_id = str(getattr(agent_result, "trace_id", "") or "")
             result.refusal = is_refusal(result.answer)
             result.metrics = score_deterministic(
@@ -1084,6 +1120,14 @@ DETERMINISTIC_METRICS = (
     "avg_query_count",
     "avg_tool_calls",
     "avg_tool_steps",
+    # 修法 A 在位时测量：单侧问题是否过度检索
+    "avg_tool_calls_knowledge",
+    "avg_tool_calls_database",
+    "avg_tool_calls_mixed",
+    "dual_tool_rate",
+    "dual_tool_rate_knowledge",
+    "dual_tool_rate_database",
+    "dual_tool_rate_mixed",
     "used_parent_rate",
     "rewrite_fallbacks",
 )
@@ -1133,6 +1177,7 @@ def _result_to_dict(result: SampleResult) -> dict:
         "stop_reason": result.stop_reason,
         "tool_calls": result.tool_calls,
         "tool_steps": result.tool_steps,
+        "tool_names": list(result.tool_names),
         "trace_id": result.trace_id,
         "history_turns": result.history_turns,
         "retrieval_ms": round(result.retrieval_ms, 2),
