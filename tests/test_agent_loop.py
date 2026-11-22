@@ -822,10 +822,11 @@ class TestMixedGate:
         assert len(sql.calls) == 1
         assert len(kb.calls) == 1
         assert result.tool_calls == 2
-        # 门控步骤记录在轨迹里
-        stop_steps = [s for s in result.steps if s.kind == "stop"]
-        assert len(stop_steps) >= 1
-        assert "门控拦截" in stop_steps[0].reason
+        # 门控步骤记录在轨迹里（kind=gate：循环没停，是被强制继续取证）
+        gate_steps = [s for s in result.steps if s.kind == "gate"]
+        assert len(gate_steps) == 1
+        assert "门控拦截" in gate_steps[0].reason
+        assert result.gate_intercepts == 1
 
     def test_gate_rejects_final_when_sql_side_empty(self, tmp_path):
         """sql_query 侧零证据时，门控强制调用 sql_query。"""
@@ -848,6 +849,7 @@ class TestMixedGate:
         assert len(kb.calls) == 1
         assert len(sql.calls) == 1
         assert result.tool_calls == 2
+        assert result.gate_intercepts == 1
 
     def test_gate_allows_final_when_both_sides_have_evidence(self, tmp_path):
         """两侧都有证据时，门控放行 final。"""
@@ -869,9 +871,10 @@ class TestMixedGate:
 
         assert result.stop_reason == "final"
         assert result.tool_calls == 2
-        # 没有门控拦截的 stop 步骤
-        stop_steps = [s for s in result.steps if s.kind == "stop"]
-        assert len(stop_steps) == 0
+        # 没有门控拦截步骤
+        gate_steps = [s for s in result.steps if s.kind == "gate"]
+        assert len(gate_steps) == 0
+        assert result.gate_intercepts == 0
 
     def test_gate_disabled_by_flag(self, tmp_path):
         """门控开关关掉时，即使一侧零证据也放行 final。"""
@@ -895,6 +898,7 @@ class TestMixedGate:
         assert len(kb.calls) == 0
         assert result.tool_calls == 1
         assert result.stop_reason == "final"
+        assert result.gate_intercepts == 0
 
     def test_gate_non_mixed_intent_ignored(self, tmp_path):
         """非 mixed 意图时，门控不生效。"""

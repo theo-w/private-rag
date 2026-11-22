@@ -111,6 +111,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cache-dir", default=str(EVAL_CACHE_DIR), help="Ragas 缓存目录")
     parser.add_argument("--no-cache", action="store_true", help="关闭 Ragas 磁盘缓存")
     parser.add_argument(
+        "--run-note",
+        default="",
+        help="跑批备注，写进报告头与 JSON，钉死这一跑是为了什么（例如「修法 C 复跑 gate=OFF」）",
+    )
+    parser.add_argument(
         "--output",
         default=str(ROOT / "eval" / "reports" / "v4_report.md"),
         help="Markdown 报告路径",
@@ -176,6 +181,19 @@ def git_commit() -> str | None:
         return output or None
     except Exception:
         return None
+
+
+def git_dirty() -> bool:
+    """工作区是否有未提交改动：读数是对这份混合代码测的，得标记出来。"""
+    try:
+        output = subprocess.check_output(
+            ["git", "-C", str(ROOT), "status", "--porcelain"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        return bool(output.strip())
+    except Exception:
+        return False
 
 
 def build_agent_for_eval(args: argparse.Namespace, engine):
@@ -425,6 +443,8 @@ def main(argv: list[str] | None = None) -> int:
         "ragas_errors": ragas_errors,
         "duration_seconds": round(duration, 2),
         "git_commit": git_commit(),
+        "git_dirty": git_dirty(),
+        "run_note": args.run_note or None,
     }
     report = build_report(meta, samples, results)
 

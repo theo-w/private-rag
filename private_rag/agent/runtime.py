@@ -102,6 +102,8 @@ class AgentResult:
     elapsed_ms: int = 0
     trace: Optional[AgentTrace] = None
     contexts: list[str] = field(default_factory=list)  # 原始证据块文本列表，供评估等下游使用
+    # 修法 C 门控拦截 final 的次数；评估用它算 gate_intercept_rate
+    gate_intercepts: int = 0
 
 
 def _evidence_chars(blocks: Sequence[ToolBlock]) -> int:
@@ -366,6 +368,7 @@ class AgentRuntime:
             )
         intent = route.intent
         self.intent = intent  # 修法 C：门控需要
+        gate_intercepts = 0
 
         # 模型给了意图却没给出可用动作时，用启发式补一个，避免空跑一轮
         if intent != "none" and registry.get(route.tool) is None:
@@ -428,8 +431,9 @@ class AgentRuntime:
                                 f"步骤{step_index + 1}：门控拦截 final——intent=mixed，"
                                 f"{missing_tool} 侧尚无证据，强制继续取证"
                             )
+                            gate_intercepts += 1
                             add_step(
-                                kind="stop",
+                                kind="gate",
                                 reason=f"门控拦截：{missing_tool} 侧零证据",
                                 observation=f"intent=mixed，{missing_tool} 侧尚无证据",
                             )
@@ -552,6 +556,7 @@ class AgentRuntime:
             elapsed_ms=trace.elapsed_ms,
             trace=trace,
             contexts=contexts,
+            gate_intercepts=gate_intercepts,
         )
 
     def run_stream(
@@ -649,6 +654,7 @@ class AgentRuntime:
             })
         intent = route.intent
         self.intent = intent  # 修法 C：门控需要
+        gate_intercepts = 0
 
         if intent != "none" and registry.get(route.tool) is None:
             intent, action, reason = heuristic_route(question, registry.names(), extra_hints=route_hints)
@@ -714,8 +720,9 @@ class AgentRuntime:
                                 f"步骤{step_index + 1}：门控拦截 final——intent=mixed，"
                                 f"{missing_tool} 侧尚无证据，强制继续取证"
                             )
+                            gate_intercepts += 1
                             add_step(
-                                kind="stop",
+                                kind="gate",
                                 reason=f"门控拦截：{missing_tool} 侧零证据",
                                 observation=f"intent=mixed，{missing_tool} 侧尚无证据",
                             )
@@ -857,6 +864,7 @@ class AgentRuntime:
             "context_chars": _evidence_chars(blocks),
             "elapsed_ms": trace.elapsed_ms,
             "trace_id": trace.trace_id,
+            "gate_intercepts": gate_intercepts,
         }
 
         yield from yield_event("done", {

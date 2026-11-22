@@ -240,6 +240,8 @@ class SampleResult:
     tool_steps: Optional[int] = None
     # 调用的工具名集合（如 {"kb_search", "sql_query"}），用于按意图分组统计
     tool_names: frozenset[str] = field(default_factory=frozenset)
+    # mixed 门控拦截 final 的次数；只有 agentic 链路有意义，固定链路保持 0
+    gate_intercepts: int = 0
     trace_id: str = ""
     # 该样本带了几轮历史；固定链路保持 None，报告显示为「—」
     history_turns: Optional[int] = None
@@ -584,6 +586,27 @@ def _mean(values: Sequence[Optional[float]]) -> Optional[float]:
     return sum(real) / len(real) if real else None
 
 
+_PROMPT_FINGERPRINT: Optional[str] = None
+
+
+def _prompt_fingerprint() -> str:
+    """作答提示词指纹（generation + agent.prompts 源码），进生成缓存键。
+
+    生成缓存目前只在进程内，指纹是防御性钉死：提示词一旦改动，同一进程里
+    旧键也不再命中，将来若缓存落盘更不会再复用旧答案。
+    """
+    global _PROMPT_FINGERPRINT
+    if _PROMPT_FINGERPRINT is None:
+        import inspect
+
+        from private_rag import generation
+        from private_rag.agent import prompts
+
+        blob = inspect.getsource(generation) + "\n" + inspect.getsource(prompts)
+        _PROMPT_FINGERPRINT = hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+    return _PROMPT_FINGERPRINT
+
+
 def aggregate_results(results: Sequence[SampleResult]) -> dict[str, Any]:
     answerable = [item for item in results if item.answerable]
     refusal = [item for item in results if not item.answerable]
@@ -650,6 +673,10 @@ def aggregate_results(results: Sequence[SampleResult]) -> dict[str, Any]:
         "dual_tool_rate_mixed": _mean(
             [1.0 if len(item.tool_names) >= 2 else 0.0 for item in results
              if item.tool_calls is not None and item.intent == "mixed"]
+        ),
+        # 修法 C 可观测性：agentic 样本里门控至少拦过一次 final 的占比（固定链路 intent 为空，不进分母）
+        "gate_intercept_rate": _mean(
+            [1.0 if item.gate_intercepts else 0.0 for item in results if item.intent]
         ),
         "used_parent_rate": _mean(
             [1.0 if item.used_parent else 0.0 for item in results]
@@ -761,6 +788,7 @@ def collect_results(
                     tuple(chunk.point_id for chunk in chunks),
                     context_digest,
                     model,
+                    _prompt_fingerprint(),
                 )
                 if cache_key in cache:
                     answer, citations = cache[cache_key]
@@ -896,6 +924,7 @@ def collect_agent_results(
                 if getattr(step, "kind", "") == "tool"
             )
             result.trace_id = str(getattr(agent_result, "trace_id", "") or "")
+            result.gate_intercepts = int(getattr(agent_result, "gate_intercepts", 0) or 0)
             result.refusal = is_refusal(result.answer)
             result.metrics = score_deterministic(
                 sample,
@@ -1128,6 +1157,7 @@ DETERMINISTIC_METRICS = (
     "dual_tool_rate_knowledge",
     "dual_tool_rate_database",
     "dual_tool_rate_mixed",
+    "gate_intercept_rate",
     "used_parent_rate",
     "rewrite_fallbacks",
 )
@@ -1178,6 +1208,7 @@ def _result_to_dict(result: SampleResult) -> dict:
         "tool_calls": result.tool_calls,
         "tool_steps": result.tool_steps,
         "tool_names": list(result.tool_names),
+        "gate_intercepts": result.gate_intercepts,
         "trace_id": result.trace_id,
         "history_turns": result.history_turns,
         "retrieval_ms": round(result.retrieval_ms, 2),
@@ -1492,7 +1523,12 @@ def render_markdown(report: dict) -> str:
             f"{meta['ragas']['limit']} 条可回答样本，不能当作全量结论。**"
         )
     if meta.get("git_commit"):
-        lines.append(f"- Git commit：`{meta['git_commit']}`")
+        commit = f"`{meta['git_commit']}`"
+        if meta.get("git_dirty"):
+            commit += "（工作区有未提交改动，读数对应的是这份混合代码）"
+        lines.append(f"- Git commit：{commit}")
+    if meta.get("run_note"):
+        lines.append(f"- 跑批备注：{meta['run_note']}")
     lines.append(f"- 总耗时：{_fmt(meta.get('duration_seconds'), digits=1)} 秒")
     lines.append("")
 

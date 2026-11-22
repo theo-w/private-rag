@@ -32,7 +32,7 @@ class AgentStep:
     """循环中的一步：一次工具调用，或一次直接结论。"""
 
     index: int
-    kind: str  # route | tool | final | error | stop
+    kind: str  # route | tool | final | error | stop | gate
     tool: str = ""
     args: dict[str, Any] = field(default_factory=dict)
     reason: str = ""
