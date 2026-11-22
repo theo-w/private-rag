@@ -1,13 +1,14 @@
-"""MCP 工具层：`kb_search`（只检索）与 `ask`（检索 + 作答），一律只读。
+"""MCP 工具层：`kb_search`（只检索）、`ask`（检索 + 作答）、`sql_query`（业务库只读查询）。
 
-两个工具都直接复用 `RagEngine`——与 CLI / HTTP 完全同一条链路（查询改写 →
-混合召回 → 精排 → 父块扩展 → 生成），不经过 agentic 循环：MCP 客户端要的是
-「一次调用给一批证据」，不需要模型替它做多轮决策。
+检索与问答直接复用 `RagEngine`——与 CLI / HTTP 完全同一条链路（查询改写 → 混合召回 →
+精排 → 父块扩展 → 生成），不经过 agentic 循环：MCP 客户端要的是「一次调用给一批证据」，
+不需要模型替它做多轮决策。
 
-对外只暴露读的能力：没有入库/写库入口，也没有运行时 SQL。SQL 侧的只读护栏
-是按「本机进程 + sources.yaml 授权」设计的，把同一能力交给任意外部客户端等于
-把业务库开放出去，所以这里的检索面只有知识库（`source_type` 能选到已入库的
-sql 文档，但那只是读已入库的内容）。
+`sql_query` 包的是 agentic 那颗运行时查询工具，装配也共用 `build_tool_registry`，所以两个
+入口的授权语义一致。它对外要过三重门，缺一门就不出现在 `tools/list`：启动命令显式带
+`--allow-sql`（默认关，得由人在命令行上开）、`sources.yaml` 里对应 sql 源带
+`allow_runtime_query: true`、`sql_guard` 的只读护栏照旧（单条 `SELECT`、表白名单、强制行数上限）。
+入库/写库仍不暴露——读与写是两条不同的边界。
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from private_rag.generation import build_citations
 from private_rag.mcp.evidence import (
     ASK_OUTPUT_SCHEMA,
     SEARCH_OUTPUT_SCHEMA,
+    SQL_OUTPUT_SCHEMA,
     answer_text,
     citation_payload,
     evidence_citations,
@@ -38,6 +40,7 @@ from private_rag.qa import RagEngine, RetrievalOptions
 MAX_LIMIT = 10
 MAX_TAGS = 10
 MAX_TAG_CHARS = 50
+MAX_SQL_CHARS = 2000
 ALLOWED_SOURCE_TYPES = ("file", "web", "sql")
 
 # 本地模式 Qdrant 的独占报错：把这个原因翻译成能照着做的下一步，客户端才不会只看到一句异常
@@ -443,15 +446,98 @@ class AskTool(McpTool):
         )
 
 
+class SqlQueryTool(McpTool):
+    """业务库只读查询：包 agentic 那颗运行时查询工具，护栏与授权语义照旧。
+
+    包装而不是重写：`sql_guard` 的只读校验、表白名单、行数上限、护栏改写后的执行 SQL 都
+    来自那颗工具本身，MCP 这边只做参数清洗和载荷整形。
+    """
+
+    name = "sql_query"
+    title = "业务库只读查询"
+
+    def __init__(self, tool: Any):
+        self.tool = tool
+        self.description = (
+            getattr(tool, "description", "") or "只读查询业务数据库表"
+        ) + "。写操作与白名单外的表会被直接拒绝。"
+        self.input_schema = {
+            "type": "object",
+            "properties": {
+                "sql": {
+                    "type": "string",
+                    "description": f"单条 SELECT 语句（最多 {MAX_SQL_CHARS} 字），行数上限由服务端强制",
+                },
+            },
+            "required": ["sql"],
+        }
+        self.output_schema = SQL_OUTPUT_SCHEMA
+
+    def run(self, args: dict[str, Any]) -> ToolOutcome:
+        invalid = _reject_unknown(args, ("sql",))
+        if invalid:
+            return ToolOutcome(False, error=invalid)
+        raw = args.get("sql")
+        if not isinstance(raw, str):
+            return ToolOutcome(False, error="参数 sql 必须是字符串")
+        sql = raw.strip()
+        if not sql:
+            return ToolOutcome(False, error="参数 sql 不能为空")
+        if len(sql) > MAX_SQL_CHARS:
+            return ToolOutcome(False, error=f"参数 sql 最多 {MAX_SQL_CHARS} 个字符")
+
+        try:
+            result = self.tool.run({"sql": sql})
+        except Exception as exc:  # 连库失败之类不能让服务死掉
+            return ToolOutcome(False, error=f"查询失败：{failure_reason(exc)}")
+        if not result.ok:
+            return ToolOutcome(False, error=f"查询失败：{result.error or '查询未成功'}")
+
+        data = result.data or {}
+        executed = str(data.get("sql") or sql)
+        lines = [f"执行 SQL：{executed}"]
+        if result.summary:
+            lines.append(result.summary)
+        lines.extend(result.warnings)
+        sections = ["\n".join(lines)]
+        body = evidence_text(result.blocks)
+        if body:
+            sections.append(body)
+
+        return ToolOutcome(
+            True,
+            text="\n\n".join(sections),
+            payload={
+                "sql": executed,
+                "summary": result.summary or "",
+                "row_count": result.rows,
+                "columns": list(data.get("columns") or []),
+                "truncated": bool(data.get("truncated")),
+                "warnings": list(result.warnings),
+                "evidence": evidence_payload(result.blocks),
+                "citations": evidence_citations(result.blocks),
+            },
+        )
+
+
 def build_mcp_tools(
     engine: Optional[RagEngine],
     *,
     base_options: Optional[RetrievalOptions] = None,
     default_limit: int = TOP_K_RERANK,
     max_chars: int = AGENT_TOOL_CHARS,
+    sql_tool: Optional[Any] = None,
 ) -> list[McpTool]:
-    """装配对外工具面。`engine=None` 时只用于输出工具定义，调用会返回错误说明。"""
-    return [
+    """装配对外工具面。`engine=None` 时只用于输出工具定义，调用会返回错误说明。
+
+    `sql_tool` 传 agentic 装配出来的运行时查询工具（`build_tool_registry` 里的 `sql_query`），
+    没传就只暴露两个知识库工具——`--allow-sql` 与 `allow_runtime_query` 两道门在入口
+    `scripts/serve_mcp.py` 判，这里只按有没有工具决定暴不暴露。
+    """
+    tools: list[McpTool] = [
         KbSearchTool(engine, base_options=base_options, default_limit=default_limit, max_chars=max_chars),
         AskTool(engine, base_options=base_options, default_limit=default_limit),
     ]
+    if sql_tool is not None:
+        tools.append(SqlQueryTool(sql_tool))
+    return tools

@@ -109,6 +109,21 @@ EVIDENCE_LIST_SCHEMA: dict[str, Any] = {
     },
 }
 
+SQL_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "sql": {"type": "string", "description": "护栏改写后真正执行的 SQL（带行数上限）"},
+        "summary": {"type": "string", "description": "一句话结论，例如「查询返回 3 行」"},
+        "row_count": {"type": "integer"},
+        "columns": {"type": "array", "items": {"type": "string"}},
+        "truncated": {"type": "boolean", "description": "是否撞上行数上限"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "evidence": EVIDENCE_LIST_SCHEMA,
+        "citations": {"type": "array", "items": CITATION_ITEM_SCHEMA},
+    },
+    "required": ["summary", "row_count", "citations"],
+}
+
 SEARCH_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {

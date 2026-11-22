@@ -18,7 +18,7 @@
 | v7.3 | `v7.3-coreference` | 指代消解：提示词写死「本项目/本系统」的消解规则，评估补上真正带对话历史的多轮样本 | ✅ 本分支完成 | 350 测试通过；`ROUTER_PROMPT`/`STEP_PROMPT`/`FINAL_PROMPT` 三处写死「『这个项目』『本系统』指本系统自身、它的说明文档就在知识库里」「没有对话历史绝不是选 `none` 的理由」；评估集 26→29 条（新增 `coreference` 3 条带 `history`），`EvalSample.history` 做严格校验并真的传给 `agent.run(..., history=...)`，报告新增 `history_turns`；三条指代样本全部还原（c01 文档侧、c02 走 `sql_query`、c03 判 `mixed`），同 26 条子集 `answer_rate`/`source_hit`/`refusal_accuracy` 与上一轮持平（0.955/0.955/1.000），`evidence_hit@3` -0.045 是 k06 与 m04 各 -1、m01 +1 的净额（三条都是 `@3` 窗口口径、答案本身正确），`citation_rate` -0.045 全部来自 d05 一条被生成预算截断在 18 字；4 条应拒答样本仍全部哨兵拒答，报告 `eval/reports/v7_3_coreference_report.md` |
 | v7.4 | `v7.4-two-sided-source` + `worktree-fix-c-runtime-gate` | 评估口径改双侧：混合问题「到底查了几侧」变成可测读数 | ✅ 本分支完成 | 357 测试通过（+4 修法 A 单测）；评估集加可选字段 `expected_sources`（声明「文档侧 + SQL 侧」），新确定性读数 `both_sides_hit` 要求声明的每一侧都在**全量**引用列表里出现才判 1（不套 `@3` 窗口，只统计声明双侧的 6 条，其余记 `None` 不进均值），`source_hit`/`evidence_hit@3`/`citation_rate` 的定义与逐条取值一字未改，v7 / v7.2 / v7.3 报告仍可比；只引到一侧的双侧样本单独进「失败与关注案例」并写「只取到一侧证据」；按新口径回算 v7.3 那轮得 5/6 = 0.833（判 0 的正是 c03，同一条在旧指标下 `source_hit` 与 `evidence_hit@3` 全满分），本轮 29 条实跑 6/6 = 1.000（c03 这轮真的回查了 SQL，缺口是间歇的；c03 与 m04 的 SQL 引用都排在第 4 位，坐实了新读数不套 `@3` 窗口的必要性），`source_hit` 0.960 持平（两轮同为 m04 一条未命中），`mrr@3` 0.747→0.727 的变化全部来自 k05 一条排位后移，单条平均 89.8 秒→82.6 秒，报告 `eval/reports/v7_4_two_sided_report.md`；修法 A（提示词硬规则）已做：STEP_PROMPT 规则 1 限定 sufficient 只看「已收集的证据」（不含历史），新增规则 10 禁止 mixed 查询在任一侧无证据时选 final；FINAL_PROMPT 新增规则 7 要求历史里的事实必须先查证据，历史段渲染加上「不能作为事实依据」标注。A/B 重复采样 5×修法 A vs 5×无修法 A：修法 A 将 c03 的 SQL 回查率从 20%（1/5）提升到 100%（5/5），修法 A 有效；修法 C（运行时硬门禁）已合入 PR #19：`config.py` 新增 `AGENT_MIXED_GATE` 开关，`runtime.py` 新增 `_has_evidence_for()` + `run()`/`run_stream()` 中的双侧证据门控，mixed 意图任一侧零证据时拒绝 final 强制调用缺失工具；修法 C 合入后 373 测试通过（+6 修法 C 单测 +4 修法 A 单测），评估新增 7 个 per-intent 工具调用指标（`avg_tool_calls_knowledge/database/mixed` + `dual_tool_rate_*`），报告 `eval/reports/v7_agent_tool_calls_report.json`。**读数出处复核（2026-11-21）**：上面「本轮 29 条实跑 6/6 = 1.000」测于 `2e912379f`，是 `d43b314` 的祖先、早于修法 A，不能当修法 A 的依据；A/B 两组的 `meta.git_commit` 同为 `d43b314`，记录本身区分不了两组提示词，而被验证的规则又在 `978a63f` 里被顺手删掉、本分支已恢复，经过见下方「修法 A 的读数出处与一次提示词回退」。**门禁可观测性与测量出处基建（2026-11-22）**：门控拦截步骤从 `kind=stop` 改为 `kind=gate`（循环并没有停，是被强制继续取证，旧 kind 会把轨迹误读成「循环停了」），`AgentResult` 加 `gate_intercepts` 计数，评估新增确定性读数 `gate_intercept_rate`（intent 非空的 agentic 样本里至少被拦一次 final 的占比，固定链路不进分母）；`evaluate.py` 新增 `git_dirty()` 与 `--run-note`，报告头把 dirty 标记与跑批备注写进读数出处，汇总 JSON（`eval_report.py`）同步带 `git_dirty`/`run_note`；生成缓存键加提示词指纹 `_prompt_fingerprint()`（`generation` + `agent.prompts` 源码哈希；缓存目前只在进程内，指纹是防御性钉死，将来缓存落盘或进程内热改提示词时不会再复用旧答案）。门控单测改断言 `kind=gate` 与 `gate_intercepts`，另加 4 项单测（拦截计数进评估 / 占比口径 / dirty+备注渲染 / 指纹稳定），全量 430 passed。**修法 C 双通道复跑（2026-11-22）**：同一代码 `944ea77` 上 29 条 × gate ON/OFF 各一轮（ON 轮 dirty=False；OFF 轮 dirty=True 只是多了未提交的 ON 报告文件，两轮代码完全一致）——两轮 `both_sides_hit` 都是 1.000，差别在确定性：OFF 这轮 d02（意图 mixed 却只查了 SQL 一侧）把 `dual_tool_rate_mixed` 拉到 0.889，ON 把双工具率钉死 1.000、`gate_intercept_rate` 0.207（6/29 全在 mixed 意图，含 d02 这种未声明 `expected_sources` 但意图判 mixed 的题）；代价如实记录——单条均耗时 59.3s→88.1s（+49%），ON 有 6 条跑到 `max_steps` 才收口但答案质量未受损（d02 两轮 `source_hit` 均 1.0，SQL 证据恰好带出了保存文本），修法 A 兜住的缺口是概率性的、修法 C 是确定性的，与 A/B 结论一致；报告 `eval/reports/v7_5_gate_on.md` / `v7_5_gate_off.md` |
 | v7.5 | `claude/serene-tharp-761b47` | function calling 决策输出对比：`RAG_AGENT_PLANNER_MODE=json|function` 实验开关（`ask_tool_json`，同一提示词换输出通道），JSON 模式保持默认 | ✅ 本分支完成 | 420 测试通过（+10 mock 单测）；同一提示词双通道实跑读数（`eval/reports/fc_comparison_report.md`）：主模型 `qwen3.8:27b-mlx` FC 路由 12/12 可用（均耗时 18.8s vs JSON 27.0s）、步进形状 3/3 一致，两通道意图一致率 0.75；对照 `qwen2.5:7b-instruct` FC 成功 4/12（提示词仍写着「只输出 JSON」的混淆已如实写明）；结论与逐条读数见 v7 详细验收的 function calling 对比项 |
-| v8 | `v8-mcp-kb-search-ask` | MCP 暴露：手写最小 stdio JSON-RPC server（零新增依赖），对外两个只读工具 `kb_search` / `ask` | ✅ 本分支完成 | 499 测试通过（既有 430 + 新增 69，不打模型、不打开真实 Qdrant）；`--list-tools` 与 `tools/list` 能看到两个工具与 input/output schema 并声明只读；本机实跑 `tools/call kb_search` 返回带 `[n]` 编号的证据与含 `page` 的引用载荷、`ask` 返回带 `[1][2]` 的回答与 `meta`；同一 `storage/` 被别的进程占用时退出码 3 并给出可操作提示；不暴露运行时 SQL 与入库，选型与代价见 `docs/adr/0004`、边界见 `docs/adr/0005` |
+| v8 | `v8-mcp-kb-search-ask` | MCP 暴露：手写最小 stdio JSON-RPC server（零新增依赖），对外只读工具 `kb_search` / `ask`，`--allow-sql` 才加 `sql_query` | ✅ 本分支完成 | 529 测试通过（既有 430 + 新增 99，不打模型、不打开真实 Qdrant）；`--list-tools` 与 `tools/list` 能看到工具与 input/output schema 并声明只读；本机实跑 `tools/call kb_search` 返回带 `[n]` 编号的证据与含 `page` 的引用载荷、`ask` 返回带 `[1][2]` 的回答与 `meta`；同一 `storage/` 被别的进程占用时退出码 3 并给出可操作提示；不暴露入库/写库，运行时 SQL 要过 `--allow-sql` + `allow_runtime_query` + `sql_guard` 三重门（与 agentic 共用 `build_tool_registry`）；选型与代价见 `docs/adr/0004`，边界见 `docs/adr/0005` 与取代其 SQL 一条的 `docs/adr/0006` |
 
 ## v2 详细验收（已完成）
 
@@ -287,21 +287,31 @@ v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上
       而不是 method not found（客户端会顺手调）；漏 `id` 的请求也回应，否则客户端会等一个不会来的响应
 - [x] 通道约定：stdout 只写协议（每行一个 JSON 对象、`ensure_ascii=False` 保证中文可读），日志与启动提示走 stderr；
       坏行按 `parse_error` / `invalid_request` 回应而不退出进程
-- [x] `private_rag/mcp/tools.py`：两个只读工具 `kb_search`（只检索）与 `ask`（检索 + 作答），
+- [x] `private_rag/mcp/tools.py`：只读工具 `kb_search`（只检索）与 `ask`（检索 + 作答），
       入参校验与 HTTP 请求模型同一口径（`limit` 1–10、`tags` ≤10 个、单个 ≤50 字、`source_type` 枚举、
       未知参数直接拒），工具定义声明 `readOnlyHint: true` / `destructiveHint: false`
+- [x] `sql_query` 包 agentic 那颗运行时查询工具（不重写护栏）：`sql` 必填、≤2000 字，返回护栏改写后
+      实际执行的 SQL、行列结果与 `source_type=sql` 的引用；写操作、多语句、白名单外的表按 `sql_guard`
+      原样拒绝，`LIMIT` 超过上限会被压缩（测试用临时 SQLite 跑真护栏）
+- [x] 装配共用一处：把 `build_agent_runtime` 里的 sources.yaml 授权装配抽出为 `build_tool_registry`，
+      MCP 入口取它的 `sql_query`，`build_agent_runtime` 变成薄委托（签名不变，agentic 430 条测试无回归）
 - [x] 引用口径复用 `agent/tools.py` 的 `citation_label` 与 `build_citations`：文本里 `[n]` 与 `citations[].index`
       一一对应，`page` / `table` 能回溯；证据字符预算随段数缩小，一次调用的总字符有界
 - [x] 失败面：知识库未就绪给与 `/ready` 同源的原因；Qdrant 本地模式被占用翻译成可操作的下一步
       （停掉 `serve.py` 或用 `RAG_STORAGE_DIR` 换目录）；工具层失败按 MCP 约定回 `isError` 结果而不是协议错误；
       工具内部没兜住的异常不打死服务
-- [x] 只读边界：没有入库/写库入口，也没有运行时 SQL，理由写进 `docs/adr/0005-mcp-tools-read-only-no-sql.md`
+- [x] 只读边界：没有入库/写库入口（读与写是两条边界）；运行时 SQL 默认不暴露，要过三重门——
+      `--allow-sql` 显式开、`sources.yaml` 的 `allow_runtime_query: true`、`sql_guard` 只读护栏，
+      见 `docs/adr/0006-mcp-sql-query-behind-three-gates.md`（取代 `docs/adr/0005` 的「不暴露 SQL」一条）
 - [x] `scripts/serve_mcp.py` 保持薄（照 `scripts/sync_gdrive.py` 的写法）：`--no-rerank`（在导入 config 前设环境变量）、
-      `--top-k`、`--log-level`、`--list-tools`（不打开知识库、不需要 Ollama，只打印工具定义后退出）；
-      打不开知识库时退出码 3 并在 stderr 写明原因
-- [x] 测试 69 条新增（`tests/test_mcp_tools.py` + `tests/test_mcp_server.py`）：全部注入假引擎与打桩的
-      `build_engine`，不打模型、不联网、不打开真实 Qdrant；入口脚本用 importlib 按路径加载。
-      全量 `python3 -m pytest tests -q` = **499 passed**（既有 430 + 新增 69），0 failed / 0 skipped
+      `--top-k`、`--log-level`、`--list-tools`（不打开知识库、不需要 Ollama，只打印工具定义后退出，也不装配
+      `sql_query`）、`--allow-sql`、`--sources`；打不开知识库时退出码 3 并在 stderr 写明原因；
+      开了 `--allow-sql` 但配置缺授权或缺文件/连不上库，服务照样起、只暴露两个知识库工具并在 stderr 说清原因，
+      不静默降级
+- [x] 测试 99 条新增（`tests/test_mcp_tools.py` + `tests/test_mcp_server.py` + `tests/test_agent_loop.py`）：
+      全部注入假引擎与打桩的 `build_engine`，不打模型、不联网、不打开真实 Qdrant；入口脚本用 importlib 按路径加载；
+      SQL 用临时 SQLite 跑真的 `sql_guard` 与真引用。
+      全量 `python3 -m pytest tests -q` = **529 passed**（既有 430 + 新增 99），0 failed / 0 skipped
 - [x] 本机实跑（2026-11-22，演示库 + 本机 Ollama `qwen2.5:7b-instruct`，`--no-rerank`）：`initialize` 协商
       `2025-06-18` 并回显 `serverInfo`；`tools/list` 只有 `kb_search` / `ask`；`tools/call kb_search` 返回
       `[1]`/`[2]` 编号证据与带 `page` 的 `structuredContent.citations`；`ask` 返回带 `[1][2]` 的回答、
@@ -309,16 +319,23 @@ v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上
       前者是那份 `storage/` 的词法索引不在、按既有规则降级为纯向量，后者是 `--no-rerank` 显式关掉，都不是本分支引入
 - [x] 单进程限制的降级实测：同一 `storage/` 被另一个 MCP server 占着时，第二个进程退出码 3，
       stderr 给出「请先停掉 scripts/serve.py…或用 RAG_STORAGE_DIR」
-- [x] 文档：README「MCP 暴露（v8）」（客户端配置片段、参数表、与 HTTP API 的区别、单进程限制与降级、只读边界、
-      `--list-tools` 自检）、`docs/adr/0004`、`docs/adr/0005`、`CONTEXT.md` 新增「工具面」「协议通道」两个术语
+- [x] 文档：README「MCP 暴露（v8）」（客户端配置片段、参数表、三重门、与 HTTP API 的区别、单进程限制与降级、
+      只读边界、`--list-tools` 自检）、`docs/adr/0004`、`docs/adr/0005`（含被 0006 取代的状态标注）、
+      `docs/adr/0006`、`CONTEXT.md` 新增「工具面」「协议通道」两个术语
+- [ ] `--allow-sql` 的本机实跑：SQL 面目前只有测试覆盖（临时 SQLite + 真护栏），还没拿真实的 `sources.yaml`
+      授权跑通过一次 `tools/call sql_query`；知识库那两个工具的实跑读数见上一条
 - [ ] 与 PR #22（分支 `claude/v8-mcp-server`，同样以 `main` 为基线，OPEN）的关系需要人工裁决：两边都自称 v8 第 1 项，
       同名文件重叠（`private_rag/mcp/__init__.py`、`private_rag/mcp/evidence.py`、`private_rag/mcp/server.py`、
-      `scripts/serve_mcp.py`、`tests/test_mcp_server.py`、README/ROADMAP/CONTEXT），工具面不同——那边是
-      `kb_search` + `sql_query`（`sql_query` 按 `sources.yaml` 授权才出现在 `tools/list`，护栏照旧）、没有 `ask`，
-      并为此改了 `agent/tools.py` 与 `agent/runtime.py`（引用加块级 `locator`）；本分支按任务书不暴露运行时 SQL、
-      不碰 `private_rag/agent/*`。`ask` 与「要不要暴露 SQL」是两件独立的事，胜出的一侧可以各自再补另一件
+      `scripts/serve_mcp.py`、`tests/test_mcp_server.py`、README/ROADMAP/CONTEXT）。用户已定「三个工具都要」，
+      本分支据此加回 `sql_query`，两边**只剩引用载荷这一处差异**：那边每条引用附块级 `locator`
+      （`doc_id` / `chunk_index` / `snippet_offset`，为此改了 `agent/tools.py`），本分支沿用既有 `Citation` 字段、
+      只把 `agent/runtime.py` 的装配抽出成 `build_tool_registry`（行为等价，没碰 `agent/tools.py`）。
+      合并建议：以本分支为主干，`locator` 作为后续单独 PR 补上，`agent/tools.py` 的改动留给那一侧
+- [ ] 块级 `locator`（PR #22 的做法）：`ToolBlock.locator` + `chunk_locator()` / `sql_locator`，让引用能回溯到
+      `doc_id` 与块内偏移。与本分支的三重门互不影响，尚未做
 - [ ] 流式工具结果与进度通知：手写实现只支持一次性结果，长调用（`ask` 十几秒）在客户端侧只能表现为「这次调用慢」
-- [ ] 鉴权与多用户：当前与本机 HTTP 服务同为「能启动进程的人即可读」，要给别人用需要先加鉴权或换 Qdrant server 模式
+- [ ] 鉴权与多用户：当前与本机 HTTP 服务同为「能启动进程的人即可读」，开了 `--allow-sql` 之后还包括白名单内的
+      业务表，要给别人用需要先加鉴权或换 Qdrant server 模式
 
 ## 分支与提交约定
 

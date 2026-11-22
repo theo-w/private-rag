@@ -9,6 +9,7 @@ import importlib.util
 import io
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -411,3 +412,166 @@ def test_script_serves_stdio_with_real_tools(clean_rerank_env, monkeypatch, caps
     captured = capsys.readouterr()
     assert [t["name"] for t in json.loads(captured.out)["result"]["tools"]] == ["kb_search", "ask"]
     assert "已启动" in captured.err
+
+
+# sql_query：只有装配给出那颗工具时才进工具面
+
+def make_sqlite_db(tmp_path):
+    db = tmp_path / "demo.db"
+    connection = sqlite3.connect(db)
+    try:
+        connection.execute("CREATE TABLE products (id INTEGER, name TEXT)")
+        connection.execute("INSERT INTO products VALUES (1, '橙子')")
+        connection.commit()
+    finally:
+        connection.close()
+    return db
+
+
+def make_sql_server(tmp_path):
+    from private_rag.agent.tools import SqlQueryTool as RuntimeSqlQueryTool
+
+    runtime_tool = RuntimeSqlQueryTool(
+        dsn=f"sqlite:///{make_sqlite_db(tmp_path)}",
+        label="demo.products",
+        allowed_tables=["products"],
+        max_rows=5,
+    )
+    # 传 agentic 那颗工具本身：`build_mcp_tools` 负责包装成 MCP 工具
+    return MCPServer(build_mcp_tools(FakeEngine([make_chunk(1)]), sql_tool=runtime_tool))
+
+
+def sources_yaml(db, *, opt_in: str = "") -> str:
+    return (
+        "sources:\n"
+        "  - type: sql\n"
+        f"    dsn: sqlite:///{db}\n"
+        "    query: SELECT id, name FROM products ORDER BY id\n"
+        "    id_column: id\n"
+        "    title_column: name\n"
+        "    content_columns: [name]\n"
+        "    label: demo.products\n"
+        f"{opt_in}"
+    )
+
+
+def test_tools_list_includes_sql_query_when_assembled(tmp_path):
+    listed = make_sql_server(tmp_path).handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    assert [t["name"] for t in listed["result"]["tools"]] == ["kb_search", "ask", "sql_query"]
+
+
+def test_sql_call_returns_structured_rows(tmp_path):
+    response = make_sql_server(tmp_path).handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "sql_query", "arguments": {"sql": "SELECT name FROM products"}},
+        }
+    )
+    result = response["result"]
+    assert result["isError"] is False
+    assert "执行 SQL：" in result["content"][0]["text"]
+    structured = result["structuredContent"]
+    assert structured["row_count"] == 1
+    assert structured["columns"] == ["name"]
+    assert structured["citations"][0]["source_type"] == "sql"
+
+
+@pytest.mark.parametrize(
+    "arguments,expected",
+    [
+        ({"sql": "DELETE FROM products"}, "只允许 SELECT"),
+        ({"sql": "SELECT * FROM secrets"}, "未授权的表"),
+        ({}, "sql"),
+    ],
+)
+def test_sql_call_reports_guard_rejections_as_tool_error(tmp_path, arguments, expected):
+    response = make_sql_server(tmp_path).handle(
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "sql_query", "arguments": arguments}}
+    )
+    assert response["result"]["isError"] is True
+    assert expected in response["result"]["content"][0]["text"]
+
+
+def test_script_defaults_to_no_sql(clean_rerank_env, monkeypatch, capsys):
+    import private_rag.qa as qa
+
+    monkeypatch.setattr(qa, "build_engine", lambda **kwargs: FakeEngine([make_chunk(1)]))
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"),
+    )
+
+    assert load_script().main([]) == 0
+    captured = capsys.readouterr()
+    assert [t["name"] for t in json.loads(captured.out)["result"]["tools"]] == ["kb_search", "ask"]
+    assert "sql_query" not in captured.err
+
+
+def test_script_allow_sql_lists_three_tools(clean_rerank_env, monkeypatch, capsys, tmp_path):
+    import private_rag.qa as qa
+
+    monkeypatch.setattr(qa, "build_engine", lambda **kwargs: FakeEngine([make_chunk(1)]))
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"),
+    )
+    config = tmp_path / "sources.yaml"
+    config.write_text(sources_yaml(make_sqlite_db(tmp_path), opt_in="    allow_runtime_query: true\n"), encoding="utf-8")
+    module = load_script()
+
+    assert module.main(["--allow-sql", "--sources", str(config)]) == 0
+    captured = capsys.readouterr()
+    assert [t["name"] for t in json.loads(captured.out)["result"]["tools"]] == ["kb_search", "ask", "sql_query"]
+    assert "sql_query" in captured.err  # 启动提示列出实际工具面
+
+
+def test_script_allow_sql_without_opt_in_stays_kb_only_and_says_why(clean_rerank_env, monkeypatch, capsys, tmp_path):
+    import private_rag.qa as qa
+
+    monkeypatch.setattr(qa, "build_engine", lambda **kwargs: FakeEngine([make_chunk(1)]))
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"),
+    )
+    config = tmp_path / "sources.yaml"
+    config.write_text(sources_yaml(make_sqlite_db(tmp_path)), encoding="utf-8")
+    module = load_script()
+
+    assert module.main(["--allow-sql", "--sources", str(config)]) == 0
+    captured = capsys.readouterr()
+    assert [t["name"] for t in json.loads(captured.out)["result"]["tools"]] == ["kb_search", "ask"]
+    assert "不暴露 sql_query" in captured.err
+    assert "allow_runtime_query" in captured.err
+
+
+def test_script_allow_sql_with_missing_config_explains_path(clean_rerank_env, monkeypatch, capsys, tmp_path):
+    import private_rag.qa as qa
+
+    monkeypatch.setattr(qa, "build_engine", lambda **kwargs: FakeEngine([make_chunk(1)]))
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"),
+    )
+    module = load_script()
+
+    assert module.main(["--allow-sql", "--sources", str(tmp_path / "sources.yaml")]) == 0
+    captured = capsys.readouterr()
+    assert [t["name"] for t in json.loads(captured.out)["result"]["tools"]] == ["kb_search", "ask"]
+    assert "sql 源配置不存在" in captured.err
+    assert str(tmp_path / "sources.yaml") in captured.err
+
+
+def test_script_list_tools_does_not_open_sql_source(clean_rerank_env, monkeypatch, capsys, tmp_path):
+    import private_rag.qa as qa
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("--list-tools 不该打开知识库")
+
+    monkeypatch.setattr(qa, "build_engine", refuse)
+    module = load_script()
+
+    assert module.main(["--list-tools", "--allow-sql"]) == 0
+    definitions = json.loads(capsys.readouterr().out)
+    assert [d["name"] for d in definitions] == ["kb_search", "ask"]

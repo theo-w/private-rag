@@ -13,7 +13,12 @@ import pytest
 
 import private_rag.agent.runtime as runtime_module
 from private_rag.agent.planner import Planner, RouteDecision, StepDecision
-from private_rag.agent.runtime import AgentOptions, AgentRuntime, build_agent_runtime
+from private_rag.agent.runtime import (
+    AgentOptions,
+    AgentRuntime,
+    build_agent_runtime,
+    build_tool_registry,
+)
 from private_rag.agent.tools import (
     SqlQueryTool,
     Tool,
@@ -942,3 +947,42 @@ class TestMixedGate:
         assert len(step_events) == 2  # sql_query + kb_search
         assert len(sql.calls) == 1
         assert len(kb.calls) == 1
+
+
+class TestSharedToolRegistryAssembly:
+    """`build_tool_registry` 是 agentic 与 MCP 共用的装配：只认注册表，不经过 AgentRuntime。"""
+
+    def registry(self, tmp_path, body: str, **kwargs):
+        path = tmp_path / "sources.yaml"
+        path.write_text(body, encoding="utf-8")
+        return build_tool_registry(object(), sources_path=path, **kwargs)
+
+    def test_optin_registers_sql_query(self, tmp_path):
+        registry = self.registry(
+            tmp_path, sources_yaml(make_db(tmp_path), opt_in="    allow_runtime_query: true\n")
+        )
+        assert registry.names() == ["kb_search", "sql_query"]
+        assert registry.get("sql_query").allowed_tables == ["products"]
+
+    def test_no_optin_means_kb_only(self, tmp_path):
+        assert self.registry(tmp_path, sources_yaml(make_db(tmp_path))).names() == ["kb_search"]
+
+    def test_allow_sql_false_skips_assembly(self, tmp_path):
+        registry = self.registry(
+            tmp_path,
+            sources_yaml(make_db(tmp_path), opt_in="    allow_runtime_query: true\n"),
+            allow_sql=False,
+        )
+        assert registry.names() == ["kb_search"]
+
+    def test_missing_config_degrades_to_kb_only(self, tmp_path):
+        registry = build_tool_registry(object(), sources_path=tmp_path / "不存在.yaml")
+        assert registry.names() == ["kb_search"]
+
+    def test_agent_runtime_shares_the_same_registry(self, tmp_path):
+        body = sources_yaml(make_db(tmp_path), opt_in="    allow_runtime_query: true\n")
+        path = tmp_path / "sources.yaml"
+        path.write_text(body, encoding="utf-8")
+        assert build_agent_runtime(object(), sources_path=path).registry.names() == build_tool_registry(
+            object(), sources_path=path
+        ).names()

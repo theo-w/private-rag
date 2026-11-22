@@ -5,15 +5,21 @@
 
 from __future__ import annotations
 
+import sqlite3
+from pathlib import Path
+
 import pytest
 
+from private_rag.agent.tools import ToolResult
 from private_rag.config import MAX_QUESTION_CHARS, TOP_K_RERANK
 from private_rag.generation import REFUSAL, build_citations
 from private_rag.mcp.evidence import citation_payload
 from private_rag.mcp.tools import (
+    MAX_SQL_CHARS,
     STORAGE_LOCKED_HINT,
     AskTool,
     KbSearchTool,
+    SqlQueryTool,
     build_mcp_tools,
     failure_reason,
 )
@@ -344,3 +350,138 @@ def test_citation_payload_shape():
     payload = citation_payload(citation)
     assert payload["index"] == 2 and payload["table"] == "products" and payload["score"] == 0.8123
     assert "page" not in payload
+
+
+# sql_query：包装 agentic 那颗运行时查询工具，护栏与授权语义照旧
+
+
+def make_sqlite(tmp_path) -> Path:
+    db = tmp_path / "demo.db"
+    connection = sqlite3.connect(db)
+    try:
+        connection.execute("CREATE TABLE products (id INTEGER, name TEXT, price REAL)")
+        connection.executemany(
+            "INSERT INTO products VALUES (?, ?, ?)",
+            [(1, "橙子", 3.5), (2, "苹果", 6.0), (3, "香蕉", 2.0)],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    return db
+
+
+def make_runtime_sql_tool(tmp_path, *, max_rows: int = 20, tables=("products",)):
+    """真的那颗运行时查询工具，指向临时 SQLite：护栏、行数上限、引用都走既有实现。"""
+    from private_rag.agent.tools import SqlQueryTool as RuntimeSqlQueryTool
+
+    return RuntimeSqlQueryTool(
+        dsn=f"sqlite:///{make_sqlite(tmp_path)}",
+        label="demo.products",
+        allowed_tables=list(tables),
+        max_rows=max_rows,
+    )
+
+
+def test_sql_tool_definition_requires_sql_and_stays_read_only(tmp_path):
+    tool = build_mcp_tools(None, sql_tool=make_runtime_sql_tool(tmp_path))[2]
+    definition = tool.definition()
+    assert definition["name"] == "sql_query"
+    assert definition["inputSchema"]["required"] == ["sql"]
+    assert set(definition["inputSchema"]["properties"]) == {"sql"}
+    assert definition["annotations"]["readOnlyHint"] is True
+    assert definition["annotations"]["destructiveHint"] is False
+    assert "写操作" in definition["description"]
+    assert "products" in definition["description"]
+    assert set(definition["outputSchema"]["required"]) == {"summary", "row_count", "citations"}
+
+
+def test_build_mcp_tools_adds_sql_only_when_given_a_tool(tmp_path):
+    assert [tool.name for tool in build_mcp_tools(None)] == ["kb_search", "ask"]
+    tools = build_mcp_tools(None, sql_tool=make_runtime_sql_tool(tmp_path))
+    assert [tool.name for tool in tools] == ["kb_search", "ask", "sql_query"]
+
+
+def test_sql_query_returns_guarded_sql_rows_and_citations(tmp_path):
+    outcome = SqlQueryTool(make_runtime_sql_tool(tmp_path)).run(
+        {"sql": "SELECT name, price FROM products WHERE price < 4"}
+    )
+    assert outcome.ok is True
+    payload = outcome.payload
+    assert payload["row_count"] == 2
+    assert payload["columns"] == ["name", "price"]
+    assert payload["truncated"] is False
+    assert payload["warnings"] == ["自动补上 LIMIT 20"]
+    assert payload["sql"].upper().endswith("LIMIT 20")  # 护栏改写后真正执行的那条
+    assert payload["citations"][0]["source_type"] == "sql"
+    assert payload["citations"][0]["table"] == "demo.products"
+    assert payload["evidence"][0]["index"] == 1
+    assert "执行 SQL：" in outcome.text and "[1]" in outcome.text
+    assert "橙子 | 3.5" in outcome.text
+
+
+def test_sql_query_clamps_a_limit_above_the_ceiling(tmp_path):
+    outcome = SqlQueryTool(make_runtime_sql_tool(tmp_path, max_rows=2)).run(
+        {"sql": "SELECT name FROM products ORDER BY id LIMIT 100"}
+    )
+    assert outcome.ok is True
+    assert outcome.payload["row_count"] <= 2
+    assert outcome.payload["sql"].upper().endswith("LIMIT 2")
+    assert any("LIMIT 被压缩" in warning for warning in outcome.payload["warnings"])
+
+
+@pytest.mark.parametrize(
+    "sql,expected",
+    [
+        ("DELETE FROM products", "只允许 SELECT"),
+        ("DROP TABLE products", "只允许 SELECT"),
+        ("SELECT * FROM orders", "未授权的表"),
+        ("SELECT id FROM products; DROP TABLE products", "单条语句"),
+    ],
+)
+def test_sql_query_refuses_writes_and_unlisted_tables(tmp_path, sql, expected):
+    outcome = SqlQueryTool(make_runtime_sql_tool(tmp_path)).run({"sql": sql})
+    assert outcome.ok is False
+    assert outcome.error.startswith("查询失败")
+    assert expected in outcome.error
+
+
+@pytest.mark.parametrize(
+    "args,expected",
+    [
+        ({"sql": ""}, "不能为空"),
+        ({"sql": None}, "必须是字符串"),
+        ({"sql": 3}, "必须是字符串"),
+        ({"sql": "SELECT 1", "limit": 3}, "不支持的参数"),
+        ({"sql": "SELECT " + "1" * MAX_SQL_CHARS}, "最多"),
+    ],
+)
+def test_sql_query_validates_arguments(tmp_path, args, expected):
+    outcome = SqlQueryTool(make_runtime_sql_tool(tmp_path)).run(args)
+    assert outcome.ok is False
+    assert outcome.payload == {}
+    assert expected in outcome.error
+
+
+def test_sql_query_survives_inner_tool_failure(tmp_path):
+    class BrokenTool:
+        description = "只读查询业务数据库表（products）"
+
+        def run(self, args):
+            raise ConnectionError("数据库文件不存在")
+
+    outcome = SqlQueryTool(BrokenTool()).run({"sql": "SELECT name FROM products"})
+    assert outcome.ok is False
+    assert outcome.error.startswith("查询失败")
+    assert "数据库文件不存在" in outcome.error
+
+
+def test_sql_query_reports_inner_failure_result(tmp_path):
+    class FailingTool:
+        description = "只读查询业务数据库表（products）"
+
+        def run(self, args):
+            return ToolResult(False, error="SQL 执行失败：no such table products")
+
+    outcome = SqlQueryTool(FailingTool()).run({"sql": "SELECT name FROM products"})
+    assert outcome.ok is False
+    assert "no such table products" in outcome.error
