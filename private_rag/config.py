@@ -104,6 +104,12 @@ AGENT_NONE_PROBE = not _env_flag("RAG_DISABLE_AGENT_NONE_PROBE")
 # 决策 JSON 的输出预算。推理型模型会先输出一段不可见的思考内容，
 # 预算给小了正文就是空的，路由会整段回退到关键词判断。
 AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)
+# 决策输出通道（v7 function calling 对比的实验开关）：
+# json —— format="json" 结构化输出（默认）；function —— 原生 function calling。
+# 本机 MLX 模型的工具调用格式不稳定，默认不启用；对比见 scripts/compare_fc_decisions.py。
+AGENT_PLANNER_MODE = os.getenv("RAG_AGENT_PLANNER_MODE", "json").strip().lower()
+if AGENT_PLANNER_MODE not in {"json", "function"}:
+    AGENT_PLANNER_MODE = "json"
 # 决策模型；默认沿用生成模型
 AGENT_LLM_MODEL = os.getenv("RAG_AGENT_LLM_MODEL", "").strip() or LLM_MODEL
 # 决策轨迹落盘，用于「trace 可回放每条决策」

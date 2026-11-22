@@ -221,6 +221,7 @@ event: error      data: {"code":"generation_failed","message":"...","request_id"
 | `RAG_MAX_HISTORY_MESSAGE_CHARS` | 800 | 历史中单条消息截断长度 |
 | `RAG_DISABLE_RERANK` | 未设置 | 设为 `1/true/yes/on` 时跳过 reranker |
 | `RAG_DISABLE_AGENT_NONE_PROBE` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：路由判 `none` 就跳过检索直接拒答（默认先用原问题做一次验证检索） |
+| `RAG_AGENT_PLANNER_MODE` | `json` | 设为 `function` 时路由/步进决策改走原生 function calling（同一提示词与预算，见 `ask_tool_json`）；非法值归一为 `json`。两条通道的对比读数见 `eval/reports/fc_comparison_report.md` |
 
 ## v4 自动评估（Ragas）
 
@@ -453,6 +454,7 @@ RAG_AGENT_SOURCES_CONFIG=config/sources.demo.yaml python3 scripts/serve.py --por
 `none` 不再是一张免检通行证：路由器判 `none` 只说明它「猜两侧都查不到」，而拒答的正当理由只有「查过了，证据里没有」。所以判成 `none` 时不再直接拒答，而是先用原问题做一次知识库验证检索——查到东西就照常作答，并把意图按实际作答依据报成 `knowledge`；查不到才返回拒答哨兵，`stop_reason` 记 `no_evidence`。代价是一条真正无关的问题多花一次 `kb_search`（仍受 `RAG_AGENT_MAX_STEPS` 约束）；`RAG_DISABLE_AGENT_NONE_PROBE=1` 退回「判 none 就直接拒答」的旧行为，知识库工具不可用时同样走旧行为。路由提示词同步收紧准入：`none` 只留给实时信息、天气、新闻、外部网站内容、主观偏好这类明确在本系统之外的事实，问到某条业务记录、某个字段或本系统自身的文档时一律先取证——字段里到底有没有，要查过才知道。v7 评估集 26 条复跑（`eval/reports/v7_2_nonegate_report.md`）：路由判 `none` 的样本从 1 条变成 0 条、`no_retrieval` 也从 1 条降到 0 条，4 条应拒答样本仍全部拒答（`refusal_accuracy` 1.000 持平），`citation_rate` 0.955→1.000，平均工具调用 1.31→1.42。
 
 决策走 JSON 模式，路由与步进两次调用共用 `RAG_AGENT_PLANNER_TOKENS`（默认 2000）输出预算。本机默认模型是推理型，会先输出一段不可见的思考内容：预算给小了（实跑时用的 400）模型只吐思考、正文为空，路由就会整段回退到关键词判断。轨迹里会写明回退原因，看到「模型输出中没有 JSON 对象」就先怀疑这个预算。
+同一份提示词也量过原生 function calling（2026-11-22，`scripts/compare_fc_decisions.py`，读数 `eval/reports/fc_comparison_report.md`）：默认模型 qwen3.8:27b-mlx 路由 12/12、步进 3/3 都返回了可用的 `tool_calls`，路由单条均耗时 18.8 秒（快于 JSON 模式的 27.0 秒），两通道意图一致率 0.75；对照组 qwen2.5:7b-instruct 只有 4/12 成功——提示词仍写着「只输出 JSON」，该模型多数情况直接吐 JSON 文本而不调工具，失败数含这个混淆，不能读成模型不支持工具调用。JSON 模式仍是默认：任何模型可用，切默认前需先跑 29 条评估确认无回归；`RAG_AGENT_PLANNER_MODE=function` 仅作实验开关。
 
 ### 命令行
 

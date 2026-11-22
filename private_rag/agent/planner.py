@@ -11,12 +11,13 @@ from typing import Any, Optional, Sequence
 
 from private_rag.agent.prompts import (
     ask_json,
+    ask_tool_json,
     build_route_prompt,
     build_step_prompt,
     parse_decision,
     parse_route,
 )
-from private_rag.config import AGENT_LLM_MODEL, AGENT_PLANNER_TOKENS
+from private_rag.config import AGENT_LLM_MODEL, AGENT_PLANNER_MODE, AGENT_PLANNER_TOKENS
 from private_rag.generation import History
 
 
@@ -78,10 +79,23 @@ class Planner:
 
 
 class LlmPlanner(Planner):
-    """用本机 LLM 的 JSON 输出做决策；不可用时抛 PlannerError 交给运行时回退。"""
+    """用本机 LLM 的决策输出做决策；不可用时抛 PlannerError 交给运行时回退。
 
-    def __init__(self, model: str = AGENT_LLM_MODEL):
+    mode 决定输出通道：``json``（默认）用 ``format="json"`` 要 JSON；
+    ``function`` 把同一组决策字段声明成工具 schema 走原生 function calling
+    （``ask_tool_json``）。两条通道的对比读数见 ``scripts/compare_fc_decisions.py``。
+    """
+
+    def __init__(self, model: str = AGENT_LLM_MODEL, mode: Optional[str] = None):
         self.model = model
+        self.mode = str(mode or AGENT_PLANNER_MODE).strip().lower()
+
+    def _ask(self, prompt: str, kind: str) -> dict:
+        if self.mode == "function":
+            return ask_tool_json(
+                prompt, kind=kind, model=self.model, num_predict=AGENT_PLANNER_TOKENS
+            )
+        return ask_json(prompt, model=self.model, num_predict=AGENT_PLANNER_TOKENS)
 
     def route(
         self,
@@ -90,7 +104,7 @@ class LlmPlanner(Planner):
         history: Optional[History] = None,
     ) -> RouteDecision:
         prompt = build_route_prompt(question, tool_specs, history)
-        data = ask_json(prompt, model=self.model, num_predict=AGENT_PLANNER_TOKENS)
+        data = self._ask(prompt, "route")
         intent, action, reason = parse_route(data)
         return RouteDecision(intent=intent, action=action, reason=reason)
 
@@ -114,7 +128,7 @@ class LlmPlanner(Planner):
             steps_used=steps_used,
             max_steps=max_steps,
         )
-        data = ask_json(prompt, model=self.model, num_predict=AGENT_PLANNER_TOKENS)
+        data = self._ask(prompt, "step")
         action, payload, reason, answer = parse_decision(data)
         if action == "final":
             return StepDecision(

@@ -1,8 +1,11 @@
 """Agentic 决策的提示词与结构化输出解析。
 
-决策一律用 JSON 结构化输出，而不是依赖模型的原生 function calling：
+决策默认用 JSON 结构化输出，而不是依赖模型的原生 function calling：
 本项目的默认模型是本机 MLX 模型，工具调用格式支持并不稳定，
 JSON 模式在任何模型上都可用，失败时还能回退到关键词启发式路由。
+`RAG_AGENT_PLANNER_MODE=function` 把决策输出切到原生 function calling
+（见 ``ask_tool_json``）：提示词与预算完全不变，两条通道的对比读数见
+``scripts/compare_fc_decisions.py``。
 """
 
 from __future__ import annotations
@@ -391,3 +394,93 @@ def heuristic_route(
     if sql_available:
         return "database", {"tool": "sql_query", "args": {}}, "回退为数据库查询"
     return "none", {}, "没有可用工具"
+
+
+# ---------------------------------------------------------------------------
+# 实验路径：同一份决策输出走原生 function calling
+# ---------------------------------------------------------------------------
+
+ROUTE_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "route_decision",
+        "description": "输出意图路由判断，intent/reason/action 与 JSON 模式同一组字段。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "intent": {
+                    "type": "string",
+                    "enum": ["knowledge", "database", "mixed", "none"],
+                },
+                "reason": {"type": "string", "description": "一句中文说明判断依据"},
+                "action": {
+                    "type": "object",
+                    "properties": {
+                        "tool": {"type": "string", "description": "首个要执行的工具；intent=none 时留空字符串"},
+                        "args": {"type": "object", "description": "该工具的参数"},
+                    },
+                },
+            },
+            "required": ["intent", "reason", "action"],
+        },
+    },
+}
+
+STEP_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "step_decision",
+        "description": "输出步进决策，字段与 JSON 模式一致。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["tool", "final"]},
+                "tool": {"type": "string", "description": "action=tool 时要调用的工具名"},
+                "args": {"type": "object", "description": "action=tool 时的参数"},
+                "reason": {"type": "string"},
+                "sufficient": {
+                    "type": "boolean",
+                    "description": "action=final 时，已收集证据能否支撑问题要的结论",
+                },
+                "missing": {"type": "string", "description": "证据不足时一句话写清缺哪一项"},
+                "answer": {"type": "string", "description": "action=final 时的最终回答"},
+            },
+            "required": ["action", "reason"],
+        },
+    },
+}
+
+
+def ask_tool_json(
+    prompt: str,
+    *,
+    kind: str,
+    model: str = AGENT_LLM_MODEL,
+    num_predict: int = AGENT_PLANNER_TOKENS,
+) -> dict:
+    """让模型用原生 function calling 给出与 JSON 模式同一份决策输出。
+
+    提示词与 ``ask_json`` 完全一致，只换输出通道：把决策字段声明成工具 schema
+    交给 ``bind_tools``，模型返回 tool_calls 后把 args 直接交给
+    ``parse_route`` / ``parse_decision``。模型没有返回 tool_calls（本机 MLX
+    模型的工具调用格式不稳定，正是这条路径要量的东西）时抛 PlannerError，
+    由运行时照旧回退到关键词路由。
+    """
+    schema = ROUTE_TOOL_SCHEMA if kind == "route" else STEP_TOOL_SCHEMA
+    llm = ChatOllama(
+        model=model,
+        temperature=0,
+        num_ctx=8192,
+        num_predict=num_predict,
+        disable_streaming=True,
+        keep_alive="10m",
+    ).bind_tools([schema])
+    response = llm.invoke(prompt)
+    tool_calls = getattr(response, "tool_calls", None) or []
+    if not tool_calls:
+        raise PlannerError("模型没有返回 tool_calls，原生 function calling 失败")
+    first = tool_calls[0]
+    args = first.get("args") if isinstance(first, dict) else getattr(first, "args", None)
+    if not isinstance(args, dict):
+        raise PlannerError(f"tool_calls 参数不是对象：{type(args).__name__}")
+    return args

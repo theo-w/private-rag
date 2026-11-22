@@ -1,0 +1,491 @@
+{
+  "model": "qwen3.8:27b-mlx",
+  "control_model": "qwen2.5:7b-instruct",
+  "items": {
+    "json_route": [
+      {
+        "ok": true,
+        "intent": "knowledge",
+        "tool": "kb_search",
+        "error": "",
+        "seconds": 29.97,
+        "id": "k01",
+        "category": "knowledge"
+      },
+      {
+        "ok": true,
+        "intent": "knowledge",
+        "tool": "kb_search",
+        "error": "",
+        "seconds": 34.69,
+        "id": "k02",
+        "category": "knowledge"
+      },
+      {
+        "ok": true,
+        "intent": "knowledge",
+        "tool": "kb_search",
+        "error": "",
+        "seconds": 26.38,
+        "id": "k03",
+        "category": "knowledge"
+      },
+      {
+        "ok": true,
+        "intent": "database",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 11.09,
+        "id": "d01",
+        "category": "database"
+      },
+      {
+        "ok": true,
+        "intent": "database",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 15.03,
+        "id": "d02",
+        "category": "database"
+      },
+      {
+        "ok": true,
+        "intent": "database",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 11.89,
+        "id": "d03",
+        "category": "database"
+      },
+      {
+        "ok": true,
+        "intent": "mixed",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 25.34,
+        "id": "m01",
+        "category": "mixed"
+      },
+      {
+        "ok": true,
+        "intent": "mixed",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 18.24,
+        "id": "m02",
+        "category": "mixed"
+      },
+      {
+        "ok": true,
+        "intent": "mixed",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 22.78,
+        "id": "m03",
+        "category": "mixed"
+      },
+      {
+        "ok": true,
+        "intent": "knowledge",
+        "tool": "kb_search",
+        "error": "",
+        "seconds": 62.93,
+        "id": "r01",
+        "category": "refusal"
+      },
+      {
+        "ok": true,
+        "intent": "knowledge",
+        "tool": "kb_search",
+        "error": "",
+        "seconds": 10.66,
+        "id": "r02",
+        "category": "refusal"
+      },
+      {
+        "ok": true,
+        "intent": "mixed",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 55.0,
+        "id": "r03",
+        "category": "refusal"
+      }
+    ],
+    "fc_route": [
+      {
+        "ok": true,
+        "intent": "knowledge",
+        "tool": "kb_search",
+        "error": "",
+        "seconds": 27.81,
+        "id": "k01",
+        "category": "knowledge"
+      },
+      {
+        "ok": true,
+        "intent": "knowledge",
+        "tool": "kb_search",
+        "error": "",
+        "seconds": 24.55,
+        "id": "k02",
+        "category": "knowledge"
+      },
+      {
+        "ok": true,
+        "intent": "knowledge",
+        "tool": "",
+        "error": "",
+        "seconds": 9.17,
+        "id": "k03",
+        "category": "knowledge"
+      },
+      {
+        "ok": true,
+        "intent": "database",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 11.6,
+        "id": "d01",
+        "category": "database"
+      },
+      {
+        "ok": true,
+        "intent": "mixed",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 32.15,
+        "id": "d02",
+        "category": "database"
+      },
+      {
+        "ok": true,
+        "intent": "database",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 11.4,
+        "id": "d03",
+        "category": "database"
+      },
+      {
+        "ok": true,
+        "intent": "mixed",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 21.09,
+        "id": "m01",
+        "category": "mixed"
+      },
+      {
+        "ok": true,
+        "intent": "mixed",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 11.73,
+        "id": "m02",
+        "category": "mixed"
+      },
+      {
+        "ok": true,
+        "intent": "mixed",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 11.78,
+        "id": "m03",
+        "category": "mixed"
+      },
+      {
+        "ok": true,
+        "intent": "database",
+        "tool": "",
+        "error": "",
+        "seconds": 31.74,
+        "id": "r01",
+        "category": "refusal"
+      },
+      {
+        "ok": true,
+        "intent": "knowledge",
+        "tool": "kb_search",
+        "error": "",
+        "seconds": 6.89,
+        "id": "r02",
+        "category": "refusal"
+      },
+      {
+        "ok": true,
+        "intent": "database",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 25.93,
+        "id": "r03",
+        "category": "refusal"
+      }
+    ],
+    "json_step": [
+      {
+        "ok": true,
+        "action": "final",
+        "tool": "",
+        "valid_tool": true,
+        "has_answer": true,
+        "error": "",
+        "seconds": 13.31,
+        "id": "文档证据已足够"
+      },
+      {
+        "ok": true,
+        "action": "tool",
+        "tool": "sql_query",
+        "valid_tool": true,
+        "has_answer": true,
+        "error": "",
+        "seconds": 18.43,
+        "id": "缺业务库侧证据"
+      },
+      {
+        "ok": true,
+        "action": "tool",
+        "tool": "kb_search",
+        "valid_tool": true,
+        "has_answer": true,
+        "error": "",
+        "seconds": 16.42,
+        "id": "第一步没有任何证据"
+      }
+    ],
+    "fc_step": [
+      {
+        "ok": true,
+        "action": "final",
+        "tool": "",
+        "valid_tool": true,
+        "has_answer": true,
+        "error": "",
+        "seconds": 18.55,
+        "id": "文档证据已足够"
+      },
+      {
+        "ok": true,
+        "action": "tool",
+        "tool": "sql_query",
+        "valid_tool": true,
+        "has_answer": true,
+        "error": "",
+        "seconds": 19.68,
+        "id": "缺业务库侧证据"
+      },
+      {
+        "ok": true,
+        "action": "tool",
+        "tool": "kb_search",
+        "valid_tool": true,
+        "has_answer": true,
+        "error": "",
+        "seconds": 15.75,
+        "id": "第一步没有任何证据"
+      }
+    ],
+    "control_fc_route": [
+      {
+        "ok": false,
+        "intent": "",
+        "tool": "",
+        "error": "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+        "seconds": 6.2,
+        "id": "k01",
+        "category": "knowledge"
+      },
+      {
+        "ok": false,
+        "intent": "",
+        "tool": "",
+        "error": "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+        "seconds": 0.92,
+        "id": "k02",
+        "category": "knowledge"
+      },
+      {
+        "ok": false,
+        "intent": "",
+        "tool": "",
+        "error": "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+        "seconds": 1.36,
+        "id": "k03",
+        "category": "knowledge"
+      },
+      {
+        "ok": false,
+        "intent": "",
+        "tool": "",
+        "error": "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+        "seconds": 0.62,
+        "id": "d01",
+        "category": "database"
+      },
+      {
+        "ok": true,
+        "intent": "database",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 1.85,
+        "id": "d02",
+        "category": "database"
+      },
+      {
+        "ok": true,
+        "intent": "database",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 2.01,
+        "id": "d03",
+        "category": "database"
+      },
+      {
+        "ok": false,
+        "intent": "",
+        "tool": "",
+        "error": "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+        "seconds": 1.15,
+        "id": "m01",
+        "category": "mixed"
+      },
+      {
+        "ok": true,
+        "intent": "mixed",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 1.91,
+        "id": "m02",
+        "category": "mixed"
+      },
+      {
+        "ok": false,
+        "intent": "",
+        "tool": "",
+        "error": "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+        "seconds": 1.82,
+        "id": "m03",
+        "category": "mixed"
+      },
+      {
+        "ok": false,
+        "intent": "",
+        "tool": "",
+        "error": "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+        "seconds": 0.71,
+        "id": "r01",
+        "category": "refusal"
+      },
+      {
+        "ok": false,
+        "intent": "",
+        "tool": "",
+        "error": "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+        "seconds": 0.68,
+        "id": "r02",
+        "category": "refusal"
+      },
+      {
+        "ok": true,
+        "intent": "database",
+        "tool": "sql_query",
+        "error": "",
+        "seconds": 2.25,
+        "id": "r03",
+        "category": "refusal"
+      }
+    ]
+  },
+  "main_model_json_route": {
+    "n": 12,
+    "parse_ok": 12,
+    "parse_ok_rate": 1.0,
+    "valid_action_rate": 1.0,
+    "mean_seconds": 27.0,
+    "errors": []
+  },
+  "main_model_fc_route": {
+    "n": 12,
+    "parse_ok": 12,
+    "parse_ok_rate": 1.0,
+    "valid_action_rate": 1.0,
+    "mean_seconds": 18.82,
+    "errors": []
+  },
+  "main_model_json_step": {
+    "n": 3,
+    "parse_ok": 3,
+    "parse_ok_rate": 1.0,
+    "valid_action_rate": 1.0,
+    "mean_seconds": 16.05,
+    "errors": []
+  },
+  "main_model_fc_step": {
+    "n": 3,
+    "parse_ok": 3,
+    "parse_ok_rate": 1.0,
+    "valid_action_rate": 1.0,
+    "mean_seconds": 17.99,
+    "errors": []
+  },
+  "control_model_fc_route": {
+    "n": 12,
+    "parse_ok": 4,
+    "parse_ok_rate": 0.333,
+    "valid_action_rate": 0.333,
+    "mean_seconds": 1.79,
+    "errors": [
+      "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+      "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+      "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+      "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+      "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+      "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+      "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败",
+      "PlannerError: 模型没有返回 tool_calls，原生 function calling 失败"
+    ]
+  },
+  "route_intent_agreement": {
+    "comparable": 12,
+    "same_rate": 0.75,
+    "diff": [
+      {
+        "id": "d02",
+        "json": "database",
+        "function": "mixed"
+      },
+      {
+        "id": "r01",
+        "json": "knowledge",
+        "function": "database"
+      },
+      {
+        "id": "r03",
+        "json": "mixed",
+        "function": "database"
+      }
+    ]
+  },
+  "route_tool_agreement": {
+    "comparable": 12,
+    "same_rate": 0.833,
+    "diff": [
+      {
+        "id": "k03",
+        "json": "kb_search",
+        "function": ""
+      },
+      {
+        "id": "r01",
+        "json": "kb_search",
+        "function": ""
+      }
+    ]
+  },
+  "step_action_agreement": {
+    "comparable": 3,
+    "same_rate": 1.0,
+    "diff": []
+  }
+}
