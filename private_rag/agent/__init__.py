@@ -5,6 +5,7 @@ from private_rag.agent.runtime import (
     AgentResult,
     AgentRuntime,
     build_agent_runtime,
+    build_tool_registry,
 )
 from private_rag.agent.tools import (
     KnowledgeSearchTool,
@@ -29,6 +30,7 @@ __all__ = [
     "ToolRegistry",
     "ToolResult",
     "build_agent_runtime",
+    "build_tool_registry",
     "load_traces",
     "new_trace_id",
 ]

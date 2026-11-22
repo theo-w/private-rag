@@ -592,6 +592,40 @@ SQL 证据却没有更容易编。子集不是全量，样本量不足以当结�
 任务被 `RemoteProtocolError` 断连打断，对应 `m03`/`full` 的 `faithfulness`+`answer_relevancy` 与
 `d01`/`agent` 的 `answer_relevancy` 记为 NaN，平均分只基于有效样本。
 
+## v8 MCP 工具暴露（stdio）
+
+v7 的工具只服务本系统自己的 agentic 链路；v8 把同一份注册表开到外面：起一个 stdio MCP server，任何 MCP 客户端（Claude Code 等）就能直接查本机知识库与授权过的业务表。**不重写检索逻辑**——`build_tool_registry`（从 `build_agent_runtime` 抽出）是 HTTP 服务与 MCP server 共用的唯一装配点，工具描述、表白名单、有界采样与缺配置降级全仓只有一处实现，两个入口不会漂移。
+
+工具只有两个，与 agentic 循环完全同名同参：
+
+- `kb_search`：完整检索链路（dense + BM25 + RRF + rerank + 父子块），入参 `query`。
+- `sql_query`：只读查询业务库，入参 `sql`。它只出现在 `tools/list` 里当 `sources.yaml` 的 sql 源带 `allow_runtime_query: true`——未授权时客户端连这个工具都看不到，与 v7 语义一致；只读护栏（`sql_guard`）照旧：单条 `SELECT`/`WITH`、写关键字与白名单外的表直接拒绝、强制 `LIMIT` 上限。
+
+每次调用返回**统一编号的证据块 + 引用列表**（编号口径与循环内 `render_evidence` 一致：只有带引用的证据块参与编号，`[n]` 与引用列表逐条对得上）：
+
+- `content[].text`：给只看文本的客户端的可读形态——结论、编号证据块、引用列表；
+- `structuredContent`：`summary / evidence / citations / rows / warnings / data`，其中每条引用附 `locator`（块级定位）：文档引用带 `source_uri, doc_id, chunk_index, chunk_count, snippet_offset, page/table`，SQL 引用带护栏改写后的执行 `sql`、`row_count`、`truncated`。`snippet_offset` 是命中片段在返回块文本内的偏移，可直接用于高亮；**文档级字符偏移目前没有入库，定位器不臆造**，等入库侧记录字符偏移后再补（见 `docs/ROADMAP.md` v8 条目）。
+
+### 接入客户端
+
+```bash
+# 前提与 chat_agent.py 相同：已 ingest；要能查库就指向授权了运行时查询的配置
+claude mcp add private-rag -- python3 scripts/serve_mcp.py --sources config/sources.demo.yaml
+
+# 不经客户端也能直接验：stdio 上每行一个 JSON-RPC 2.0 消息
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | python3 scripts/serve_mcp.py --no-rerank
+```
+
+四条必须说清的边界：
+
+- **日志走 stderr**：stdout 只归协议通道，任何往 stdout 打印的内容都会破坏客户端；`serve_mcp.py` 已把日志定向 stderr。
+- **本地模式 Qdrant 同一路径只允许一个进程打开**：这个 server 与 `scripts/serve.py`（或任何直接打开同一 `storage/` 的进程）不能同时跑。
+- **无鉴权**：能启动这个进程的人就能查演示库与白名单表，与 HTTP 服务本地无鉴权同级；表白名单是纵深防御的一层，不是沙箱。
+- **不引入第三方 MCP SDK**：SDK 要求 Python 3.10+，本项目钉在 3.9 且全本地离线。`private_rag/mcp/server.py` 手写实现了用到的四个方法（`initialize` / `ping` / `tools/list` / `tools/call`），协议版本协商、坏行容错与工具层 `isError` 回传都由单测钉死。
+
 ## 只读公网演示（Render）
 
 完整问答依赖本机 Ollama（`bge-m3` 嵌入 + `qwen3.8:27b-mlx` 生成）与 `bge-reranker`，
@@ -770,7 +804,7 @@ CI（`.github/workflows/ci.yml`）在每次 push 与 PR 上跑两个作业：
   其中 `test_readonly_index_ranks_like_lexical_index` 被排除：它要 `import LexicalIndex`，
   而 `retrieval/lexical.py` 模块级导入 `qdrant_client`；该条在 `tests` 作业里照常执行，覆盖没有丢。
 
-覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、OCR 与表格提取、PDF 加载器（文本/扫描件/表格/降级）、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4/v5 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。v7 agentic 部分另覆盖只读 SQL 护栏（写操作、多语句、越权表必须被拒，CTE 与子查询不能误拒）、工具层证据与引用统一编号、检索-行动循环（意图路由、步数与字符预算、无效工具名、模型不可用降级、决策 JSON 的输出预算与解析回退）、轨迹落盘与 `--list`/单条回放 CLI、`/chat/agent` 与 `/traces` 接口；v7.2 另覆盖库内数据目录写进工具描述、采样词驱动关键词回退路由、证据充分性解析与拒答短路、缺口透传进最终提示词、路由提示词不含评估集实体；决策器与工具都是注入的替身，同样不依赖 Ollama 与 Qdrant。
+覆盖：配置解析与环境变量、SQL/网页连接器、jieba 分词与 BM25、RRF 融合、父子块切分与父块扩展、查询改写解析与回退、OCR 与表格提取、PDF 加载器（文本/扫描件/表格/降级）、入库幂等/更新/prune、引用构建与拒答、会话 TTL/容量/历史裁剪、共享引擎 readiness/降级/流式事件、API 同步/流式/错误格式/多会话隔离与并发、演示页路由、v4/v5 数据集校验/确定性指标/Ragas 映射/报告渲染。API 测试注入 fake engine，不加载 Ollama 与真实 Qdrant。v7 agentic 部分另覆盖只读 SQL 护栏（写操作、多语句、越权表必须被拒，CTE 与子查询不能误拒）、工具层证据与引用统一编号、检索-行动循环（意图路由、步数与字符预算、无效工具名、模型不可用降级、决策 JSON 的输出预算与解析回退）、轨迹落盘与 `--list`/单条回放 CLI、`/chat/agent` 与 `/traces` 接口；v7.2 另覆盖库内数据目录写进工具描述、采样词驱动关键词回退路由、证据充分性解析与拒答短路、缺口透传进最终提示词、路由提示词不含评估集实体；决策器与工具都是注入的替身，同样不依赖 Ollama 与 Qdrant。v8 MCP 部分另覆盖协议握手与版本协商、`serve_stdio` 逐行循环对坏行的容错、`tools/list` 与注册表一致（未授权时 `sql_query` 不出现）、`tools/call` 的编号证据与块级定位引用载荷、入参校验、护栏拒绝与检索失败经 `isError` 回传、以及 `build_tool_registry` 装配复用（授权 sql 源挂上、缺配置只剩 `kb_search`）——全部走 mock 与 tmp SQLite。
 
 冒烟测试需要已入库并启动 Ollama：
 
@@ -810,8 +844,11 @@ private_rag/
 │   ├── prompts.py        路由 / 步进 / 最终回答提示词与关键词回退
 │   ├── tools.py          kb_search 与只读 sql_query 工具、证据统一编号
 │   ├── sql_guard.py      运行时 SQL 只读护栏（单条 SELECT、表白名单、强制 LIMIT）
-│   ├── runtime.py        检索-行动循环，按 sources 配置装配可用工具
+│   ├── runtime.py        检索-行动循环，build_tool_registry 为 agentic 与 MCP 共用装配
 │   └── trace.py          决策轨迹落盘（JSONL）与回放渲染
+├── mcp/
+│   ├── server.py         MCP server（stdio JSON-RPC 2.0，手写最小实现）
+│   └── evidence.py       编号证据块 + 带块级定位引用列表的返回载荷
 ├── qa.py                 共享问答引擎（CLI/API 同一条链路，含检索 trace）
 ├── query_rewrite.py      多查询 / HyDE 改写与失败回退
 ├── sessions.py           内存多轮会话、TTL/容量/历史裁剪
@@ -825,6 +862,7 @@ scripts/chat_cli.py       混合检索问答 CLI
 scripts/chat_agent.py     agentic 问答 CLI（意图路由 + 工具调用 + 决策轨迹）
 scripts/replay_trace.py   决策轨迹回放 CLI
 scripts/serve.py          HTTP 服务入口（单 worker）
+scripts/serve_mcp.py      MCP server 入口（stdio，暴露 kb_search / sql_query）
 scripts/init_demo_db.py   生成演示 SQLite 库
 scripts/prepare_eval_kb.py 构建评估专用知识库
 scripts/evaluate.py       策略评估与报告 CLI
@@ -833,7 +871,7 @@ eval/v5_paraphrase_qa.jsonl 18 条口语化/复杂问题（v5）
 eval/v7_agent_qa.jsonl    29 条按工具分类的 agentic 问答（v7，含 3 条带对话历史的指代样本）
 eval/reports/             v4/v5/v7 Markdown / JSON 报告
 tests/                    pytest 单测 + smoke_test.py
-docs/ROADMAP.md           v1–v7 路线与验收标准
+docs/ROADMAP.md           v1–v8 路线与验收标准
 data/docs/                本地文档
 storage/                  向量库与 BM25 索引（已 gitignore，可由 ingest 重建）
 storage/traces/           agentic 决策轨迹 agent.jsonl（已 gitignore，每请求追加一行）

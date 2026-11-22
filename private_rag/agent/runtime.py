@@ -985,19 +985,20 @@ def _log_unreachable_sql_source(label: str, dsn: str, exc: Exception) -> None:
     logger.error("\n".join(lines))
 
 
-def build_agent_runtime(
+def build_tool_registry(
     engine: Any,
     *,
     sources_path: Optional[Path] = None,
-    planner: Optional[Planner] = None,
-    model: str = AGENT_LLM_MODEL,
     sql_rows: int = AGENT_SQL_ROWS,
     allow_sql: bool = True,
-) -> AgentRuntime:
+) -> ToolRegistry:
     """按 sources.yaml 装配工具：知识库检索始终可用，运行时 SQL 需显式开启。
 
     拿不到配置（文件不存在或写坏了）只降级成 kb_search 并打日志，不抛异常：
     只有文档知识库的用法本来就没有这份配置，不该因此起不了服务。
+
+    agentic 循环（build_agent_runtime）与 MCP server（scripts/serve_mcp.py）共用这份
+    装配：表白名单、有界采样、缺配置降级三套语义只有一处实现，两个入口不会漂移。
     """
     tools: list[Tool] = [KnowledgeSearchTool(engine)]
 
@@ -1061,4 +1062,20 @@ def build_agent_runtime(
                     path,
                 )
 
-    return AgentRuntime(ToolRegistry(tools), planner=planner, model=model)
+    return ToolRegistry(tools)
+
+
+def build_agent_runtime(
+    engine: Any,
+    *,
+    sources_path: Optional[Path] = None,
+    planner: Optional[Planner] = None,
+    model: str = AGENT_LLM_MODEL,
+    sql_rows: int = AGENT_SQL_ROWS,
+    allow_sql: bool = True,
+) -> AgentRuntime:
+    """装配 agentic 运行时：工具注册表见 build_tool_registry，决策器与模型在这里挂上。"""
+    registry = build_tool_registry(
+        engine, sources_path=sources_path, sql_rows=sql_rows, allow_sql=allow_sql
+    )
+    return AgentRuntime(registry, planner=planner, model=model)

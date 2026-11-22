@@ -40,11 +40,37 @@ def citation_label(citation: Citation) -> str:
 
 @dataclass
 class ToolBlock:
-    """一段可作为证据的材料；citation 为 None 表示该段材料无法溯源。"""
+    """一段可作为证据的材料；citation 为 None 表示该段材料无法溯源。
+
+    locator 是块级定位字段（source_uri + 块序号/片段偏移等），agentic 循环不读它，
+    供 MCP 等对外通道把「引用指的是哪一块」说清楚（见 private_rag/mcp/evidence.py）。
+    """
 
     label: str
     text: str
     citation: Optional[Citation] = None
+    locator: Optional[dict[str, Any]] = None
+
+
+def chunk_locator(chunk: Any) -> dict[str, Any]:
+    """从检索块的元数据拼块级定位，为后续引用定位器打基础。
+
+    只给检索链路确实带着的信息：文档级字符偏移目前没有入库，这里不臆造；
+    snippet_offset 是命中片段在返回块文本内的偏移，可直接用于高亮定位。
+    """
+    metadata = getattr(chunk, "metadata", None) or {}
+    locator: dict[str, Any] = {"source_uri": str(metadata.get("source_uri") or "")}
+    for key in ("doc_id", "chunk_index", "chunk_count", "page", "table"):
+        value = metadata.get(key)
+        if value is not None:
+            locator[key] = value
+    snippet = str(getattr(chunk, "snippet_text", "") or "")
+    text = str(getattr(chunk, "text", "") or "")
+    if snippet and text:
+        offset = text.find(snippet)
+        if offset >= 0:
+            locator["snippet_offset"] = offset
+    return locator
 
 
 @dataclass
@@ -127,6 +153,7 @@ class KnowledgeSearchTool(Tool):
                 label=citation_label(citation),
                 text=_clip(chunk.text, self.max_chars // max(1, len(chunks)) + 200),
                 citation=citation,
+                locator=chunk_locator(chunk),
             )
             for chunk, citation in zip(chunks, citations)
         ]
@@ -262,10 +289,25 @@ class SqlQueryTool(Tool):
         if truncated:
             summary += f"（已达上限 {self.max_rows} 行，可能还有更多）"
 
+        sql_locator = {
+            "source_uri": citation.source_uri,
+            "table": self.label,
+            # 块级定位对 SQL 就是「哪条查询、取了哪些行」：护栏改写后的 SQL 才是执行体
+            "sql": guarded,
+            "row_count": len(rows),
+            "truncated": truncated,
+        }
         return ToolResult(
             True,
             summary=summary,
-            blocks=[ToolBlock(label=f"SQL 查询（表 {self.label}）", text=_clip(body, self.max_chars), citation=citation)],
+            blocks=[
+                ToolBlock(
+                    label=f"SQL 查询（表 {self.label}）",
+                    text=_clip(body, self.max_chars),
+                    citation=citation,
+                    locator=sql_locator,
+                )
+            ],
             rows=len(rows),
             warnings=warnings,
             data={"sql": guarded, "columns": columns, "truncated": truncated},
