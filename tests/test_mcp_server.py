@@ -1,0 +1,413 @@
+"""MCP server 测试：JSON-RPC 消息面、stdio 通道、只读工具面与入口 CLI。
+
+不打模型、不联网、不打开真实 Qdrant：工具用假引擎，入口脚本用打桩的 build_engine。
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+
+import pytest
+
+from private_rag.mcp.server import (
+    INVALID_PARAMS,
+    INVALID_REQUEST,
+    METHOD_NOT_FOUND,
+    PARSE_ERROR,
+    PROTOCOL_VERSION,
+    MCPServer,
+)
+from private_rag.mcp.tools import McpTool, ToolOutcome, build_mcp_tools
+from private_rag.qa import QaResult, Readiness, RetrievalTrace
+from private_rag.retrieval.hybrid import RetrievedChunk
+
+
+def make_chunk(index: int, *, text: str = "", page=None) -> RetrievedChunk:
+    metadata = {
+        "source_type": "file",
+        "title": f"文档{index}",
+        "source_uri": f"data/docs/{index}.md",
+    }
+    if page is not None:
+        metadata["page"] = page
+    return RetrievedChunk(
+        point_id=f"p{index}",
+        text=text or f"这是第 {index} 段资料。",
+        metadata=metadata,
+        snippet_text=text or f"第 {index} 段",
+    )
+
+
+class FakeEngine:
+    """只实现 MCP 工具用到的三个方法。"""
+
+    def __init__(self, chunks=(), *, ready: bool = True, reasons=()):
+        self.chunks = list(chunks)
+        self.ready = ready
+        self.reasons = list(reasons)
+
+    def readiness(self) -> Readiness:
+        return Readiness(
+            ready=self.ready,
+            vector_count=len(self.chunks),
+            lexical_available=True,
+            reranker_available=True,
+            reasons=list(self.reasons),
+            collection_exists=self.ready,
+        )
+
+    def retrieve_with_trace(self, query: str, options) -> RetrievalTrace:
+        return RetrievalTrace(
+            chunks=list(self.chunks),
+            used_lexical=True,
+            used_rerank=True,
+            used_parent=True,
+            queries=[query],
+            query_rewrite="off",
+            query_count=1,
+            context_chars=1234,
+        )
+
+    def answer(self, question: str, *, options=None, history=None) -> QaResult:
+        from private_rag.generation import REFUSAL, build_citations
+
+        citations = build_citations(self.chunks)
+        return QaResult(
+            answer="橙子富含维生素 C。[1]" if citations else REFUSAL,
+            citations=citations,
+            retrieved=len(self.chunks),
+            used_lexical=True,
+            used_rerank=True,
+            used_parent=True,
+            query_rewrite="off",
+            query_count=1,
+            context_chars=1234,
+        )
+
+
+def make_server(chunks=(), **engine_kwargs) -> MCPServer:
+    return MCPServer(build_mcp_tools(FakeEngine(chunks, **engine_kwargs)))
+
+
+def call(server: MCPServer, method: str, params=None, msg_id=1) -> dict:
+    message = {"jsonrpc": "2.0", "id": msg_id, "method": method}
+    if params is not None:
+        message["params"] = params
+    return server.handle(message)
+
+
+def serve_lines(server: MCPServer, text: str) -> list[dict]:
+    out = io.StringIO()
+    assert server.serve_stdio(io.StringIO(text), out) == 0
+    return [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+
+
+# initialize / ping / 通知
+
+
+def test_initialize_echoes_known_protocol_version():
+    result = call(make_server(), "initialize", {"protocolVersion": "2025-03-26"})["result"]
+    assert result["protocolVersion"] == "2025-03-26"
+    assert result["capabilities"]["tools"]["listChanged"] is False
+    assert result["serverInfo"]["name"] == "private-rag"
+    assert result["serverInfo"]["version"]
+
+
+def test_initialize_falls_back_to_own_version_for_unknown_request():
+    result = call(make_server(), "initialize", {"protocolVersion": "1999-01-01"})["result"]
+    assert result["protocolVersion"] == PROTOCOL_VERSION
+
+
+def test_initialize_without_params_still_works():
+    response = call(make_server(), "initialize", msg_id=7)
+    assert "protocolVersion" in response["result"]
+
+
+def test_ping_returns_empty_result():
+    assert call(make_server(), "ping") == {"jsonrpc": "2.0", "id": 1, "result": {}}
+
+
+def test_notifications_produce_no_response():
+    server = make_server()
+    assert server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
+    assert server.handle({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1}}) is None
+    # 通知即使带 id 也不回应
+    assert server.handle({"jsonrpc": "2.0", "id": 5, "method": "notifications/progress"}) is None
+    # 请求漏了 id 也要回应，否则客户端会一直等
+    assert call(server, "tools/list", msg_id=None)["result"]["tools"]
+
+
+# 协议错误
+
+
+def test_message_without_method_is_invalid_request():
+    assert call(make_server(), "", msg_id=3)["error"]["code"] == INVALID_REQUEST
+
+
+def test_params_must_be_object():
+    assert call(make_server(), "tools/call", "not-an-object")["error"]["code"] == INVALID_PARAMS
+
+
+def test_unknown_method_is_method_not_found():
+    response = call(make_server(), "unknown/method")
+    assert response["error"]["code"] == METHOD_NOT_FOUND
+    assert "unknown/method" in response["error"]["message"]
+
+
+def test_resources_and_prompts_lists_are_empty_not_errors():
+    server = make_server()
+    assert call(server, "resources/list")["result"] == {"resources": []}
+    assert call(server, "resources/templates/list")["result"] == {"resourceTemplates": []}
+    assert call(server, "prompts/list")["result"] == {"prompts": []}
+
+
+# tools/list
+
+
+def test_tools_list_exposes_only_read_only_kb_tools():
+    tools = call(make_server(), "tools/list")["result"]["tools"]
+    assert [tool["name"] for tool in tools] == ["kb_search", "ask"]
+    for tool in tools:
+        assert tool["inputSchema"]["type"] == "object"
+        assert tool["outputSchema"]["required"]
+        assert tool["annotations"]["readOnlyHint"] is True
+
+
+def test_empty_registry_lists_no_tools():
+    assert MCPServer([]).tool_definitions() == []
+    assert call(MCPServer([]), "tools/list")["result"]["tools"] == []
+
+
+def test_server_requires_named_tools():
+    class Nameless(McpTool):
+        def run(self, args):
+            return ToolOutcome(True, text="x")
+
+    with pytest.raises(ValueError):
+        MCPServer([Nameless()])
+
+
+# tools/call
+
+
+def test_tools_call_kb_search_returns_text_and_structured_content():
+    server = make_server([make_chunk(1, page=3), make_chunk(2)])
+    response = call(server, "tools/call", {"name": "kb_search", "arguments": {"query": "橙子"}}, msg_id=42)
+
+    assert response["id"] == 42
+    assert response["result"]["isError"] is False
+    assert "[1]" in response["result"]["content"][0]["text"]
+    assert response["result"]["structuredContent"]["citations"][0]["page"] == 3
+
+
+def test_tools_call_ask_returns_answer_and_citations():
+    response = call(make_server([make_chunk(1)]), "tools/call", {"name": "ask", "arguments": {"question": "橙子"}})
+    assert response["result"]["isError"] is False
+    assert response["result"]["structuredContent"]["answer"] == "橙子富含维生素 C。[1]"
+    assert response["result"]["content"][0]["text"].startswith("橙子富含维生素 C。")
+
+
+def test_tools_call_with_no_arguments_defaults_to_empty():
+    response = call(make_server(), "tools/call", {"name": "kb_search"})
+    assert response["result"]["isError"] is True
+    assert "query" in response["result"]["content"][0]["text"]
+
+
+def test_tools_call_missing_name_is_invalid_params():
+    assert call(make_server(), "tools/call", {})["error"]["code"] == INVALID_PARAMS
+    assert call(make_server(), "tools/call", {"name": "  "})["error"]["code"] == INVALID_PARAMS
+
+
+def test_tools_call_unknown_tool_is_invalid_params():
+    response = call(make_server(), "tools/call", {"name": "ingest", "arguments": {}})
+    assert response["error"]["code"] == INVALID_PARAMS
+    assert "ingest" in response["error"]["message"]
+
+
+def test_tools_call_arguments_must_be_object():
+    response = call(make_server(), "tools/call", {"name": "kb_search", "arguments": "橙子"})
+    assert response["result"]["isError"] is True
+    assert "arguments" in response["result"]["content"][0]["text"]
+
+
+def test_tool_failure_is_returned_as_is_error_result():
+    response = call(make_server(), "tools/call", {"name": "kb_search", "arguments": {"query": ""}})
+    assert "error" not in response
+    assert response["result"]["isError"] is True
+    assert "失败原因" in response["result"]["content"][0]["text"]
+
+
+def test_uncaught_tool_exception_does_not_break_the_server():
+    class Boom(McpTool):
+        name = "boom"
+
+        def run(self, args):
+            raise RuntimeError("意外异常")
+
+    response = call(MCPServer([Boom()]), "tools/call", {"name": "boom", "arguments": {}})
+    assert response["result"]["isError"] is True
+    assert "RuntimeError" in response["result"]["content"][0]["text"]
+
+
+# stdio 通道
+
+
+def test_serve_stdio_answers_each_line_in_order():
+    server = make_server([make_chunk(1)])
+    responses = serve_lines(
+        server,
+        "\n".join(
+            [
+                json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-10-22"}}),
+                json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+                json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "tools/call",
+                        "params": {"name": "ask", "arguments": {"question": "橙子"}},
+                    }
+                ),
+                "",
+            ]
+        ),
+    )
+    assert [r["id"] for r in responses] == [1, 2, 3]
+    assert responses[0]["result"]["protocolVersion"] == "2024-10-22"
+    assert [t["name"] for t in responses[1]["result"]["tools"]] == ["kb_search", "ask"]
+    assert responses[2]["result"]["structuredContent"]["no_evidence"] is False
+
+
+def test_serve_stdio_reports_bad_lines_without_stopping():
+    server = make_server([make_chunk(1)])
+    responses = serve_lines(
+        server,
+        "\n".join(
+            [
+                "{不是 JSON",
+                json.dumps([1, 2]),
+                json.dumps({"jsonrpc": "2.0", "id": 9, "method": "ping"}),
+            ]
+        ),
+    )
+    assert responses[0]["error"]["code"] == PARSE_ERROR
+    assert responses[1]["error"]["code"] == INVALID_REQUEST
+    assert responses[2]["result"] == {}
+
+
+def test_serve_stdio_exits_cleanly_on_eof():
+    assert make_server().serve_stdio(io.StringIO(""), io.StringIO()) == 0
+
+
+def test_stdout_keeps_chinese_readable():
+    server = make_server([make_chunk(1, text="橙子富含维生素 C")])
+    raw = io.StringIO()
+    server.serve_stdio(
+        io.StringIO(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "kb_search", "arguments": {"query": "橙子"}},
+                }
+            )
+        ),
+        raw,
+    )
+    assert "橙子富含维生素 C" in raw.getvalue()
+    assert "\\u" not in raw.getvalue()
+
+
+def test_response_is_single_line_json():
+    server = make_server([make_chunk(1, text="第一行\n第二行")])
+    raw = io.StringIO()
+    server.serve_stdio(
+        io.StringIO(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "kb_search", "arguments": {"query": "x"}},
+                }
+            )
+        ),
+        raw,
+    )
+    assert len(raw.getvalue().rstrip("\n").split("\n")) == 1
+
+
+# 入口 CLI（scripts/ 不是包，按路径加载）
+
+
+@pytest.fixture
+def clean_rerank_env(monkeypatch):
+    monkeypatch.delenv("RAG_DISABLE_RERANK", raising=False)
+
+
+def load_script():
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("serve_mcp", root / "scripts" / "serve_mcp.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_script_no_rerank_sets_env_before_config(clean_rerank_env):
+    load_script().parse_args(["--no-rerank", "--top-k", "5"])
+    assert os.getenv("RAG_DISABLE_RERANK") == "1"
+
+
+def test_script_top_k_default_matches_config(clean_rerank_env):
+    import private_rag.config as config
+
+    assert load_script().parse_args([]).top_k == config.TOP_K_RERANK
+
+
+def test_script_list_tools_prints_definitions_without_opening_storage(clean_rerank_env, monkeypatch, capsys):
+    import private_rag.qa as qa
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("--list-tools 不该打开知识库")
+
+    monkeypatch.setattr(qa, "build_engine", refuse)
+    module = load_script()
+
+    assert module.main(["--list-tools"]) == 0
+    definitions = json.loads(capsys.readouterr().out)
+    assert [d["name"] for d in definitions] == ["kb_search", "ask"]
+    assert definitions[0]["inputSchema"]["required"] == ["query"]
+
+
+def test_script_exits_with_storage_hint_when_kb_cannot_open(clean_rerank_env, monkeypatch, capsys):
+    import private_rag.qa as qa
+
+    def locked(*args, **kwargs):
+        raise RuntimeError("Storage folder is already accessed by another instance of Qdrant client")
+
+    monkeypatch.setattr(qa, "build_engine", locked)
+    module = load_script()
+
+    assert module.main([]) == 3
+    captured = capsys.readouterr()
+    assert captured.err.startswith("❌ 知识库打不开")
+    assert "scripts/serve.py" in captured.err
+
+
+def test_script_serves_stdio_with_real_tools(clean_rerank_env, monkeypatch, capsys):
+    import private_rag.qa as qa
+
+    monkeypatch.setattr(qa, "build_engine", lambda **kwargs: FakeEngine([make_chunk(1)]))
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"))
+    module = load_script()
+
+    assert module.main(["--no-rerank"]) == 0
+    captured = capsys.readouterr()
+    assert [t["name"] for t in json.loads(captured.out)["result"]["tools"]] == ["kb_search", "ask"]
+    assert "已启动" in captured.err
