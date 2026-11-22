@@ -1,0 +1,6 @@
+{"id": "v6st-01", "question": "库存盘点表中键盘的数量和单价分别是多少？", "reference": "键盘数量 12，单价 99.5。", "evidence": ["键盘 12 99.5"], "source": "eval/fixtures/v6_scan_table.md", "category": "ingestion", "answerable": true}
+{"id": "v6st-02", "question": "库存盘点表中鼠标的数量和单价分别是多少？", "reference": "鼠标数量 30，单价 45.0。", "evidence": ["鼠标 30 45.0"], "source": "eval/fixtures/v6_scan_table.md", "category": "ingestion", "answerable": true}
+{"id": "v6st-03", "question": "库存盘点表的表格有哪几列？", "reference": "三列：产品、数量、单价。", "evidence": ["产品 数量 单价"], "source": "eval/fixtures/v6_scan_table.md", "category": "ingestion", "answerable": true}
+{"id": "v6st-04", "question": "这份盘点表正文里的备注写了什么？", "reference": "备注：以上为草稿数据。", "evidence": ["以上为草稿数据"], "source": "eval/fixtures/v6_scan_table.md", "category": "ingestion", "answerable": true}
+{"id": "v6st-05", "question": "盘点表里打印机的数量是多少？", "reference": "", "evidence": [], "source": "", "category": "refusal", "answerable": false}
+{"id": "v6st-06", "question": "按盘点表计算，键盘按单价卖出的总金额是多少？", "reference": "12 × 99.5 = 1194。", "evidence": ["键盘 12 99.5"], "source": "eval/fixtures/v6_scan_table.md", "category": "multi_step", "answerable": true}

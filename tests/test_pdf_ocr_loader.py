@@ -158,27 +158,45 @@ def test_load_pdf_with_table():
 
 def test_load_pdf_scanned_with_ocr():
     """扫描件 PDF 使用 OCR 提取文本。"""
+    from PIL import Image
+    import os
+
     mock_page = MagicMock()
     mock_page.extract_text.return_value = ""  # 扫描件无文本
 
+    mock_image = Image.new("RGB", (200, 120), "white")
+    mock_page.to_image.return_value = MagicMock(
+        original=mock_image, to_pil=None
+    )
+
     mock_ocr_result = MagicMock()
     mock_ocr_result.text = "OCR 识别结果。"
+    mock_ocr_result.boxes = []
 
     mock_pp = _make_mock_pdfplumber([mock_page])
 
-    with patch("private_rag.ingestion.files.pdfplumber", mock_pp):
-        with patch("private_rag.ingestion.ocr.ocr_page", return_value=mock_ocr_result):
-            docs, errors = _load_pdf_with_pdfplumber(
-                Path("/tmp/test.pdf"),
-                "data/docs/test.pdf",
-                "file:/tmp/test.pdf",
-                "2026-01-01T00:00:00",
-                ["test"],
-            )
+    # 关闭版面表格提取，避免测试依赖 rapid-table
+    old_env = os.environ.get("RAG_DISABLE_SCAN_TABLE")
+    os.environ["RAG_DISABLE_SCAN_TABLE"] = "1"
+    try:
+        with patch("private_rag.ingestion.files.pdfplumber", mock_pp):
+            with patch("private_rag.ingestion.ocr.ocr_image", return_value=mock_ocr_result):
+                docs, errors = _load_pdf_with_pdfplumber(
+                    Path("/tmp/test.pdf"),
+                    "data/docs/test.pdf",
+                    "file:/tmp/test.pdf",
+                    "2026-01-01T00:00:00",
+                    ["test"],
+                )
 
-    assert len(docs) == 1
-    assert docs[0].text == "OCR 识别结果。"
-    assert docs[0].extra["scanned"] is True
+        assert len(docs) == 1
+        assert docs[0].text == "OCR 识别结果。"
+        assert docs[0].extra["scanned"] is True
+    finally:
+        if old_env is not None:
+            os.environ["RAG_DISABLE_SCAN_TABLE"] = old_env
+        else:
+            os.environ.pop("RAG_DISABLE_SCAN_TABLE", None)
 
 
 def test_load_pdf_scanned_no_ocr_backend():
@@ -312,3 +330,151 @@ def test_load_file_documents_pdf_fallback(tmp_path):
 
     assert len(docs) == 1
     assert "回退文本" in docs[0].text
+
+
+# --- 联动单测：扫描件 + 版面表格 + 正文过滤 ---
+
+
+def test_load_pdf_scanned_with_scan_tables_and_filter(tmp_path):
+    """端到端测试：扫描件页面同时有 OCR 正文和版面表格。
+
+    验证：
+    1. 表格作为独立 SourceDocument 入库
+    2. 正文文本不包含表格区域内容（被 filter_ocr_result 过滤）
+    3. 页码和 scanned 标记正确
+    """
+    from PIL import Image
+    import os
+
+    # 模拟扫描件页面：无文本，需要 OCR
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = ""
+    mock_page.extract_tables.return_value = []
+
+    # 模拟渲染图像
+    mock_image = Image.new("RGB", (400, 300), "white")
+    mock_page.to_image.return_value = MagicMock(
+        original=mock_image, to_pil=None
+    )
+
+    # 模拟 OCR 结果：包含正文和表格区域的文本框
+    # 表格区域：(50, 50) 到 (200, 150)
+    # 表格内文本框：中心在 (75, 75) → 应被过滤
+    # 表格外文本框：中心在 (300, 250) → 应保留
+    table_box = [[60, 60], [90, 60], [90, 90], [60, 90]]  # 中心 (75, 75)
+    outside_box = [[280, 240], [320, 240], [320, 270], [280, 270]]  # 中心 (300, 255)
+
+    mock_ocr_result = MagicMock()
+    mock_ocr_result.text = "表格内容\n正文内容"
+    mock_ocr_result.boxes = [
+        (table_box, "表格内容", 0.95),
+        (outside_box, "正文内容", 0.92),
+    ]
+
+    mock_pp = _make_mock_pdfplumber([mock_page])
+
+    # 模拟版面表格提取结果（带 rects 用于过滤）
+    mock_scan_result = MagicMock()
+    mock_scan_result.tables = [
+        [["姓名", "年龄"], ["张三", "28"]],
+    ]
+    mock_scan_result.rects = [(50, 50, 200, 150)]
+
+    # 开启版面表格提取
+    old_env = os.environ.get("RAG_DISABLE_SCAN_TABLE")
+    os.environ.pop("RAG_DISABLE_SCAN_TABLE", None)
+    try:
+        with patch("private_rag.ingestion.files.pdfplumber", mock_pp):
+            with patch("private_rag.ingestion.ocr.ocr_image", return_value=mock_ocr_result):
+                with patch(
+                    "private_rag.ingestion.table_layout.extract_scan_tables",
+                    return_value=mock_scan_result,
+                ):
+                    docs, errors = _load_pdf_with_pdfplumber(
+                        Path("/tmp/scanned.pdf"),
+                        "data/docs/scanned.pdf",
+                        "file:/tmp/scanned.pdf",
+                        "2026-01-01T00:00:00",
+                        ["test"],
+                    )
+
+        # 应该有 2 个文档：表格 + 正文
+        assert len(docs) == 2
+        # 表格文档
+        assert docs[0].extra["table"] == "scanned_table_1"
+        assert docs[0].extra["scanned"] is True
+        assert "姓名" in docs[0].text
+        # 正文文档：表格内容应被过滤
+        assert docs[1].extra["page"] == 1
+        assert docs[1].extra["scanned"] is True
+        assert "正文内容" in docs[1].text
+        assert "表格内容" not in docs[1].text
+    finally:
+        if old_env is not None:
+            os.environ["RAG_DISABLE_SCAN_TABLE"] = old_env
+        else:
+            os.environ.pop("RAG_DISABLE_SCAN_TABLE", None)
+
+
+def test_load_pdf_scanned_with_table_document(tmp_path):
+    """端到端测试：扫描件页面有版面表格，表格作为独立文档入库。"""
+    from PIL import Image
+    import os
+
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = ""
+    mock_page.extract_tables.return_value = []
+
+    mock_image = Image.new("RGB", (400, 300), "white")
+    mock_page.to_image.return_value = MagicMock(
+        original=mock_image, to_pil=None
+    )
+
+    # OCR 结果：只有表格区域外的正文
+    outside_box = [[280, 240], [320, 240], [320, 270], [280, 270]]
+    mock_ocr_result = MagicMock()
+    mock_ocr_result.text = "正文内容"
+    mock_ocr_result.boxes = [(outside_box, "正文内容", 0.92)]
+
+    mock_pp = _make_mock_pdfplumber([mock_page])
+
+    # 模拟版面表格提取结果
+    mock_scan_result = MagicMock()
+    mock_scan_result.tables = [
+        [["姓名", "年龄"], ["张三", "28"]],
+    ]
+    mock_scan_result.rects = [(50, 50, 200, 150)]
+
+    old_env = os.environ.get("RAG_DISABLE_SCAN_TABLE")
+    os.environ.pop("RAG_DISABLE_SCAN_TABLE", None)  # 开启版面表格
+    try:
+        with patch("private_rag.ingestion.files.pdfplumber", mock_pp):
+            with patch("private_rag.ingestion.ocr.ocr_image", return_value=mock_ocr_result):
+                with patch(
+                    "private_rag.ingestion.table_layout.extract_scan_tables",
+                    return_value=mock_scan_result,
+                ):
+                    docs, errors = _load_pdf_with_pdfplumber(
+                        Path("/tmp/scanned.pdf"),
+                        "data/docs/scanned.pdf",
+                        "file:/tmp/scanned.pdf",
+                        "2026-01-01T00:00:00",
+                        ["test"],
+                    )
+
+        # 应该有 2 个文档：表格 + 正文
+        assert len(docs) == 2
+        # 表格文档
+        assert docs[0].extra["table"] == "scanned_table_1"
+        assert docs[0].extra["scanned"] is True
+        assert "姓名" in docs[0].text
+        assert "张三" in docs[0].text
+        # 正文文档
+        assert docs[1].extra["page"] == 1
+        assert docs[1].extra["scanned"] is True
+        assert "正文内容" in docs[1].text
+    finally:
+        if old_env is not None:
+            os.environ["RAG_DISABLE_SCAN_TABLE"] = old_env
+        else:
+            os.environ.pop("RAG_DISABLE_SCAN_TABLE", None)

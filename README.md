@@ -221,6 +221,7 @@ event: error      data: {"code":"generation_failed","message":"...","request_id"
 | `RAG_MAX_HISTORY_MESSAGE_CHARS` | 800 | 历史中单条消息截断长度 |
 | `RAG_DISABLE_RERANK` | 未设置 | 设为 `1/true/yes/on` 时跳过 reranker |
 | `RAG_DISABLE_AGENT_NONE_PROBE` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：路由判 `none` 就跳过检索直接拒答（默认先用原问题做一次验证检索） |
+| `RAG_AGENT_PLANNER_MODE` | `json` | 设为 `function` 时路由/步进决策改走原生 function calling（同一提示词与预算，见 `ask_tool_json`）；非法值归一为 `json`。两条通道的对比读数见 `eval/reports/fc_comparison_report.md` |
 
 ## v4 自动评估（Ragas）
 
@@ -370,6 +371,7 @@ v6 为 PDF 文件接入 **OCR 与表格提取**：扫描件 PDF 经 OCR 后可�
   - **扫描件 PDF**：页面文本为空或没有实质字符（汉字/拉丁字母）时，判定为扫描件，自动渲染页面 → OCR 识别文字。
 - OCR 渲染固定 **200 dpi**（`OCR_RENDER_RESOLUTION`）：`pdfplumber` 默认 72 dpi，实测中文会认错（"产品库存" → "产品本存"，置信度 0.79），200 dpi 下整句正确、置信度约 0.98。
 - 表格作为独立的 `SourceDocument` 入库，获得独立的向量与 BM25 索引；引用中显示表名与页码。
+- **扫描件上的表格**走版面识别（`private_rag/ingestion/table_layout.py`）：OpenCV 形态学（横/纵结构线开运算）在位图上检测网格线、定位表格矩形；裁剪后的区域先白色补齐成方形再交给 `rapid-table`（SLANet-Plus ONNX，避免引擎 488×488 非等比拉伸扭曲结构）；整页 RapidOCR 文本框按表格区域裁剪、平移到 crop 坐标后以 `ocr_results` 传给引擎拼带文本的 HTML（引擎不跑内部 OCR），含 rowspan/colspan 的单元格由解析展开。正文侧用 `filter_ocr_result` 丢弃中心落在表格矩形内的 OCR 框，避免表格内容在正文里重复一份。总开关 `RAG_DISABLE_SCAN_TABLE`，模型路径可用 `RAG_SCAN_TABLE_MODEL` 预置（离线）。
 - 父子块切分对 OCR 与表格透明：正文与表格各自走相同的父子块流程。
 
 ### 依赖安装
@@ -378,11 +380,12 @@ OCR 功能为**可选依赖**，不安装时 PDF 仍按现有方式处理（文�
 
 ```bash
 # 安装 OCR 依赖（可选）
-pip install pdfplumber rapidocr-onnxruntime
+pip install pdfplumber rapidocr-onnxruntime rapid-table
 ```
 
 - `pdfplumber 0.11.7`：PDF 渲染 + 表格提取。
 - `rapidocr-onnxruntime 1.4.4`：中英 OCR，ONNX 模型内置（约 100MB），无需联网下载。
+- `rapid-table 3.0.2`：扫描件版面表格结构识别（SLANet-Plus ONNX），包内自带模型文件，离线可用。
 
 ### 降级行为
 
@@ -391,6 +394,8 @@ pip install pdfplumber rapidocr-onnxruntime
 | 未安装 `pdfplumber` | 回退到 `PyPDFLoader`（文本提取，无 OCR/表格） |
 | 未安装 `rapidocr-onnxruntime` | 扫描件页面跳过 OCR，文本为空则记录 warning |
 | OCR 推理失败 | 该页跳过，记录 warning，不影响其他文件 |
+| 未安装 `rapid-table` 或 SLANet 模型缺失 | 版面表格提取整体跳过（引擎初始化失败按进程缓存），扫描件正文 OCR 照常入库 |
+| 单个表格区域识别失败 | 该区域跳过并记录 warning，其余区域与正文不受影响 |
 
 降级行为在入库日志中输出 warning，不阻塞其他文件。
 
@@ -399,10 +404,12 @@ pip install pdfplumber rapidocr-onnxruntime
 - 扫描 PDF 入库后，OCR 文本进入向量与 BM25 索引，问答时可被召回。
 - 表格作为独立文档入库，引用中显示 `表 {表名}_table_{N}` 与页码。
 - 文本型 PDF 继续正常工作，不退回 v5 功能。
+- 版面表格消融（`eval/v6_scan_table.jsonl` 6 条，`full` 配置，独立两库对照）：开启后 `evidence_hit@3` 0.2→1.0、`context_precision@3` 0.2→0.5，两侧 `answer_rate` 与 `refusal_accuracy` 持平；报告见 `eval/reports/v6_scan_table_on.md` 与 `eval/reports/v6_scan_table_off.md`。
 
 ### 已知限制
 
-- **结构化表格只对文本型 PDF 有效**：`extract_tables` 依赖页面里的文字对象与绘制的边框线。扫描件页面是一整张位图，两者都不存在，因此扫描件只能拿到整页 OCR 文本，提不出单元格（版面表格识别属于后续版本范围）。
+- **结构化表格需要边框线**：文本型 PDF 的 `extract_tables` 依赖页面文字对象与绘制的边框线；扫描件的版面识别依赖位图上可检测的网格线（OpenCV 形态学）。无边框、纯靠文字对齐排版的表格两条路都提不出，仍以整页 OCR 正文入库。
+- **扫描件单元格文本按 OCR 框中心匹配**：合并单元格由 SLANet 的 HTML span 声明展开；网格过小（<60×20 px）、线条断裂或结构复杂时可能漏检或错位，消融 fixture 未覆盖复杂合并表格。
 - **表格需要有边框线**：只是靠文字对齐排版的表格，`extract_tables` 默认策略识别不出来（实测返回 0 张）；这类内容仍会以整页正文的形式被检索到。
 - **OCR 精度**：清晰印刷体效果好，手写体、低分辨率、倾斜页面识别率下降；200 dpi 渲染可缓解低分辨率这一类。
 
@@ -447,6 +454,7 @@ RAG_AGENT_SOURCES_CONFIG=config/sources.demo.yaml python3 scripts/serve.py --por
 `none` 不再是一张免检通行证：路由器判 `none` 只说明它「猜两侧都查不到」，而拒答的正当理由只有「查过了，证据里没有」。所以判成 `none` 时不再直接拒答，而是先用原问题做一次知识库验证检索——查到东西就照常作答，并把意图按实际作答依据报成 `knowledge`；查不到才返回拒答哨兵，`stop_reason` 记 `no_evidence`。代价是一条真正无关的问题多花一次 `kb_search`（仍受 `RAG_AGENT_MAX_STEPS` 约束）；`RAG_DISABLE_AGENT_NONE_PROBE=1` 退回「判 none 就直接拒答」的旧行为，知识库工具不可用时同样走旧行为。路由提示词同步收紧准入：`none` 只留给实时信息、天气、新闻、外部网站内容、主观偏好这类明确在本系统之外的事实，问到某条业务记录、某个字段或本系统自身的文档时一律先取证——字段里到底有没有，要查过才知道。v7 评估集 26 条复跑（`eval/reports/v7_2_nonegate_report.md`）：路由判 `none` 的样本从 1 条变成 0 条、`no_retrieval` 也从 1 条降到 0 条，4 条应拒答样本仍全部拒答（`refusal_accuracy` 1.000 持平），`citation_rate` 0.955→1.000，平均工具调用 1.31→1.42。
 
 决策走 JSON 模式，路由与步进两次调用共用 `RAG_AGENT_PLANNER_TOKENS`（默认 2000）输出预算。本机默认模型是推理型，会先输出一段不可见的思考内容：预算给小了（实跑时用的 400）模型只吐思考、正文为空，路由就会整段回退到关键词判断。轨迹里会写明回退原因，看到「模型输出中没有 JSON 对象」就先怀疑这个预算。
+同一份提示词也量过原生 function calling（2026-11-22，`scripts/compare_fc_decisions.py`，读数 `eval/reports/fc_comparison_report.md`）：默认模型 qwen3.8:27b-mlx 路由 12/12、步进 3/3 都返回了可用的 `tool_calls`，路由单条均耗时 18.8 秒（快于 JSON 模式的 27.0 秒），两通道意图一致率 0.75；对照组 qwen2.5:7b-instruct 只有 4/12 成功——提示词仍写着「只输出 JSON」，该模型多数情况直接吐 JSON 文本而不调工具，失败数含这个混淆，不能读成模型不支持工具调用。JSON 模式仍是默认：任何模型可用，切默认前需先跑 29 条评估确认无回归；`RAG_AGENT_PLANNER_MODE=function` 仅作实验开关。
 
 ### 命令行
 

@@ -198,3 +198,75 @@ def test_ocr_page_passes_pil_image_to_ocr_image():
     passed = mock_ocr_image.call_args[0][0]
     assert isinstance(passed, Image.Image)
     assert result.text == "识别结果"
+
+
+# --- _merge_lines ---
+
+
+def test_merge_lines_empty():
+    from private_rag.ingestion.ocr import _merge_lines
+
+    assert _merge_lines([]) == ""
+
+
+def test_merge_lines_single():
+    from private_rag.ingestion.ocr import _merge_lines
+
+    box = [[0, 0], [100, 0], [100, 10], [0, 10]]
+    assert _merge_lines([(box, "hello", 0.9)]) == "hello"
+
+
+def test_merge_lines_same_row():
+    from private_rag.ingestion.ocr import _merge_lines
+
+    box1 = [[0, 0], [50, 0], [50, 10], [0, 10]]
+    box2 = [[60, 2], [110, 2], [110, 12], [60, 12]]
+    boxes = [(box1, "第一", 0.9), (box2, "第二", 0.9)]
+    assert _merge_lines(boxes) == "第一 第二"
+
+
+def test_merge_lines_different_rows():
+    from private_rag.ingestion.ocr import _merge_lines
+
+    box1 = [[0, 0], [50, 0], [50, 10], [0, 10]]
+    box2 = [[0, 50], [50, 50], [50, 60], [0, 60]]
+    boxes = [(box1, "第一行", 0.9), (box2, "第二行", 0.9)]
+    assert _merge_lines(boxes) == "第一行\n第二行"
+
+
+# --- filter_ocr_result ---
+
+
+def test_filter_ocr_result_no_rects():
+    from private_rag.ingestion.ocr import filter_ocr_result
+
+    box = [[10, 10], [30, 10], [30, 20], [10, 20]]
+    result = OCRResult(text="hello", boxes=[(box, "hello", 0.9)])
+    filtered = filter_ocr_result(result, [])
+    assert filtered.text == "hello"
+
+
+def test_filter_ocr_result_all_inside():
+    from private_rag.ingestion.ocr import filter_ocr_result
+
+    box = [[10, 10], [30, 10], [30, 20], [10, 20]]
+    result = OCRResult(text="in table", boxes=[(box, "in table", 0.9)])
+    filtered = filter_ocr_result(result, [(0, 0, 100, 50)])
+    assert filtered.text == ""
+
+
+def test_filter_ocr_result_outside_survives():
+    from private_rag.ingestion.ocr import filter_ocr_result
+
+    box = [[200, 10], [220, 10], [220, 20], [200, 20]]
+    result = OCRResult(text="outside", boxes=[(box, "outside", 0.9)])
+    filtered = filter_ocr_result(result, [(0, 0, 100, 50)])
+    assert "outside" in filtered.text
+
+
+def test_filter_ocr_result_empty_boxes():
+    from private_rag.ingestion.ocr import filter_ocr_result
+
+    result = OCRResult(text="", boxes=[])
+    filtered = filter_ocr_result(result, [(0, 0, 100, 50)])
+    assert filtered.text == ""

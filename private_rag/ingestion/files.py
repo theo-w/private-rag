@@ -90,40 +90,100 @@ def _load_pdf_with_pdfplumber(path: Path, relative: str, source_key: str,
                 text = page.extract_text() or ""
                 scanned = _is_scanned(text)
 
-                # 扫描件：OCR
+                # 扫描件：OCR + 版面表格提取
                 if scanned:
-                    from private_rag.ingestion.ocr import ocr_page as _ocr_page
-                    ocr_result = _ocr_page(page)
-                    text = ocr_result.text
-                    if not text.strip():
+                    from private_rag.ingestion.ocr import render_page as _render_page
+                    from private_rag.ingestion.ocr import ocr_image as _ocr_image
+                    from private_rag.ingestion.ocr import filter_ocr_result as _filter_ocr
+                    from private_rag.ingestion.ocr import OCRResult
+
+                    # 渲染一次（避免重复渲染）
+                    image = _render_page(page)
+
+                    # OCR 识别
+                    ocr_result = _ocr_image(image)
+                    if not ocr_result.text.strip():
                         # 纯图片页无内容，跳过
                         continue
 
-                # 提取表格
-                from private_rag.ingestion.ocr import extract_tables as _extract_tables
-                tables = _extract_tables(page, table_label=file_stem, is_scanned=scanned)
+                    # 版面表格提取
+                    table_rects: list[tuple[int, int, int, int]] = []
+                    try:
+                        from private_rag.config import SCAN_TABLE_ENABLED
 
-                for table_index, table_info in enumerate(tables, start=1):
-                    table_text = table_info["text"]
-                    documents.append(
-                        SourceDocument(
-                            doc_id=f"file:{relative}#page={page_index}#table={table_index}",
-                            text=table_text,
-                            title=f"{file_name} 第 {page_index} 页 表格 {table_index}",
-                            source_type="file",
-                            source_uri=relative,
-                            source_key=source_key,
-                            updated_at=updated_at,
-                            tags=list(tags),
-                            extra={
-                                "page": page_index,
-                                "table": f"{file_stem}_table_{table_index}",
-                                "file_name": file_name,
-                                "format": "pdf",
-                                "scanned": scanned,
-                            },
+                        if SCAN_TABLE_ENABLED:
+                            from private_rag.ingestion.table_layout import (
+                                extract_scan_tables as _extract_scan_tables,
+                            )
+                            scan_result = _extract_scan_tables(image, ocr_result.boxes)
+                            tables = scan_result.tables
+                            table_rects = scan_result.rects
+                        else:
+                            tables = []
+                    except Exception as exc:
+                        errors.append(f"版面表格提取失败 {relative} 页 {page_index}：{exc}")
+                        tables = []
+
+                    # 过滤表格区域文本，避免正文与表格重复
+                    text = _filter_ocr(ocr_result, table_rects).text
+
+                    # 写入表格文档
+                    for table_index, table_row in enumerate(tables, start=1):
+                        table_text = ",".join(
+                            ",".join(str(c) if c else "" for c in row)
+                            for row in table_row
                         )
-                    )
+                        if not table_text.strip():
+                            continue
+                        documents.append(
+                            SourceDocument(
+                                doc_id=f"file:{relative}#page={page_index}#table={table_index}",
+                                text=table_text,
+                                title=f"{file_name} 第 {page_index} 页 表格 {table_index}",
+                                source_type="file",
+                                source_uri=relative,
+                                source_key=source_key,
+                                updated_at=updated_at,
+                                tags=list(tags),
+                                extra={
+                                    "page": page_index,
+                                    "table": f"{file_stem}_table_{table_index}",
+                                    "file_name": file_name,
+                                    "format": "pdf",
+                                    "scanned": True,
+                                },
+                            )
+                        )
+
+                    # 用过滤后的 OCR 文本作为正文
+                    text = text
+
+                else:
+                    # 文本型 PDF：提取表格
+                    from private_rag.ingestion.ocr import extract_tables as _extract_tables
+                    tables = _extract_tables(page, table_label=file_stem, is_scanned=False)
+
+                    for table_index, table_info in enumerate(tables, start=1):
+                        table_text = table_info["text"]
+                        documents.append(
+                            SourceDocument(
+                                doc_id=f"file:{relative}#page={page_index}#table={table_index}",
+                                text=table_text,
+                                title=f"{file_name} 第 {page_index} 页 表格 {table_index}",
+                                source_type="file",
+                                source_uri=relative,
+                                source_key=source_key,
+                                updated_at=updated_at,
+                                tags=list(tags),
+                                extra={
+                                    "page": page_index,
+                                    "table": f"{file_stem}_table_{table_index}",
+                                    "file_name": file_name,
+                                    "format": "pdf",
+                                    "scanned": False,
+                                },
+                            )
+                        )
 
                 # 正文
                 if text.strip():
