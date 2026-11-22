@@ -311,9 +311,12 @@ v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上
       stderr 给出「请先停掉 scripts/serve.py…或用 RAG_STORAGE_DIR」
 - [x] 文档：README「MCP 暴露（v8）」（客户端配置片段、参数表、与 HTTP API 的区别、单进程限制与降级、只读边界、
       `--list-tools` 自检）、`docs/adr/0004`、`docs/adr/0005`、`CONTEXT.md` 新增「工具面」「协议通道」两个术语
-- [ ] 与 PR #22（`corpus-gdrive-sync` 分支上的 MCP 实现，OPEN）的关系需要人工裁决：同名文件重叠
-      （`private_rag/mcp/server.py`、`scripts/serve_mcp.py`、`tests/test_mcp_server.py`、README/ROADMAP/CONTEXT），
-      工具面不同（那边是 `kb_search` + `sql_query`、没有 `ask`，并改了 `agent/tools.py`），本分支按任务书不暴露 SQL
+- [ ] 与 PR #22（分支 `claude/v8-mcp-server`，同样以 `main` 为基线，OPEN）的关系需要人工裁决：两边都自称 v8 第 1 项，
+      同名文件重叠（`private_rag/mcp/__init__.py`、`private_rag/mcp/evidence.py`、`private_rag/mcp/server.py`、
+      `scripts/serve_mcp.py`、`tests/test_mcp_server.py`、README/ROADMAP/CONTEXT），工具面不同——那边是
+      `kb_search` + `sql_query`（`sql_query` 按 `sources.yaml` 授权才出现在 `tools/list`，护栏照旧）、没有 `ask`，
+      并为此改了 `agent/tools.py` 与 `agent/runtime.py`（引用加块级 `locator`）；本分支按任务书不暴露运行时 SQL、
+      不碰 `private_rag/agent/*`。`ask` 与「要不要暴露 SQL」是两件独立的事，胜出的一侧可以各自再补另一件
 - [ ] 流式工具结果与进度通知：手写实现只支持一次性结果，长调用（`ask` 十几秒）在客户端侧只能表现为「这次调用慢」
 - [ ] 鉴权与多用户：当前与本机 HTTP 服务同为「能启动进程的人即可读」，要给别人用需要先加鉴权或换 Qdrant server 模式
 
