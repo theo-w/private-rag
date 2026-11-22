@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 from dataclasses import dataclass, field
@@ -174,39 +173,31 @@ _engine: Any = None
 _engine_failed: bool = False
 
 
-def _download_model_if_needed(model_path: str) -> str:
-    """下载或校验 SLANet 模型文件。"""
+def _resolve_model_path() -> str:
+    """定位 SLANet 模型文件。
+
+    优先级：环境变量预置路径 > rapid_table 包内自带的 slanet-plus.onnx。
+    两者都不存在时抛 FileNotFoundError（离线兜底）。
+    """
     import pathlib
 
-    p = pathlib.Path(model_path)
-    if p.exists():
-        # 校验 SHA256
-        expected = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        actual = hashlib.sha256(p.read_bytes()).hexdigest()
-        if actual == expected:
-            # 空文件，需要下载
-            pass
-        else:
-            return model_path  # 已有模型，跳过
+    env_path = pathlib.Path(_SCAN_TABLE_MODEL_PATH)
+    if env_path.is_file():
+        return str(env_path)
 
-    # 尝试从 rapid_table 包内复制
-    try:
-        from rapid_table import ModelConfig
+    import rapid_table
 
-        config = ModelConfig.table_structure_model()
-        src = config.get_local_path() if hasattr(config, "get_local_path") else config.model_path
-        import shutil
+    bundled = pathlib.Path(rapid_table.__file__).parent / "models" / "slanet-plus.onnx"
+    if bundled.is_file():
+        return str(bundled)
 
-        p.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(str(src), model_path)
-        return model_path
-    except Exception as exc:
-        logger.warning("模型准备失败：%s", exc)
-        raise
+    raise FileNotFoundError(
+        f"SLANet 模型不存在：{env_path}；也不在 rapid_table 包内（{bundled}）"
+    )
 
 
 def _get_engine() -> Any:
-    """获取 SLANet 引擎（进程级单例）。"""
+    """获取 SLANet 引擎（进程级单例，rapid_table 3.x API）。"""
     global _engine, _engine_failed
 
     if _engine_failed:
@@ -214,16 +205,15 @@ def _get_engine() -> Any:
 
     if _engine is None:
         try:
-            _download_model_if_needed(_SCAN_TABLE_MODEL_PATH)
-
             from rapid_table import RapidTable
+            from rapid_table.utils.typings import RapidTableInput
 
-            _engine = RapidTable(
-                ocr=False,  # 我们用自己的 OCR 文本框
-                det=False,
-                rec=False,
-                model_path=_SCAN_TABLE_MODEL_PATH,
+            cfg = RapidTableInput(
+                model_type="slanet_plus",
+                model_dir_or_path=_resolve_model_path(),
+                use_ocr=True,  # 拼装 HTML；实际 OCR 结果由调用方传入，不会跑内部 OCR
             )
+            _engine = RapidTable(cfg)
         except Exception as exc:
             logger.warning("SLANet 引擎初始化失败：%s，后续扫描件将跳过表格提取", exc)
             _engine_failed = True
@@ -245,19 +235,28 @@ def extract_scan_tables(
     """从扫描件图像中提取结构化表格。
 
     参数：
-        image：numpy 数组（BGR 或灰度）。
-        ocr_boxes：RapidOCR 返回的文本框列表，每个为
-            ``[[[x1,y1], [x2,y2], [x3,y3], [x4,y4]], text, confidence]``。
-        table_rects：表格边界框列表 ``[(x1,y1,x2,y2), ...]``。
+        image：numpy 数组或 PIL 图像（页面渲染结果）。
+        ocr_boxes：RapidOCR 文本框列表，每个为
+            ``[[[x1,y1], [x2,y2], [x3,y3], [x4,y4]], text, confidence]``（整页坐标）。
+        table_rects：表格边界框列表 ``[(x1,y1,x2,y2), ...]``（整页坐标）。
             若为 None，自动调用 :func:`find_table_rects` 检测。
 
     返回：
         ScanTableExtraction，包含结构化表格和边界框。
         若 rapid-table 不可用或识别失败，返回空结果。
+
+    实现要点：rapid_table 3.x 在 use_ocr=True 时才会把结构识别结果和文本
+    拼成 HTML；把整页 OCR 框按表格区域裁剪、平移到 crop 坐标系后，以
+    ``[(boxes, texts, scores)]`` 形式传给引擎，引擎不会跑自己的 OCR。
     """
+    import numpy as np
+
     engine = _get_engine()
     if engine is None:
         return ScanTableExtraction()
+
+    if not isinstance(image, np.ndarray):
+        image = np.asarray(image)
 
     if table_rects is None:
         table_rects = find_table_rects(image)
@@ -269,23 +268,57 @@ def extract_scan_tables(
 
     for x1, y1, x2, y2 in table_rects:
         # 裁剪表格区域
-        crop = image[y1:y2, x1:x2]
+        crop = np.ascontiguousarray(image[y1:y2, x1:x2])
         if crop.size == 0:
             continue
 
+        # rapid_table 内部会把输入拉伸到 488x488，扁长裁剪会扭曲结构识别；
+        # 先用白色补齐成方形（OCR 文本框坐标不变，引擎会自行换算）
+        h, w = crop.shape[:2]
+        side = max(h, w)
+        if crop.ndim == 2:
+            padded = np.full((side, side), 255, dtype=crop.dtype)
+        else:
+            padded = np.full((side, side, crop.shape[2]), 255, dtype=crop.dtype)
+        padded[:h, :w] = crop
+        crop = padded
+
+        # 收集中心落在表格区域内的 OCR 文本框，平移到 crop 坐标系
+        rel_boxes: list[Any] = []
+        texts: list[str] = []
+        scores: list[float] = []
+        if ocr_boxes:
+            for box, text, score in ocr_boxes:
+                pts = np.asarray(box, dtype=np.float32)
+                cx = float(pts[:, 0].mean())
+                cy = float(pts[:, 1].mean())
+                if x1 <= cx <= x2 and y1 <= cy <= y2:
+                    rel_boxes.append(pts - np.array([x1, y1], dtype=np.float32))
+                    texts.append(str(text))
+                    scores.append(float(score))
+
+        if not rel_boxes:
+            # 无文本的网格（少见）没有入库价值，跳过
+            logger.debug("表格区域 %s 内没有 OCR 文本框，跳过", (x1, y1, x2, y2))
+            continue
+
         try:
-            # rapid-table 返回 HTML 字符串
-            html = engine.predict(crop)
+            # rapid_table 3.x：engine(img, ocr_results=[...]) 返回 RapidTableOutput，
+            # pred_htmls[0] 是带单元格文本的表格 HTML
+            ocr_results = [
+                (np.asarray(rel_boxes, dtype=np.float32), tuple(texts), tuple(scores))
+            ]
+            output = engine(crop, ocr_results=ocr_results)
+            pred_htmls = getattr(output, "pred_htmls", None) or []
+            if not pred_htmls:
+                continue
+            html = pred_htmls[0]
             if not html or not isinstance(html, str):
                 continue
 
             grid = _parse_html_table(html)
             if not grid:
                 continue
-
-            # 将 OCR 文本框匹配到单元格
-            if ocr_boxes:
-                grid = _match_boxes_to_cells(grid, ocr_boxes, x1, y1)
 
             tables.append(grid)
 
@@ -449,50 +482,6 @@ def _expand_span(grid: list[list]) -> list[list[str | None]]:
             col_idx += colspan
 
     return full
-
-
-def _match_boxes_to_cells(
-    grid: list[list],
-    ocr_boxes: list[tuple],
-    offset_x: int,
-    offset_y: int,
-) -> list[list[str | None]]:
-    """将 OCR 文本框匹配到网格单元格。
-
-    每个单元格取中心点落在其区域内的文本框文本。
-    """
-    if not grid or not ocr_boxes:
-        return grid
-
-    rows = len(grid)
-    cols = len(grid[0]) if grid else 0
-    if rows == 0 or cols == 0:
-        return grid
-
-    cell_h = 1.0
-    cell_w = 1.0
-    if rows > 0:
-        # 估算单元格大小（从网格推断）
-        pass
-
-    # 对每个 OCR 文本框，找到其中心点在网格中的位置
-    for box, text, _conf in ocr_boxes:
-        # 计算文本框中心（原始图像坐标）
-        pts = box  # [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-        cx = sum(p[0] for p in pts) / 4
-        cy = sum(p[1] for p in pts) / 4
-
-        # 减去偏移量
-        cx_rel = cx - offset_x
-        cy_rel = cy - offset_y
-
-        # 估算行列（假设表格均匀分布）
-        # 这里用简单启发式：根据文本框位置在 crop 中的相对位置
-        # 由于我们不知道 crop 的精确尺寸，用网格索引近似
-        # 更精确的做法需要传入 crop 尺寸
-        pass  # 简化：暂不填充，返回原始网格
-
-    return grid
 
 
 # ---------------------------------------------------------------------------

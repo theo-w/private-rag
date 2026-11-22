@@ -1,0 +1,6 @@
+# v6 扫描件表格消融评估专用知识库：只入扫描件 PDF，
+# 文字底稿 eval/fixtures/v6_scan_table.md 仅用于评估集证据校验，不入库。
+sources:
+  - type: file
+    path: eval/fixtures/v6_scan_table.pdf
+    tags: [eval, scan]

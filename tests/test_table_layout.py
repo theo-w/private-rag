@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from private_rag.ingestion.table_layout import (
@@ -188,13 +189,13 @@ def test_fallback_parse_empty():
 
 
 def test_get_engine_no_rapid_table():
-    with patch("private_rag.ingestion.table_layout._download_model_if_needed", side_effect=ImportError("no rapid_table")):
+    with patch("private_rag.ingestion.table_layout._resolve_model_path", side_effect=ImportError("no rapid_table")):
         result = _get_engine()
         assert result is None
 
 
 def test_get_engine_download_fails():
-    with patch("private_rag.ingestion.table_layout._download_model_if_needed", side_effect=RuntimeError("download fail")):
+    with patch("private_rag.ingestion.table_layout._resolve_model_path", side_effect=RuntimeError("model missing")):
         result = _get_engine()
         assert result is None
 
@@ -204,9 +205,19 @@ def test_get_engine_download_fails():
 # ---------------------------------------------------------------------------
 
 
+def _make_image():
+    return np.zeros((60, 100, 3), dtype=np.uint8)
+
+
+def _box_in_rect():
+    """中心落在 (0,0,100,50) 区域内的文本框。"""
+    box = [[10, 10], [40, 10], [40, 30], [10, 30]]
+    return [(box, "A", 0.9)]
+
+
 def test_extract_scan_tables_no_engine():
     with patch("private_rag.ingestion.table_layout._get_engine", return_value=None):
-        result = extract_scan_tables(MagicMock())
+        result = extract_scan_tables(_make_image())
         assert isinstance(result, ScanTableExtraction)
         assert result.tables == []
         assert result.rects == []
@@ -216,37 +227,45 @@ def test_extract_scan_tables_no_rects():
     mock_engine = MagicMock()
     with patch("private_rag.ingestion.table_layout._get_engine", return_value=mock_engine):
         with patch("private_rag.ingestion.table_layout.find_table_rects", return_value=[]):
-            result = extract_scan_tables(MagicMock())
+            result = extract_scan_tables(_make_image())
             assert result.tables == []
 
 
 def test_extract_scan_tables_empty_ocr():
+    """表格区域内没有 OCR 文本框时跳过该区域。"""
     mock_engine = MagicMock()
     with patch("private_rag.ingestion.table_layout._get_engine", return_value=mock_engine):
         with patch("private_rag.ingestion.table_layout.find_table_rects", return_value=[(0, 0, 100, 50)]):
-            with patch("private_rag.ingestion.table_layout._parse_html_table", return_value=[]):
-                result = extract_scan_tables(MagicMock(), ocr_boxes=[])
-                assert result.tables == []
+            result = extract_scan_tables(_make_image(), ocr_boxes=[])
+            assert result.tables == []
+            mock_engine.assert_not_called()
 
 
 def test_extract_scan_tables_engine_raises():
     mock_engine = MagicMock()
-    mock_engine.predict.side_effect = RuntimeError("predict fail")
+    mock_engine.side_effect = RuntimeError("predict fail")
     with patch("private_rag.ingestion.table_layout._get_engine", return_value=mock_engine):
         with patch("private_rag.ingestion.table_layout.find_table_rects", return_value=[(0, 0, 100, 50)]):
-            result = extract_scan_tables(MagicMock())
+            result = extract_scan_tables(_make_image(), ocr_boxes=_box_in_rect())
             assert result.tables == []
 
 
 def test_extract_scan_tables_success():
     mock_engine = MagicMock()
-    mock_engine.predict.return_value = "<tr><td>A</td></tr>"
+    # rapid_table 3.x：engine(img, ocr_results=[...]) 返回带 pred_htmls 的输出对象
+    mock_engine.return_value = SimpleNamespace(pred_htmls=["<tr><td>A</td></tr>"])
     with patch("private_rag.ingestion.table_layout._get_engine", return_value=mock_engine):
         with patch("private_rag.ingestion.table_layout.find_table_rects", return_value=[(0, 0, 100, 50)]):
             with patch("private_rag.ingestion.table_layout._parse_html_table", return_value=[["A"]]):
-                result = extract_scan_tables(MagicMock())
+                result = extract_scan_tables(_make_image(), ocr_boxes=_box_in_rect())
                 assert len(result.tables) == 1
                 assert len(result.rects) == 1
+                # 引擎必须收到平移后的自建 OCR 结果，而不是跑内部 OCR
+                args, kwargs = mock_engine.call_args
+                assert "ocr_results" in kwargs
+                # 输入被白色补齐成方形（保持纵横比）
+                fed = args[0]
+                assert fed.shape[0] == fed.shape[1] == 100
 
 
 # ---------------------------------------------------------------------------

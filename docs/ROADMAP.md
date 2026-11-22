@@ -11,6 +11,7 @@
 | v5 | `v5-parent-rag-query-rewrite` | Parent-Document RAG（子块召回、父块送上下文）、查询改写（多查询 / HyDE）、去重与上下文预算 | ✅ 本分支完成（评估结果见报告） | 支持父子块、多查询/HyDE、预算与去重；有 `full` / `parent` / `parent_multi` / `parent_hyde` 前后对比、Ragas 子集与失败案例分析，见 `eval/reports/v5_report.md` |
 | v6 | `v6-ocr-parser` | 扫描件 OCR、表格解析、版面处理，接入现有连接器与元数据 | ✅ 本分支完成 | 扫描 PDF 与表格可检索；页码/表格名进入引用 |
 | v6.1 | `v6.1-readonly-render` | 只读公网演示：v6 入库产物导出快照，小服务暴露语料与 BM25 检索，问答明确关闭 | ✅ 已部署 (<https://private-rag-readonly.onrender.com>) | 公网可看到扫描件 OCR 文本、表格文档与页码/表格名引用；不加载模型，问答返回 409 |
+| v6.2 | `claude/serene-tharp-761b47` | 扫描件版面表格提取：OpenCV 形态学检测网格线定位表格矩形，rapid-table（SLANet-Plus ONNX）识别结构，自建 OCR 文本框平移到 crop 坐标后传给引擎拼 HTML；`filter_ocr_result` 按表格矩形过滤正文 OCR 框去重；开关 `RAG_DISABLE_SCAN_TABLE` | ✅ 本分支完成 | 410 测试通过；合成扫描件 fixture 端到端入库得「表格文档 + 过滤后正文」两文档；消融评估 6 条 `full`：`evidence_hit@3` 0.2→1.0、`context_precision@3` 0.2→0.5，两侧 `answer_rate`/`refusal_accuracy` 持平，报告 `eval/reports/v6_scan_table_on.md` / `v6_scan_table_off.md` |
 | v7 | `claude/heuristic-edison-ebcf0b` | Agentic RAG：意图路由、SQL/工具调用、检索-行动循环、可观测 trace | ✅ 本分支完成 | 业务问题能自动选择知识库或工具；trace 可回放每条决策 |
 | v7.1 | `v7.1` | SSE 流式 Agentic 输出、演示页 Agentic 开关、列表/表格感知切分、v7 评估集与量化对比 | ✅ 本分支完成 | 311 测试通过；SSE 端点可流式输出 agentic 轨迹并写回会话历史；demo.html 支持 Agentic 模式；列表/表格切分测试通过；v7 agentic 评估集 26 条 + `agent`/`full` 对比报告（agentic `answer_rate` 0.909 vs 0.318、`source_hit` 0.591 vs 0.318、单条耗时 71.2s vs 17.0s），Ragas 子集 6 条另见 `eval/reports/v7_agent_ragas_report.md` |
 | v7.2 | `v7.2` | 意图路由与拒答策略：数据可得性驱动路由、证据充分性拒答 | ✅ 本分支完成 | 343 测试通过（同日收紧 `none` 判据后）；`sql_query` 工具描述带上库内数据目录（列名 + 有界样例值，`RAG_AGENT_CATALOG_CHARS` / `RAG_AGENT_CATALOG_SAMPLES` 可关），路由判据改为「回答所需的事实住在哪一侧」；证据充分性由步进决策声明，判不足直接拒答并给 `stop_reason=insufficient_evidence`；v7 评估集 26 条复跑 `refusal_accuracy` 0.250→1.000、`source_hit` 0.591→1.000、`evidence_hit@3` 0.409→0.864、单条耗时 71.2s→51.9s，`knowledge` 类 7 条持平无回归，报告 `eval/reports/v7_2_agent_report.md`；同日在同一条线上收紧 `none` 判据（分支 `v7.2-none-gate`：判 `none` 先做一次验证检索，拒答必须建立在证据上，`RAG_DISABLE_AGENT_NONE_PROBE` 可关），复跑 26 条 `none`/`no_retrieval` 双双归零、`refusal_accuracy` 1.000 持平、`citation_rate` 0.955→1.000，报告 `eval/reports/v7_2_nonegate_report.md`；指代消解见下一行 v7.3 |
@@ -76,7 +77,7 @@
 - [x] 新增 `pdfplumber` + `rapidocr-onnxruntime` 依赖，Python 3.9 macOS arm64 wheel 可用
 - [x] 扫描件 PDF 经 OCR 后可被检索，页码进入引用（OCR 渲染 200 dpi；72 dpi 下中文识别明显出错）
 - [x] 文本型 PDF 的表格被结构化提取，表格名/内容进入引用（依赖页面文字与边框线）
-- [ ] 扫描件上的表格结构化提取（版面表格识别，依赖位图上的表格检测）→ 归入 v7 版面处理
+- [x] 扫描件上的表格结构化提取（版面表格识别，依赖位图上的表格检测）：`private_rag/ingestion/table_layout.py` 用 OpenCV 形态学（横/纵结构线开运算）检测网格线定位表格矩形；`rapid-table==3.0.2`（SLANet-Plus ONNX，包内模型离线可用，`RAG_SCAN_TABLE_MODEL` 可预置路径）在裁剪区域识别结构，输入先白色补齐成方形以避免引擎 488×488 非等比拉伸扭曲；把整页 RapidOCR 文本框按表格区域裁剪、平移到 crop 坐标后以 `ocr_results` 传给引擎拼 HTML（引擎不跑内部 OCR）；`filter_ocr_result` 按表格矩形中心点过滤正文 OCR 框，避免正文与表格内容重复；总开关 `RAG_DISABLE_SCAN_TABLE`。消融评估（`eval/v6_scan_table.jsonl` 6 条，`full` 配置，两库 ON/OFF 对照）：`evidence_hit@3` 0.2→1.0、`context_precision@3` 0.2→0.5，报告见 `eval/reports/v6_scan_table_on.md` 与 `eval/reports/v6_scan_table_off.md`
 - [x] 文本型 PDF 继续正常工作（不退回 v5 功能）
 - [x] 依赖可选：未安装 OCR 后端时 PDF 仍按现有方式处理（文本提取），不阻塞服务启动
 - [x] `generation.py` 的 `_source_brief` / `build_citations` 无需改动即可展示页码/表格名
