@@ -111,6 +111,8 @@ def load_eval_summary(path: Optional[Path] = None) -> dict:
         "embed_model": meta.get("embed_model"),
         "duration_seconds": _finite_number(meta.get("duration_seconds")),
         "git_commit": meta.get("git_commit"),
+        "git_dirty": meta.get("git_dirty"),
+        "run_note": meta.get("run_note"),
         "configs": [
             _config_summary(str(name), configs_raw.get(str(name))) for name in names
         ],

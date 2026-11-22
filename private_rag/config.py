@@ -114,6 +114,9 @@ if AGENT_PLANNER_MODE not in {"json", "function"}:
 AGENT_LLM_MODEL = os.getenv("RAG_AGENT_LLM_MODEL", "").strip() or LLM_MODEL
 # 决策轨迹落盘，用于「trace 可回放每条决策」
 AGENT_TRACE_ENABLED = not _env_flag("RAG_DISABLE_AGENT_TRACE")
+# 双侧查询门控：intent=mixed 时，代码级禁止在任一侧零证据的情况下选 final
+# 置 1 关掉门控（回退到仅靠提示词约束的修法 A）
+AGENT_MIXED_GATE = not _env_flag("RAG_DISABLE_AGENT_MIXED_GATE")
 AGENT_TRACE_PATH = _env_path("RAG_AGENT_TRACE_PATH", ROOT / "storage" / "traces" / "agent.jsonl")
 # 单条观察/理由写入轨迹的字符上限
 AGENT_TRACE_FIELD_CHARS = _env_int("RAG_AGENT_TRACE_FIELD_CHARS", 1200)

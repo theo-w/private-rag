@@ -1267,3 +1267,102 @@ def test_report_exposes_history_turns():
 
     assert report["samples_meta"][0]["history_turns"] == 2
     assert report["samples"][0]["history_turns"] == 2
+
+
+def test_collect_agent_results_records_gate_intercepts():
+    agent = FakeAgent(_fake_agent_result(intent="mixed", gate_intercepts=2))
+    results = collect_agent_results(agent, [_agent_sample()], CONFIGS["agent"])
+    assert results[0].gate_intercepts == 2
+    assert aggregate_results(results)["gate_intercept_rate"] == 1.0
+
+
+def test_gate_intercept_rate_only_over_agentic_samples():
+    # 固定链路样本 intent 为空，不进门控指标的分母
+    fixed = SampleResult(
+        sample_id="q01",
+        config="dense",
+        category="factual",
+        answerable=True,
+        question="q",
+        reference="r",
+        evidence=["e"],
+        expected_source="README.md",
+    )
+    gated = SampleResult(
+        sample_id="q02",
+        config="agent",
+        category="mixed",
+        answerable=True,
+        question="q",
+        reference="r",
+        evidence=["e"],
+        expected_source="README.md",
+        intent="mixed",
+        tool_calls=2,
+        gate_intercepts=1,
+    )
+    clean = SampleResult(
+        sample_id="q03",
+        config="agent",
+        category="knowledge",
+        answerable=True,
+        question="q",
+        reference="r",
+        evidence=["e"],
+        expected_source="README.md",
+        intent="knowledge",
+        tool_calls=1,
+    )
+    assert aggregate_results([fixed, gated, clean])["gate_intercept_rate"] == 0.5
+
+
+def test_report_marks_dirty_commit_and_run_note():
+    sample = EvalSample(
+        id="q01",
+        question="q",
+        reference="r",
+        evidence=("e",),
+        source="README.md",
+        category="factual",
+        answerable=True,
+    )
+    result = SampleResult(
+        sample_id="q01",
+        config="dense",
+        category="factual",
+        answerable=True,
+        question="q",
+        reference="r",
+        evidence=["e"],
+        expected_source="README.md",
+        answer="r[1]",
+    )
+    dirty = render_markdown(
+        build_report(
+            {
+                "configs": ["dense"],
+                "git_commit": "deadbeef",
+                "git_dirty": True,
+                "run_note": "修法 C 复跑 gate=ON",
+            },
+            [sample],
+            [result],
+        )
+    )
+    assert "deadbeef" in dirty
+    assert "工作区有未提交改动" in dirty
+    assert "跑批备注：修法 C 复跑 gate=ON" in dirty
+    clean = render_markdown(
+        build_report({"configs": ["dense"], "git_commit": "cafe0000"}, [sample], [result])
+    )
+    assert "工作区有未提交改动" not in clean
+    assert "跑批备注" not in clean
+
+
+def test_prompt_fingerprint_stable_hex():
+    from private_rag.evaluation import _prompt_fingerprint
+
+    first = _prompt_fingerprint()
+    assert first == _prompt_fingerprint()
+    assert len(first) == 16
+    int(first, 16)
