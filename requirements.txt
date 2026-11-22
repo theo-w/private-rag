@@ -24,6 +24,7 @@ requests==2.32.5
 # v6 扫描件 OCR、表格解析与版面处理
 pdfplumber==0.11.7
 rapidocr-onnxruntime==1.4.4
+rapid-table==3.0.2
 
 # v3 HTTP 服务（单 worker）
 fastapi==0.128.8

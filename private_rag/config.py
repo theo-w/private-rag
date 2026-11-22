@@ -113,3 +113,12 @@ AGENT_TRACE_PATH = _env_path("RAG_AGENT_TRACE_PATH", ROOT / "storage" / "traces"
 AGENT_TRACE_FIELD_CHARS = _env_int("RAG_AGENT_TRACE_FIELD_CHARS", 1200)
 # 运行时 SQL 的授权来源：只有这里声明了 allow_runtime_query 的 sql 源才可被查询
 AGENT_SOURCES_CONFIG = _env_path("RAG_AGENT_SOURCES_CONFIG", DEFAULT_SOURCES_CONFIG)
+
+# v6 扫描件版面表格提取
+# 置 1 / true / yes / on 时关闭扫描件表格提取（默认开启）
+SCAN_TABLE_ENABLED = not _env_flag("RAG_DISABLE_SCAN_TABLE")
+# 预置 SLANet 模型文件路径；环境变量 RAG_SCAN_TABLE_MODEL 覆盖
+SCAN_TABLE_MODEL_PATH = os.getenv(
+    "RAG_SCAN_TABLE_MODEL",
+    str(ROOT / "data" / "models" / "slanet_plus.onnx"),
+)

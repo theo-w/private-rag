@@ -14,6 +14,11 @@
 | `reports/v5_report.json` | v5 主报告的机器可读结果 |
 | `reports/v5_v4_regression.md` | v5 配置在 v4 40 条集上的回归报告 |
 | `reports/v5_v4_regression.json` | 同一次回归的机器可读结果 |
+| `v6_scan_table.jsonl` | v6 扫描件版面表格消融评估集（5 可回答 + 1 应拒答，`ingestion`/`multi_step`/`refusal`） |
+| `fixtures/v6_scan_table.pdf` | 合成扫描件表格 PDF（`scripts/make_scan_table_fixture.py` 生成，入库进评估库） |
+| `fixtures/v6_scan_table.md` | 上表的文字底稿，仅作 evidence 逐字校验，**不入库** |
+| `reports/v6_scan_table_on.md` / `.json` | 版面表格**开启**侧的消融报告（独立集合 `rag_scan_table_on`） |
+| `reports/v6_scan_table_off.md` / `.json` | 版面表格**关闭**侧的消融报告（独立集合 `rag_scan_table_off`） |
 
 `storage/eval/`（Qdrant 与 BM25）和 `storage/eval_cache/`（Ragas 判分缓存）由脚本生成，已被 `.gitignore` 忽略，不提交。
 
@@ -132,6 +137,23 @@ python3 scripts/evaluate.py --configs full,parent,parent_multi,parent_hyde \
   --ragas-configs full,parent_multi --ragas-limit 12 \
   --output eval/reports/v5_v4_regression.md --json-output eval/reports/v5_v4_regression.json
 
+# 8. v6 版面表格消融：ON/OFF 两个独立评估库（串行跑，避免本地 Ollama 争抢）
+python3 scripts/make_scan_table_fixture.py   # 生成 eval/fixtures/v6_scan_table.pdf
+RAG_COLLECTION_NAME=rag_scan_table_on RAG_STORAGE_DIR=storage/eval/qdrant_scan_on \
+  RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_scan_on/bm25.pkl \
+  python3 scripts/prepare_eval_kb.py --config config/sources.eval.scan.yaml --recreate
+RAG_DISABLE_SCAN_TABLE=1 RAG_COLLECTION_NAME=rag_scan_table_off RAG_STORAGE_DIR=storage/eval/qdrant_scan_off \
+  RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_scan_off/bm25.pkl \
+  python3 scripts/prepare_eval_kb.py --config config/sources.eval.scan.yaml --recreate
+RAG_COLLECTION_NAME=rag_scan_table_on RAG_STORAGE_DIR=storage/eval/qdrant_scan_on \
+  RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_scan_on/bm25.pkl \
+  python3 scripts/evaluate.py --dataset eval/v6_scan_table.jsonl --configs full --skip-ragas \
+  --output eval/reports/v6_scan_table_on.md --json-output eval/reports/v6_scan_table_on.json
+RAG_COLLECTION_NAME=rag_scan_table_off RAG_STORAGE_DIR=storage/eval/qdrant_scan_off \
+  RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_scan_off/bm25.pkl \
+  python3 scripts/evaluate.py --dataset eval/v6_scan_table.jsonl --configs full --skip-ragas \
+  --output eval/reports/v6_scan_table_off.md --json-output eval/reports/v6_scan_table_off.json
+
 # 可选：用官方 7B judge（更快；先 ollama pull qwen2.5:7b-instruct）
 python3 scripts/evaluate.py --configs dense,hybrid,full --ragas-configs dense,full \
   --judge-model qwen2.5:7b-instruct --cache-dir storage/eval_cache_qwen25_7b \
@@ -147,6 +169,7 @@ python3 scripts/evaluate.py --configs dense,hybrid,full --ragas-configs dense,fu
 ## 局限
 
 - v4 只有 40 条、v5 只有 18 条样本，且语料是项目文档，分数不代表其他领域或生产流量。
+- v6 消融集只有 6 条、语料是一张合成扫描表格，`evidence` 采用「整行连续」短语（ON 侧表格文档为逗号拼接的行文本，OFF 侧正文是 OCR 乱序），量的是「版面表格提取有没有把单元格结构送进检索」这一件事；`source_hit` 两侧恒为 0——证据底稿 `fixtures/v6_scan_table.md` 按设计不入库，检索命中的是 PDF 文档本身。
 - v5 的 4 组配置差值是描述性结果，样本少且未做显著性检验；某一组没有增益时会如实呈现，不把假设写成结论。
 - 父块会放大索引体积（约 2–3 倍），多查询/HyDE 会多一次本地 LLM 调用与多次检索，延迟相应增加。
 - 生成与判分默认使用同一个本地模型 `qwen3.8:27b-mlx`，存在自评偏差；分数主要用于同一模型下的相对比较。用 `--judge-model` 换 judge 后（例如官方 `qwen2.5:7b-instruct`），分数只能在该 judge 下比较，不能与 27B 的分数直接混比。
