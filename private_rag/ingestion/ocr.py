@@ -45,6 +45,98 @@ def _import_pdfplumber() -> Any:
         return None
 
 
+# ---------------------------------------------------------------------------
+# _merge_lines / filter_ocr_result：可复用的行合并与过滤逻辑
+# ---------------------------------------------------------------------------
+
+
+def _merge_lines(
+    boxes: list[tuple],
+    *,
+    y_threshold: float = 12.0,
+) -> str:
+    """将 OCR 文本框按 y 坐标合并为行文本。
+
+    参数：
+        boxes：``[(box, text, confidence), ...]``，box 为四个角点。
+        y_threshold：同一行的 y 坐标容差（像素）。
+
+    返回：
+        按行合并的文本，行与行之间用换行分隔。
+    """
+    if not boxes:
+        return ""
+
+    entries = [(float(b[0][1]), b, t, c) for b, t, c in boxes]
+    entries.sort(key=lambda e: e[0])
+
+    lines: list[str] = []
+    current_y: float | None = None
+    line_texts: list[str] = []
+
+    for y, box, text, confidence in entries:
+        if current_y is None:
+            current_y = y
+            line_texts.append(text)
+        elif abs(y - current_y) < y_threshold:
+            line_texts.append(text)
+        else:
+            lines.append(" ".join(line_texts))
+            current_y = y
+            line_texts = [text]
+
+    if line_texts:
+        lines.append(" ".join(line_texts))
+
+    return "\n".join(lines)
+
+
+def filter_ocr_result(
+    result: "OCRResult",
+    table_rects: list[tuple[int, int, int, int]],
+) -> "OCRResult":
+    """从 OCR 结果中剔除落在表格区域内的文本框，然后重新合并行。
+
+    参数：
+        result：OCRResult 对象（来自 ocr_page / ocr_image）。
+        table_rects：表格边界框列表 ``[(x1,y1,x2,y2), ...]``。
+
+    返回：
+        新的 OCRResult，文本框已过滤且行已重新合并。
+        若 table_rects 为空，返回原结果。
+    """
+    if not table_rects:
+        return result
+
+    if not result.boxes:
+        return result
+
+    # boxes 格式：[(box, text, confidence), ...]
+    # box 格式：[[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+    kept: list[tuple] = []
+    for box, text, confidence in result.boxes:
+        # 计算文本框中心
+        cx = sum(p[0] for p in box) / 4
+        cy = sum(p[1] for p in box) / 4
+
+        # 检查是否在任意表格区域内
+        inside = False
+        for x1, y1, x2, y2 in table_rects:
+            if x1 <= cx <= x2 and y1 <= cy <= y2:
+                inside = True
+                break
+
+        if not inside:
+            kept.append((box, text, confidence))
+
+    if not kept:
+        return OCRResult()
+
+    # 重新合并行
+    text = _merge_lines(kept)
+    return OCRResult(text=text, boxes=kept)
+
+
 def ocr_image(image: Any) -> OCRResult:
     """对一张 PIL Image 执行 OCR，返回合并文本与边界框。
 
@@ -89,30 +181,9 @@ def ocr_image(image: Any) -> OCRResult:
 
         # 按 y 坐标排序后按行合并
         entries.sort(key=lambda entry: entry[0])
-        boxes: list[tuple] = []
-        lines: list[str] = []
-
-        current_y: float | None = None
-        line_texts: list[str] = []
-        y_threshold = 12.0  # 同一行的 y 坐标容差（200 dpi 下约半行高）
-
-        for y, box, text, confidence in entries:
-            boxes.append((box, text, confidence))
-
-            if current_y is None:
-                current_y = y
-                line_texts.append(text)
-            elif abs(y - current_y) < y_threshold:
-                line_texts.append(text)
-            else:
-                lines.append(" ".join(line_texts))
-                current_y = y
-                line_texts = [text]
-
-        if line_texts:
-            lines.append(" ".join(line_texts))
-
-        return OCRResult(text="\n".join(lines), boxes=boxes)
+        boxes: list[tuple] = [(e[1], e[2], e[3]) for e in entries]
+        text = _merge_lines(boxes)
+        return OCRResult(text=text, boxes=boxes)
     except Exception as exc:
         logger.warning("OCR 识别失败：%s", exc)
         return OCRResult()
