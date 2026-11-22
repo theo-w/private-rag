@@ -5,6 +5,8 @@ scripts/qdrant_storage/
 data/sql/*.db
 # 本地数据源配置（可能含明文连接串，示例文件 sources.example.yaml 才是入库内容）
 config/sources.yaml
+# Google Drive 同步目录：真实语料正文，只留在本机，不进公开仓库（docs/adr/0002）
+data/gdrive/
 # Python
 __pycache__/
 *.py[cod]

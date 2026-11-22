@@ -36,6 +36,7 @@ ollama pull qwen3.8:27b-mlx
 
 - 首次运行会自动从 HuggingFace 下载 `BAAI/bge-reranker-v2-m3` 重排模型。
 - SQLite 开箱即用；MySQL/PostgreSQL 需要额外安装驱动（见下文“数据库接入”）。
+- Google Drive 语料接入需要本机 CLI（`rclone` 或 `gdrive`），Python 侧不需要额外依赖（见下文“Google Drive 语料接入”）。
 
 ## 安装
 
@@ -723,6 +724,70 @@ sources:
 - 使用 `requests` 抓取，`trafilatura` 抽取正文、标题与发布日期；单条 URL 失败只记录错误，不阻塞其他来源。
 - 需要可访问的 URL；内网页面请确保运行环境有相应网络权限。
 
+### Google Drive 语料接入（预下载）
+
+Drive 里的真实文档先下载到本地目录，再按普通 `file` 源入库：联网只发生在下载这一步，入库与检索链路照旧完全本地离线，仓库不引入 Google SDK，Python 侧也没有新增依赖。为什么这么切，见 [docs/adr/0003](docs/adr/0003-google-drive-corpus-cli-prefetch.md)。
+
+1）装本机 CLI：
+
+```bash
+brew install rclone
+```
+
+想用另一个 CLI 也可以：`brew install gdrive`（用法见下面的 `--tool gdrive`）。
+
+2）授权。凭据只留在本机——rclone 的 remote 配置在 `~/.config/rclone/rclone.conf`，不进仓库、不出现在命令行与日志里：
+
+```bash
+rclone config       # n 新建 remote → 取个名字（如 gdrive）→ storage 选 drive → client id/secret 留空
+                    # 「Use auto config?」选 Yes 会开浏览器；没有浏览器的机器选 No，
+                    # 在有浏览器的机器上跑 rclone authorize "drive"，把返回的 token 粘回来
+rclone listremotes  # 确认 remote 建好了，也可以用 python3 scripts/sync_gdrive.py --list-remotes
+```
+
+`gdrive` 走自己的 OAuth，首次 `gdrive about` 会要求浏览器授权，凭据落在 `~/.gdrive/`。
+
+3）下载到本地目录（默认 `data/gdrive`，已 gitignore）：
+
+```bash
+python3 scripts/sync_gdrive.py --remote gdrive:某个文件夹            # 只下载
+python3 scripts/sync_gdrive.py --remote gdrive:某个文件夹 --dry-run  # 预演，不写文件
+```
+
+4）入库，复用现有链路（分块与嵌入一处没动）：
+
+```bash
+python3 scripts/sync_gdrive.py --skip-sync --ingest                  # 只用已下载的内容
+python3 scripts/sync_gdrive.py --remote gdrive:某个文件夹 --ingest   # 下载完接着入库
+python3 scripts/sync_gdrive.py --skip-sync --ingest --config config/sources.gdrive.example.yaml
+```
+
+`--skip-sync` 表示不再联网，只用目录里已有的内容。下载完先清点目录（多少文件可入库、哪些后缀不支持），再走与 `scripts/ingest.py` 完全相同的 `run_ingest`。入库默认写进演示库那个 collection，用 `--tag gdrive` 过滤 Drive 内容。
+
+常用开关：
+
+- `--mode sync`：让本地目录与 Drive 一致，会删除 Drive 里已删掉的本地文件；默认 `copy` 只增量添加。要让知识库也跟着 Drive 的删除收缩，得 `--mode sync --ingest --prune` 一起用。
+- `--export-formats`：Google 原生文档（Docs/Sheets/Slides）没有文件实体，下载时必须导出；默认钉成 `pdf`，因为入库链路只认 txt/md/pdf，rclone 自己的默认导出格式（docx/xlsx 那类）反而入不了库。传空值可关掉这个参数。
+- `--include "*.md"`：只下载匹配的文件名，可重复。
+- `--tags`：入库时打的标签，默认 `gdrive`。
+- `--dest`（或 `RAG_GDRIVE_SYNC_DIR`）：下载目录；`RAG_GDRIVE_REMOTE`：默认下载目标。相对路径按项目根解析。
+- `-- --drive-skip-gdocs`：`--` 之后的参数原样传给下载工具。
+- `--tool gdrive --target <文件夹或文件 ID>`：改用 gdrive CLI。它没有 dry-run（要预演请用 `--tool rclone --dry-run`），各发行版的输出目录参数也不一致，所以脚本把执行目录切成下载目录来落文件；目标是单个文件时加 `--single-file`。
+
+与演示库、评估库的关系：
+
+- 默认入库目标就是演示库那个 collection，Drive 内容靠 `tags: [gdrive]` 区分，与 `data/docs` 的演示内容互不覆盖（幂等按 `doc_id + content_hash`）。
+- 想把真实语料单独放一个库，用与评估库同一套隔离开关指向独立路径：`RAG_COLLECTION_NAME` / `RAG_STORAGE_DIR` / `RAG_LEXICAL_INDEX_PATH`。
+- 评估库不受影响：`config/sources.eval.yaml` 里没有 Drive 源，评估语料仍只有项目文档。
+- 真实语料正文不进公开仓库（[docs/adr/0002](docs/adr/0002-real-corpus-reports-out-of-public-repo.md)）：下载目录已 gitignore，脚本还会用 `git check-ignore` 确认仓库内的目录确实被忽略，没被忽略就拒绝下载。生成公网只读快照时 `scripts/build_demo_snapshot.py` 只允许 `data/docs`，`data/gdrive` 会被判越界拒绝。
+- Qdrant 本地磁盘模式只允许一个进程，入库前先停掉 `scripts/serve.py`。
+
+失败与降级：
+
+- 本机没装 CLI 会直接给出安装命令；下载失败会带上退出码与 CLI 的报错。授权过期就重跑 `rclone config` 或 `rclone authorize "drive"`。
+- 目录里只有 docx/xlsx 这类不支持的后缀时，`--ingest` 明确失败并提示用 `--export-formats pdf` 重新下载，不会静默入库 0 条。
+- 下载目录安全边界可以显式跳过（`--allow-tracked-dest`），但不推荐：那样真实语料正文会进公开仓库。
+
 ## 增量与更新语义
 
 - **幂等**：`doc_id + content_hash` 未变化时跳过，不重复调用 embedding。
@@ -752,7 +817,7 @@ python3 scripts/ingest.py --recreate                               # 清空集�
 
 ## 测试
 
-单元测试不依赖 Ollama 与真实数据库：
+单元测试不依赖 Ollama、真实数据库与真实 Google 账号（Drive 同步只断言下载命令拼装，下载执行层打桩，入库走临时 Qdrant 与确定性假向量）：
 
 ```bash
 python3 -m pytest tests -q
@@ -792,6 +857,7 @@ private_rag/
 │   ├── ocr.py            图片 OCR（rapidocr）与表格提取
 │   ├── web.py            URL 抓取 + 正文抽取
 │   ├── sql.py            SQLAlchemy 查询 -> 行级文档
+│   ├── gdrive.py         Drive 预下载：拼下载命令、下载目录安全边界、目录清点
 │   ├── chunking.py       父块(2000/0)内切子块(700/100)，生成稳定父块 ID
 │   └── pipeline.py       父子块切分、幂等写入、更新替换、prune、BM25 重建
 ├── retrieval/
@@ -820,6 +886,8 @@ private_rag/
 └── eval_env.py           评估库路径隔离（导入配置前生效）
 config/settings.py        兼容入口（re-export private_rag.config）
 config/sources.example.yaml / sources.demo.yaml / sources.eval.yaml / sources.eval.agent.yaml（agentic 运行时只读 SQL，不入库）
+config/sources.gdrive.example.yaml Drive 下载目录的 file 源示例
+scripts/sync_gdrive.py    Drive 语料预下载 CLI（下载到本地目录，可选接着走入库链路）
 scripts/ingest.py         多源入库 CLI
 scripts/chat_cli.py       混合检索问答 CLI
 scripts/chat_agent.py     agentic 问答 CLI（意图路由 + 工具调用 + 决策轨迹）
@@ -835,6 +903,7 @@ eval/reports/             v4/v5/v7 Markdown / JSON 报告
 tests/                    pytest 单测 + smoke_test.py
 docs/ROADMAP.md           v1–v7 路线与验收标准
 data/docs/                本地文档
+data/gdrive/              Drive 预下载目录（已 gitignore，真实语料正文不进仓库）
 storage/                  向量库与 BM25 索引（已 gitignore，可由 ingest 重建）
 storage/traces/           agentic 决策轨迹 agent.jsonl（已 gitignore，每请求追加一行）
 requirements-eval.txt     可选评估依赖（Ragas）
