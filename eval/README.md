@@ -692,3 +692,65 @@ RAG_AGENT_ANSWER_THINKING=off python3 scripts/evaluate.py --dataset eval/v7_agen
 两轮都带 `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`（精排走本地缓存，权重没变）。
 这一对读数是同一提交上跑的，所以前后对比只用这一对：同配置跨轮抖动很大（本轮 A 40.6s，
 PR #26 里同默认行为的 route 档 56.6s，`source_hit` 也差 0.04），29 条上 ±3 条拒答可能就是噪声。
+
+### 读数可复现吗（2026-11-23，`v8-eval-determinism`）
+
+上面那句「±3 条可能就是噪声」需要变成可判定的东西，所以先量复现性，再谈归因。
+另外那一节的耗时结论要按下面的口径重读：两轮各跑一次时冷热启动会让方向都反过来（v8.3 复核结果是
+关思考 -8.3%，且全量 29 条不可判定；误拒实际是 1 条不是 3 条）。
+
+```bash
+# 同一输入重复调用，数唯一输出个数（要打到本机 Ollama，不打网络）
+python3 scripts/check_generation_determinism.py --repeat 4
+python3 scripts/check_generation_determinism.py --repeat 4 --thinking off
+python3 scripts/check_generation_determinism.py --repeat 4 --unpinned   # 复现改动前：不传温度与 seed
+```
+
+实测结论（细节见 `docs/ROADMAP.md` 的 v8.3）：不传 `temperature` 时四次调用四个输出——改动前的
+最终作答正是这样；`temperature=0` 且关思考时四次同一输出；`temperature=1` 加固定 `seed` 仍然每次都不同，
+也就是**这台 MLX 后端不接受 seed**，复现只能靠温度为 0；默认档带思考，温度为 0 也还是会抖。
+`configure_eval_env()` 因此默认写入 `RAG_AGENT_ANSWER_TEMPERATURE=0` 与 `RAG_AGENT_LLM_SEED=7`
+（后者留着表达意图，实际不起作用），只影响评估链路，想跑采样版 `export` 覆盖即可。
+
+噪声底用同配置重复三轮量（默认档，参数与前几轮完全一致）：
+
+```bash
+export RAG_COLLECTION_NAME=rag_eval_v8_latency
+export RAG_STORAGE_DIR=storage/eval/qdrant_v8_latency
+export RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_v8_latency/bm25.pkl
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+
+for n in 1 2 3; do
+  python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
+    --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 \
+    --output "eval/reports/v8_noise_floor_repeat_${n}.md" \
+    --json-output "eval/reports/v8_noise_floor_repeat_${n}.json" \
+    --run-note "同配置重复轮 ${n}"
+done
+```
+
+三轮跑完按逐条差异比对（拒答、意图、`stop_reason`、`source_hit`、工具调用数、答案文本、耗时），
+噪声底是：九项质量指标三轮完全一致，答案措辞每对轮次有 4~7 条不同但不改变指标，逐条行为只有 `r01`
+在第 1 轮翻动，而耗时第一轮比后两轮慢 52%（冷启动）——第 2、3 轮之间只差 0.2%。
+所以对照的口径写死为三条：**指标变化 ≥ 1 条样本（29 条上约 3.4pt）才当真；耗时读数作废第一轮；
+措辞变化不算证据**。细节见 `docs/ROADMAP.md` 的 v8.3。三轮跑完用这个脚本算噪声底：
+
+```bash
+python3 scripts/compare_eval_noise.py eval/reports/v8_noise_floor_repeat_1.json \
+  eval/reports/v8_noise_floor_repeat_2.json eval/reports/v8_noise_floor_repeat_3.json
+```
+
+它会列出「指标是否轮轮一致」和每一对轮次的逐条行为差异与耗时差。退出码非 0 表示有指标在轮次之间变了。
+
+比耗时（A/B 两种设置）要在同一进程里交替跑，别各跑一轮：
+
+```bash
+# 4 条子集，keep → off → keep；两次 keep 的每条耗时应当相同，否则说明读数不可信
+grep -E '"id": ?"(s01|s02|s04|r02)"' eval/v7_agent_qa.jsonl > /tmp/subset.jsonl
+for mode in keep off keep; do
+  RAG_AGENT_ANSWER_THINKING=$mode python3 scripts/evaluate.py --dataset /tmp/subset.jsonl \
+    --configs agent --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 \
+    --output "/tmp/sub_${mode}.md" --json-output "/tmp/sub_${mode}.json" \
+    --run-note "子集交替读数 $mode"
+done
+```
