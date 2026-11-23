@@ -54,11 +54,14 @@ jobs:
         run: python -m pytest tests -q
 
       # 评估集的 evidence 逐字校验不需要模型，跑模型之前先兜住标注漂移
-      - name: 校验三份评估集
+      # （v8 解析基准集的证据校验只读 eval/fixtures/v8_parse_bench.md 底稿，
+      #   不需要装第三方解析器，所以 CI 里也能验）
+      - name: 校验四份评估集
         run: |
           python scripts/evaluate.py --validate-only
           python scripts/evaluate.py --dataset eval/v5_paraphrase_qa.jsonl --validate-only
           python scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --validate-only
+          python scripts/evaluate.py --dataset eval/v8_parse_bench.jsonl --validate-only
 
   readonly:
     name: 只读演示依赖清单
