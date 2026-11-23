@@ -327,15 +327,13 @@ v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上
       `isError=false`、`row_count=3`、`columns=[name, price]`、`structuredContent.sql` 回显护栏后的 SQL、
       引用 `source_type=sql` / `table=demo.products` / `source_uri=demo.products#sql_query`；
       `UPDATE products SET price = 1` 被护栏拒（`isError=true`，原因「只允许 SELECT 或 WITH 开头的查询」）
-- [ ] 与 PR #22（分支 `claude/v8-mcp-server`，同样以 `main` 为基线，OPEN）的关系需要人工裁决：两边都自称 v8 第 1 项，
-      同名文件重叠（`private_rag/mcp/__init__.py`、`private_rag/mcp/evidence.py`、`private_rag/mcp/server.py`、
-      `scripts/serve_mcp.py`、`tests/test_mcp_server.py`、README/ROADMAP/CONTEXT）。用户已定「三个工具都要」，
-      本分支据此加回 `sql_query`，两边**只剩引用载荷这一处差异**：那边每条引用附块级 `locator`
+- [x] 与 PR #22（分支 `claude/v8-mcp-server`，同样以 `main` 为基线）的冲突已裁决（2026-11-23）：以本分支为主干，
+      #22 已关闭并留下说明。两边在 `sql_query` 加回以后只剩引用载荷一处差异——那边每条引用附块级 `locator`
       （`doc_id` / `chunk_index` / `snippet_offset`，为此改了 `agent/tools.py`），本分支沿用既有 `Citation` 字段、
       只把 `agent/runtime.py` 的装配抽出成 `build_tool_registry`（行为等价，没碰 `agent/tools.py`）。
-      合并建议：以本分支为主干，`locator` 作为后续单独 PR 补上，`agent/tools.py` 的改动留给那一侧
-- [ ] 块级 `locator`（PR #22 的做法）：`ToolBlock.locator` + `chunk_locator()` / `sql_locator`，让引用能回溯到
-      `doc_id` 与块内偏移。与本分支的三重门互不影响，尚未做
+      分支与提交 `6d24ac2` 保留在远端，`locator` 从那里取
+- [ ] 块级 `locator`（从已关闭的 PR #22 的 `6d24ac2` 取）：`ToolBlock.locator` + `chunk_locator()` / `sql_locator`，
+      让引用能回溯到 `doc_id` 与块内偏移。与本分支的三重门互不影响，尚未做
 - [ ] 流式工具结果与进度通知：手写实现只支持一次性结果，长调用（`ask` 十几秒）在客户端侧只能表现为「这次调用慢」
 - [ ] 鉴权与多用户：当前与本机 HTTP 服务同为「能启动进程的人即可读」，开了 `--allow-sql` 之后还包括白名单内的
       业务表，要给别人用需要先加鉴权或换 Qdrant server 模式
