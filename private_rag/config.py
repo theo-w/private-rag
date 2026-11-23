@@ -4,8 +4,34 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _env_optional_float(name: str) -> Optional[float]:
+    """可选浮点参数：未设置或非法都返回 ``None``，意思是「不传给模型」。
+
+    这类参数的默认值必须由调用方保留（不传），否则一改环境变量就改变了运行时行为。
+    """
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _env_optional_int(name: str) -> Optional[int]:
+    """可选整数参数：未设置或非法都返回 ``None``，同 ``_env_optional_float``。"""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
 
 
 def _env_int(name: str, default: int) -> int:
@@ -150,6 +176,13 @@ def _answer_thinking_mode(raw: str) -> str:
 # answer_rate 1.000 → 0.880、source_hit 1.000 → 0.960，所以默认保留思考，只留开关。
 # 读数与逐条变化见 docs/ROADMAP.md 的 v8.2。
 AGENT_ANSWER_THINKING = _answer_thinking_mode(os.getenv("RAG_AGENT_ANSWER_THINKING", "keep"))
+# 采样参数与随机种子：默认都不传，运行时保持服务端的默认抽样行为。
+# 评估链路会在 configure_eval_env() 里把两者钉死（温度 0 + 固定 seed）——此前同一条默认配置的
+# 两轮评估对不上（单条均耗时 40.6s vs 56.6s、source_hit 1.000 vs 0.960、d02 意图 mixed vs database），
+# 因为最终作答从来没传 temperature，用的是服务端默认值，29 条上 ±3 条拒答可能只是抽样噪声。
+# 钉死以后前后对比才谈得上归因，见 docs/ROADMAP.md 的 v8.3。
+AGENT_ANSWER_TEMPERATURE = _env_optional_float("RAG_AGENT_ANSWER_TEMPERATURE")
+AGENT_LLM_SEED = _env_optional_int("RAG_AGENT_LLM_SEED")
 # 决策输出通道（v7 function calling 对比的实验开关）：
 # json —— format="json" 结构化输出（默认）；function —— 原生 function calling。
 # 本机 MLX 模型的工具调用格式不稳定，默认不启用；对比见 scripts/compare_fc_decisions.py。

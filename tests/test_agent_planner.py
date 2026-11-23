@@ -14,6 +14,7 @@ import private_rag.agent.prompts as prompts_module
 from private_rag.agent.planner import LlmPlanner
 from private_rag.agent.prompts import (
     PlannerError,
+    ask_json,
     build_final_prompt,
     build_route_prompt,
     build_step_prompt,
@@ -212,6 +213,82 @@ class TestAnswerThinkingSwitch:
         # 拼错的取值不静默失效：回退到保持模型默认
         assert _answer_thinking_mode("maybe") == "keep"
         assert _answer_thinking_mode("") == "keep"
+
+
+class TestEvalDeterminismParams:
+    """采样参数与 seed：运行时都不传（保持服务端默认），评估链路才钉死。
+
+    钉死之前最终作答既不传 temperature 也不传 seed，同一条证据两次生成会给出不同答案，
+    同配置的两次评估也就对不上（见 docs/ROADMAP.md 的 v8.3）。
+    """
+
+    def test_runtime_passes_neither(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_TEMPERATURE", None)
+        monkeypatch.setattr(prompts_module, "AGENT_LLM_SEED", None)
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert "temperature" not in FakeChatOllama.calls[0]
+        assert "seed" not in FakeChatOllama.calls[0]
+        # 决策调用本来传 temperature=0，没配 seed 时也不传
+        FakeChatOllama.payload = json.dumps({"action": "final", "reason": "r"})
+        ask_json("提示词", kind="step")
+        assert FakeChatOllama.calls[1]["temperature"] == 0
+        assert "seed" not in FakeChatOllama.calls[1]
+
+    def test_pinned_seed_reaches_answer_and_decisions(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_LLM_SEED", 7)
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert FakeChatOllama.calls[0]["seed"] == 7
+        # 流式路径与思考开关一样共用同一套参数
+        assert list(stream_final_answer("问题", "[1] 证据")) == ["答案 [1]"]
+        assert FakeChatOllama.calls[1]["seed"] == 7
+        FakeChatOllama.payload = json.dumps({"action": "final", "reason": "r"})
+        ask_json("提示词", kind="step")
+        assert FakeChatOllama.calls[2]["seed"] == 7
+
+    def test_pinned_answer_temperature_only_affects_answer(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_TEMPERATURE", 0.0)
+        monkeypatch.setattr(prompts_module, "AGENT_LLM_SEED", None)
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert FakeChatOllama.calls[0]["temperature"] == 0.0
+        assert "seed" not in FakeChatOllama.calls[0]
+
+    def test_optional_env_parsing(self, monkeypatch):
+        from private_rag.config import _env_optional_float, _env_optional_int
+
+        monkeypatch.delenv("RAG_X", raising=False)
+        assert _env_optional_float("RAG_X") is None
+        assert _env_optional_int("RAG_X") is None
+        monkeypatch.setenv("RAG_X", "0")
+        assert _env_optional_float("RAG_X") == 0.0
+        assert _env_optional_int("RAG_X") == 0
+        monkeypatch.setenv("RAG_X", "0.7")
+        assert _env_optional_float("RAG_X") == 0.7
+        # 非法值按「没设置」处理，不会把运行时行为改成某个猜出来的数
+        assert _env_optional_int("RAG_X") is None
+
+    def test_eval_env_pins_both(self, monkeypatch):
+        import os
+
+        from private_rag.eval_env import configure_eval_env
+
+        for name in ("RAG_AGENT_ANSWER_TEMPERATURE", "RAG_AGENT_LLM_SEED"):
+            monkeypatch.delenv(name, raising=False)
+        configure_eval_env()
+        assert os.environ["RAG_AGENT_ANSWER_TEMPERATURE"] == "0"
+        assert os.environ["RAG_AGENT_LLM_SEED"] == "7"
+
+    def test_eval_env_keeps_exported_override(self, monkeypatch):
+        import os
+
+        from private_rag.eval_env import configure_eval_env
+
+        # 想跑采样版可以把变量 export 掉，评估隔离不强行覆盖
+        monkeypatch.setenv("RAG_AGENT_ANSWER_TEMPERATURE", "0.8")
+        configure_eval_env()
+        assert os.environ["RAG_AGENT_ANSWER_TEMPERATURE"] == "0.8"
 
 
 class TestRouterPromptDataAvailability:

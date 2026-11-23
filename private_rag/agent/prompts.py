@@ -16,8 +16,10 @@ from typing import Any, Optional, Sequence
 from langchain_ollama import ChatOllama
 
 from private_rag.config import (
+    AGENT_ANSWER_TEMPERATURE,
     AGENT_ANSWER_THINKING,
     AGENT_LLM_MODEL,
+    AGENT_LLM_SEED,
     AGENT_PLANNER_THINKING_STAGES,
     AGENT_PLANNER_TOKENS,
     MAX_QUESTION_CHARS,
@@ -191,6 +193,15 @@ def _history_section(history: Optional[History]) -> str:
     return f"对话历史（仅用于理解当前问题的指代，不能作为事实依据）：\n{text}\n\n"
 
 
+def _seed_kwargs() -> dict[str, Any]:
+    """决策与作答调用要不要钉随机种子。
+
+    没配置就不传（保持服务端默认）；评估链路会钉一个固定值，这样同配置的两次评估
+    才能逐条对齐，前后对比的差别才不至于混进抽样噪声。
+    """
+    return {"seed": AGENT_LLM_SEED} if AGENT_LLM_SEED is not None else {}
+
+
 def _planner_reasoning(kind: str, thinking: Optional[bool]) -> bool:
     """某个决策环节要不要让模型先思考。
 
@@ -223,6 +234,7 @@ def ask_json(
         disable_streaming=True,
         keep_alive="10m",
         reasoning=_planner_reasoning(kind, thinking),
+        **_seed_kwargs(),
     )
     response = llm.invoke(prompt)
     try:
@@ -304,11 +316,19 @@ def _answer_reasoning(thinking: Optional[str] = None) -> Optional[bool]:
 
 
 def _final_llm(model: str, thinking: Optional[str] = None) -> ChatOllama:
-    """最终作答用的模型实例：参数与改动前一致，只在开关显式时多传 reasoning。"""
+    """最终作答用的模型实例：默认参数与改动前一致，只有开关显式时才多传参数。
+
+    改动前这里既不传 ``temperature`` 也不传 ``seed``，也就是用服务端的默认抽样，
+    同一条证据两次生成可以给出不同答案；评估链路现在会把两者钉死（见
+    ``configure_eval_env``），运行时仍然不传，行为不变。
+    """
     kwargs: dict[str, Any] = {"model": model, "num_ctx": 8192, "keep_alive": "10m"}
     reasoning = _answer_reasoning(thinking)
     if reasoning is not None:
         kwargs["reasoning"] = reasoning
+    if AGENT_ANSWER_TEMPERATURE is not None:
+        kwargs["temperature"] = AGENT_ANSWER_TEMPERATURE
+    kwargs.update(_seed_kwargs())
     return ChatOllama(**kwargs)
 
 
@@ -527,6 +547,7 @@ def ask_tool_json(
         disable_streaming=True,
         keep_alive="10m",
         reasoning=_planner_reasoning(kind, thinking),
+        **_seed_kwargs(),
     ).bind_tools([schema])
     response = llm.invoke(prompt)
     tool_calls = getattr(response, "tool_calls", None) or []
