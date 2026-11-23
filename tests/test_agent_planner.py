@@ -20,6 +20,7 @@ from private_rag.agent.prompts import (
     generate_final_answer,
     heuristic_route,
     parse_decision,
+    stream_final_answer,
 )
 from private_rag.generation import REFUSAL
 from private_rag.config import AGENT_PLANNER_TOKENS
@@ -36,6 +37,9 @@ class FakeChatOllama:
 
     def invoke(self, prompt):
         return SimpleNamespace(content=FakeChatOllama.payload)
+
+    def stream(self, prompt):
+        yield SimpleNamespace(content=FakeChatOllama.payload)
 
 
 @pytest.fixture(autouse=True)
@@ -155,6 +159,59 @@ class TestPlannerThinkingStages:
         # 拼错的取值不静默失效：回退默认环节
         monkeypatch.setenv("RAG_AGENT_PLANNER_THINKING", "routeee")
         assert _env_stages("RAG_AGENT_PLANNER_THINKING", "route") == frozenset({"route"})
+
+
+class TestAnswerThinkingSwitch:
+    """最终作答的思考开关：默认 ``keep`` 保持模型默认，只有显式 on/off 才传 ``reasoning``。
+
+    实测同一条证据文本 keep 与 on 都是 10.3 秒、off 是 2.95 秒，默认确实在思考；
+    但关掉以后 29 条对照出现三条误拒，所以默认保持 ``keep``，只留开关。读数见 docs/ROADMAP.md 的 v8.2。
+    """
+
+    def test_default_keeps_model_default(self):
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert "reasoning" not in FakeChatOllama.calls[0]
+
+    def test_off_passes_reasoning_false(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_THINKING", "off")
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert FakeChatOllama.calls[0]["reasoning"] is False
+
+    def test_on_passes_reasoning_true(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_THINKING", "on")
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert FakeChatOllama.calls[0]["reasoning"] is True
+
+    def test_explicit_argument_beats_config(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_THINKING", "off")
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据", thinking="keep")
+        assert "reasoning" not in FakeChatOllama.calls[0]
+
+    def test_stream_path_shares_the_switch(self, monkeypatch):
+        # MCP 服务与 demo 的流式路径用同一个开关，不能只有非流式生效
+        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_THINKING", "off")
+        FakeChatOllama.payload = "答案 [1]"
+        assert list(stream_final_answer("问题", "[1] 证据")) == ["答案 [1]"]
+        assert FakeChatOllama.calls[0]["reasoning"] is False
+
+    def test_no_evidence_still_skips_the_model(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_THINKING", "off")
+        assert generate_final_answer("问题", "   ") == REFUSAL
+        assert FakeChatOllama.calls == []
+
+    def test_value_parsing_falls_back_to_keep(self):
+        from private_rag.config import _answer_thinking_mode
+
+        assert _answer_thinking_mode("off") == "off"
+        assert _answer_thinking_mode("1") == "on"
+        assert _answer_thinking_mode("keep") == "keep"
+        # 拼错的取值不静默失效：回退到保持模型默认
+        assert _answer_thinking_mode("maybe") == "keep"
+        assert _answer_thinking_mode("") == "keep"
 
 
 class TestRouterPromptDataAvailability:
