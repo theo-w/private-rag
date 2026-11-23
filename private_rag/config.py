@@ -131,3 +131,17 @@ SCAN_TABLE_MODEL_PATH = os.getenv(
     "RAG_SCAN_TABLE_MODEL",
     str(ROOT / "data" / "models" / "slanet_plus.onnx"),
 )
+
+# v8 解析基准：扫描件解析后端。selfbuilt 是默认的 rapidocr + OpenCV + SLANet 链路，
+# docling / mineru 是外部解析器——它们要求 Python ≥3.10 / ≥3.11，而本仓库钉死 3.9，
+# 只能装进另一个解释器的虚拟环境，主进程用 subprocess 调，见 docs/adr/0007。
+SCAN_PARSER = os.getenv("RAG_SCAN_PARSER", "").strip().lower() or "selfbuilt"
+# 外部解析器虚拟环境的解释器；默认仓库根 .venv-parse/
+PARSE_VENV_PYTHON = _env_path("RAG_PARSE_VENV_PYTHON", ROOT / ".venv-parse" / "bin" / "python")
+# 整份 PDF 一次解析的子进程超时（秒）：模型冷启动加推理，给足但不至于挂死
+PARSE_BACKEND_TIMEOUT_SECONDS = _env_int("RAG_PARSE_BACKEND_TIMEOUT", 300)
+# 解析结果缓存：同一份 PDF 反复重跑入库不再付冷启动代价
+PARSE_CACHE_DIR = _env_path("RAG_PARSE_CACHE_DIR", ROOT / "storage" / "parse_cache")
+# MinerU 档位：basic = 流水线小模型，standard = 再加 llama.cpp 的 VLM。主进程不解析，
+# 只把它传给驱动并参与缓存键——换档必须重解析，否则旧档的缓存会串进新档的读数
+MINERU_TIER = os.getenv("RAG_MINERU_TIER", "").strip().lower() or "standard"

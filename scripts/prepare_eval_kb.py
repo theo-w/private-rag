@@ -14,17 +14,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # 必须先设置环境变量，再导入 private_rag.config 等模块（常量在导入时确定）
-from private_rag.eval_env import (  # noqa: E402
-    EVAL_COLLECTION_NAME,
-    EVAL_LEXICAL_INDEX_PATH,
-    EVAL_STORAGE_DIR,
-    configure_eval_env,
-)
+from private_rag.eval_env import configure_eval_env  # noqa: E402
 
 configure_eval_env()
 
 from langchain_ollama import OllamaEmbeddings  # noqa: E402
 
+from private_rag import config  # noqa: E402
 from private_rag.config import EMB_MODEL  # noqa: E402
 from private_rag.ingestion.pipeline import run_ingest  # noqa: E402
 from private_rag.sources import ConfigError, load_sources_config  # noqa: E402
@@ -45,20 +41,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        config = load_sources_config(args.config)
+        sources_cfg = load_sources_config(args.config)
     except ConfigError as exc:
         print(f"❌ 配置错误：{exc}")
         return 1
 
     print("📦 评估知识库（与演示库隔离）")
-    print(f"   collection : {EVAL_COLLECTION_NAME}")
-    print(f"   Qdrant     : {EVAL_STORAGE_DIR}")
-    print(f"   BM25       : {EVAL_LEXICAL_INDEX_PATH}")
+    # 打印生效值而不是 eval_env 的默认常量：消融靠环境变量分库，打印默认值会让人以为隔离没生效
+    print(f"   collection : {config.COLLECTION_NAME}")
+    print(f"   Qdrant     : {config.STORAGE_DIR}")
+    print(f"   BM25       : {config.LEXICAL_INDEX_PATH}")
+    print(f"   解析后端   : {config.SCAN_PARSER}")
 
     client = open_client()
     try:
         stats = run_ingest(
-            config,
+            sources_cfg,
             client=client,
             embedding=OllamaEmbeddings(model=EMB_MODEL),
             recreate=args.recreate,

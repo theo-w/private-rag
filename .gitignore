@@ -9,6 +9,8 @@ config/sources.yaml
 __pycache__/
 *.py[cod]
 .venv/
+# v8 解析基准用的第三方解析器虚拟环境（Python 3.11，与仓库钉死的 3.9 隔离）
+.venv-parse/
 # 系统与编辑器
 .DS_Store
 .idea/
