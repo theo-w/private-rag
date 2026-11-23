@@ -624,3 +624,45 @@ JSON 合并后再聚合（合并是一次性脚本，聚合走仓库内 `aggrega
 - **评估语料是本仓库文档，这轮不是 v7.3 的语料快照**：`docs/v7.4-history-as-evidence.md` 已并入 main
   并被 `config/sources.eval.yaml` 入库，m01/m05/c03 等条目的引用列表里正常出现它。检索排位的差异里
   含这一项，不能全部记到代码改动头上。
+
+### 单条延迟复跑（2026-11-23，`v8-latency-planner-nothink`）
+
+量的是 agentic 单条耗时，只动决策调用的思考开关（`RAG_AGENT_PLANNER_THINKING`），提示词、门控、步数与
+指标判定式都没动。读数表与逐条变化见 `docs/ROADMAP.md` 的 v8.1 一节，复现命令：
+
+```bash
+# 三元组一起换到独立库，建一次给三轮共用（入库侧本轮没动，语料快照因此一致）
+export RAG_COLLECTION_NAME=rag_eval_v8_latency
+export RAG_STORAGE_DIR=storage/eval/qdrant_v8_latency
+export RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_v8_latency/bm25.pkl
+python3 scripts/prepare_eval_kb.py
+
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
+  --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 \
+  --output eval/reports/v8_latency_route_thinking.md \
+  --json-output eval/reports/v8_latency_route_thinking.json \
+  --run-note "决策环节 RAG_AGENT_PLANNER_THINKING=route（路由保留思考、步进决策关思考）"
+```
+
+基线（决策全开思考）与全关档（`RAG_AGENT_PLANNER_THINKING=off`）的同一批读数在
+`eval/reports/v8_latency_baseline_thinking_on.{md,json}` 与 `eval/reports/v8_latency_thinking_off.{md,json}`；
+基线是在工作区把 `private_rag/config.py` 与 `private_rag/agent/prompts.py` 临时退回基线提交跑的，
+报告头的 `git_dirty` 因此为 true（未提交的只有测试文件）。
+
+口径与限制，引用这轮数字时一并带上：
+
+- **三轮必须同条件**：同一三元组、同 `--configs agent`、同 `--agent-sources`、同 `--skip-ragas --max-workers 1`、
+  同生成模型 `qwen3.8:27b-mlx`。串行跑是为了不抢本机 Ollama，同时也是 Qdrant 本地模式的要求。
+- **报告里「检索」与「生成」两块不足以定位决策调用**：`avg_retrieval_ms` 只含工具执行，路由与步进决策
+  都落在 `avg_generation_ms` 里。要拆开用量 `scripts/measure_planner_latency.py`（同一证据文本逐格计时）。
+- **`avg_latency_ms` 是端到端单条耗时**：含路由、每次步进决策、工具执行、双侧门控的重试与最终作答，
+  不是纯模型时间。默认档 56.6s 里工具执行 1.0s，其余都是 LLM 调用。
+- **29 条样本只支撑方向**：±1 条就是 ±4 个百分点，`context_precision@3` 那类 -0.027 的量级也在噪声里。
+  要把「降到多少」当结论，需要更大的评估集。
+- **换机器 / 换模型 / 换精排不可比**：这组数测于本机 Ollama 0.40.16、`qwen3.8:27b-mlx`、`bge-m3`、
+  `BAAI/bge-reranker-v2-m3`、MLX 后端、串行单并发；任一变化都要重测基线再比。
+- **精排模型加载会做联网 HEAD 校验**：`BAAI/bge-reranker-v2-m3` 在网络不通时报 `Read timed out`，重试 5 次
+  以后 transformers 回退本地缓存继续跑。想跳过校验带 `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`，
+  模型与权重都没变、不影响可比性，但要写进 `--run-note`。
+- **关掉决策思考会改变路由判定**：全关那轮三条 multi_step 样本的意图从 `database` 变成 `mixed`，
+  双侧门控接着禁止提前 `final`，`answer_rate` 因此从 1.000 掉到 0.880。默认档保留路由的思考就是这个原因。

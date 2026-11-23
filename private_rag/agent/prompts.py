@@ -15,7 +15,12 @@ from typing import Any, Optional, Sequence
 
 from langchain_ollama import ChatOllama
 
-from private_rag.config import AGENT_LLM_MODEL, AGENT_PLANNER_TOKENS, MAX_QUESTION_CHARS
+from private_rag.config import (
+    AGENT_LLM_MODEL,
+    AGENT_PLANNER_THINKING_STAGES,
+    AGENT_PLANNER_TOKENS,
+    MAX_QUESTION_CHARS,
+)
 from private_rag.generation import REFUSAL, History, render_history
 
 # 明确指向「库里精确数据」的线索；LLM 不可用时用它决定首选工具
@@ -185,10 +190,29 @@ def _history_section(history: Optional[History]) -> str:
     return f"对话历史（仅用于理解当前问题的指代，不能作为事实依据）：\n{text}\n\n"
 
 
+def _planner_reasoning(kind: str, thinking: Optional[bool]) -> bool:
+    """某个决策环节要不要让模型先思考。
+
+    默认按环节读配置（而不是写死在参数默认值里），这样测试与运行期改配置都能生效。
+    """
+    if thinking is not None:
+        return bool(thinking)
+    return kind in AGENT_PLANNER_THINKING_STAGES
+
+
 def ask_json(
-    prompt: str, *, model: str = AGENT_LLM_MODEL, num_predict: int = AGENT_PLANNER_TOKENS
+    prompt: str,
+    *,
+    kind: str = "step",
+    model: str = AGENT_LLM_MODEL,
+    num_predict: int = AGENT_PLANNER_TOKENS,
+    thinking: Optional[bool] = None,
 ) -> dict:
-    """向模型要一段 JSON；解析失败抛 PlannerError。"""
+    """向模型要一段 JSON；解析失败抛 PlannerError。
+
+    思考按环节开关（``RAG_AGENT_PLANNER_THINKING``，默认只让路由思考）：决策输出是
+    一小段结构化 JSON，思考 token 既吃输出预算又吃时间。
+    """
     llm = ChatOllama(
         model=model,
         temperature=0,
@@ -197,6 +221,7 @@ def ask_json(
         num_predict=num_predict,
         disable_streaming=True,
         keep_alive="10m",
+        reasoning=_planner_reasoning(kind, thinking),
     )
     response = llm.invoke(prompt)
     try:
@@ -457,6 +482,7 @@ def ask_tool_json(
     kind: str,
     model: str = AGENT_LLM_MODEL,
     num_predict: int = AGENT_PLANNER_TOKENS,
+    thinking: Optional[bool] = None,
 ) -> dict:
     """让模型用原生 function calling 给出与 JSON 模式同一份决策输出。
 
@@ -474,6 +500,7 @@ def ask_tool_json(
         num_predict=num_predict,
         disable_streaming=True,
         keep_alive="10m",
+        reasoning=_planner_reasoning(kind, thinking),
     ).bind_tools([schema])
     response = llm.invoke(prompt)
     tool_calls = getattr(response, "tool_calls", None) or []
