@@ -7,8 +7,9 @@
 开关是 `private_rag.config.TREE_INDEX_ENABLED` 的导入时快照，检索时读的是
 `private_rag.qa` 里的那个名字，所以必须改模块属性才生效（只改环境变量不会被读到）。
 
-用法（要打到本机 Ollama，串行跑；一条大约 40 秒，29 条三轮约一小时）：
+用法（要打到本机 Ollama，串行跑；一条 20~35 秒，29 条三轮约 40 分钟）：
     python3 scripts/measure_tree_index_ab.py --values off,on,off --keep-reports
+报告写在 `eval/reports/v8_5_tree_ab_{1,2,3}_{off,on,off}.md/.json`（默认前缀 `v8_5_tree_ab`）。
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ configure_eval_env()
 import private_rag.qa as qa  # noqa: E402
 
 # scripts/evaluate.py 就是评估 CLI，这里按轮调用它的 main
+import compare_eval_noise  # noqa: E402  # 同值轮次的噪声底比对（v8.3 口径）
 import evaluate  # noqa: E402
 from private_rag.retrieval.tree import PATH_PREFIX  # noqa: E402
 
@@ -111,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="按顺序跑的开关值，逗号分隔；建议 off,on,off")
     parser.add_argument("--dataset", default="eval/v7_agent_qa.jsonl")
     parser.add_argument("--agent-sources", default=str(EVAL_AGENT_SOURCES_CONFIG))
-    parser.add_argument("--prefix", default="tree_ab", help="报告文件名前缀")
+    parser.add_argument("--prefix", default="v8_5_tree_ab", help="报告文件名前缀")
     parser.add_argument("--keep-reports", action="store_true",
                         help="把报告写到 eval/reports 而不是临时目录")
     args = parser.parse_args(argv)
@@ -149,6 +151,15 @@ def main(argv: list[str] | None = None) -> int:
     for index, (value, stats) in enumerate(zip(values, rounds), start=1):
         note = "（第一轮，作废）" if index == 1 else ""
         print(f"  第 {index} 轮 tree_index={value:6s} {stats['avg_ms'] / 1000:6.1f}s{note}")
+
+    # 噪声底：同一个开关值的轮次两两比对（通常是两个 off 轮）。指标不一致就说明
+    # 这一轮的变化不能全归给开关，比对脚本本身按 v8.3 口径判定并返回非 0
+    same_value = [i for i, value in enumerate(values) if value == values[0]]
+    if len(same_value) > 1:
+        print("\n=== 同值轮次的噪声底（compare_eval_noise.py）===")
+        compare_eval_noise.main(
+            [str(out_dir / f"{args.prefix}_{i + 1}_{values[i]}.json") for i in same_value]
+        )
 
     reference = rounds[0]
     for index, (value, stats) in enumerate(zip(values, rounds), start=1):
