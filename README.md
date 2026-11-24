@@ -303,7 +303,7 @@ v5 处理两个问题：子块召回准，但 700 字符上下文容易丢前因
 - 旧库没有 `parent` 字段时自动回退子块，无需迁移；重新执行 ingest 后生效。
 - 父块文本随每个子块各存一份，Qdrant 与 BM25 体积约放大 2–3 倍；换来的是无需额外 docstore，也不会出现父子存储不一致。
 - 父块的边界是固定字符数，跟文档结构无关，所以会断在「这里有五个关键角色：」这种地方、列表掉进下一个父块。
-  v8.5 另有一条按标题层级还原上下文的并列通路，默认关闭，见下文「章节树索引（v8.5）」。
+  v8.6 另有一条按标题层级还原上下文的并列通路，默认关闭，见下文「章节树索引（v8.6）」。
 
 | 环境变量 | 默认 | 说明 |
 |---|---:|---|
@@ -697,7 +697,65 @@ Qdrant 本地磁盘模式同一路径只允许一个进程打开，所以 **MCP 
 因为官方 `mcp` SDK 要求 Python 3.10+ 而本仓库钉在 3.9，选型与代价见
 [docs/adr/0004](docs/adr/0004-mcp-stdio-without-sdk.md)。
 
-## 章节树索引（v8.5）
+## 解析后端与解析基准（v8）
+
+扫描件某一页的正文与表格由哪套解析器给出，由 `RAG_SCAN_PARSER` 决定：`selfbuilt`（默认）/ `docling` / `mineru`。
+默认值就是 v6.2 那条链路（渲染 → RapidOCR → OpenCV 形态学找表格框 → rapid-table SLANet 结构 → 按框过滤正文 OCR），
+不装任何额外东西、不起子进程。这个开关存在的目的是**量出自建链路处在什么位置**，不是把自建链路换掉：
+换后端以后正文 OCR 的来源也换了（整页替换口径），两侧差异里含 OCR 差异，是否切换要看读数。
+
+`docling` 与 `mineru` 要求 Python 3.10 / 3.11，装不进本仓库与 CI 钉死的 3.9，所以它们是**可选后端**：
+装进仓库根的 `.venv-parse/`（独立 3.11 解释器），主进程用 subprocess 调驱动脚本，靠一份 JSON 契约通信。
+`requirements-parse-bench.txt` 不在 `requirements.txt` 里，也不在 CI 里——不装它就跑默认后端，一切照旧。
+
+```bash
+# 一次性安装（要 uv；第三方与本机 3.9 完全隔离，换机器要重装）
+uv venv --python /opt/homebrew/bin/python3.11 .venv-parse
+uv pip install --python .venv-parse/bin/python -r requirements-parse-bench.txt
+# MinerU 的模型必须预下载，缺模型驱动直接报错而不是悄悄降档（standard 档含 llama.cpp 的 VLM）
+.venv-parse/bin/mineru-kit models download --tier standard -s modelscope
+
+# 自检：venv、库、模型、驱动输出是否就绪（失败即早停并给可操作提示）
+python3 scripts/parse_bench.py --preflight --backends docling,mineru
+
+# 解析层对照（不打生成模型、不入库，直接量解析结果对不对）
+python3 scripts/parse_bench.py --backends selfbuilt,docling,mineru \
+  --output /tmp/parse_baseline.md --json-output /tmp/parse_baseline.json
+
+# 用第三方后端入库（开关只在入库时生效，检索与作答读的是已入库的块）。
+# 想同时留两侧，就换一个 collection 与存储目录，别覆盖默认库
+RAG_SCAN_PARSER=docling RAG_COLLECTION_NAME=rag_docling RAG_STORAGE_DIR=storage/docling \
+  python3 scripts/ingest.py --config config/sources.yaml --recreate
+```
+
+行为约定：
+
+- **不静默降级**。后端名非法、`.venv-parse` 缺失、驱动失败都抛 `ScanBackendError`；某页后端没给结果才回退
+  自建链路，并把这件事写进入库 `errors`。基准读数最怕「其实跑的是自建链路」混进第三方侧，宁可报错。
+- **一次调用解析整份 PDF**（模型冷启动只付一次），结果按 PDF 字节内容缓存进 `storage/parse_cache/`
+  （已 gitignore，键含输出契约版本与影响结果的开关），反复重跑入库不再付冷启动。
+- **MinerU 的档位是 `RAG_MINERU_TIER`**（默认 `standard` = 流水线小模型 + llama.cpp 的 VLM，`basic` = 只有流水线小模型），
+  它参与缓存键：换了档位必须重解析，否则旧档的缓存会冒充新档的读数。4.2.3 的批量解析入口是 `mineru-kit parse`
+  （`mineru parse` 是「文档库 + 本地服务」那套 CLI，基准不启那个服务，也不用 `--remote`——把 PDF 传到外部服务
+  与本仓库「本机解析」的前提相反）。
+- **下游契约不变**：`doc_id`、页码、表格名、表格的逗号序列化、父子块切分全部共用同一份装配代码，
+  所以换后端的两轮读数与 v6.2 的报告直接可比。
+- 后端页号与 PDF 实有页数不一致会在 `errors` 里写明：缺的页回退自建，多出来的页忽略。
+- 换 collection 时 `RAG_LEXICAL_INDEX_PATH` 也要跟着换——词法索引的默认路径不跟着 `RAG_STORAGE_DIR` 走，
+  只换存储目录会让混合检索读到另一侧的 BM25 索引。
+- 超时上限 `RAG_PARSE_BACKEND_TIMEOUT`（默认 300 秒）；解释器路径可用 `RAG_PARSE_VENV_PYTHON` 指到已有的 3.11。
+- `mineru` 的 CLI 与模型装在虚拟环境里，驱动按 `sys.executable` 旁边找它，不依赖你有没有 activate。
+
+为什么走独立虚拟环境 + subprocess 而不是升仓库的 Python，考虑过的方案与代价见
+[docs/adr/0007](docs/adr/0007-scan-parse-backend-out-of-process.md)。指标口径、fixture 四页规格、三侧读数与
+端到端复现命令见 [eval/README.md](eval/README.md) 的「v8 解析基准集」；PaddleOCR-VL 没进候选，它要 CUDA 上的
+vLLM/SGLang 服务，本机 Apple Silicon 跑不了。
+
+首轮读数（2026-11-23）：解析层 docling 四页表格全对（`table_recall` 1.00 / `cell_accuracy` 1.00），自建与
+MinerU 同为 0.75，缺口都集中在无框线那一页；端到端新集自建 5/7 命中（0.571），docling 与 MinerU 都 7/7。
+**默认后端仍是 `selfbuilt`**，是否切换的结论与代价写在 ROADMAP 的 v8.5 与 eval/README 的「三侧读数」。
+
+## 章节树索引（v8.6）
 
 父块扩展解决的是「召回准但读得太少」，可它的边界是按字符数切出来的，跟文档本身的章节没关系：
 一段话正好断在「这里有五个关键角色：」后面，那五个角色就掉进下一个父块，模型读到的永远是半句话。
@@ -740,7 +798,7 @@ python3 scripts/build_tree_index.py --eval     # 评估库，写到 storage/eval
 
 打开这一路以后，它**只作用在路由判成「纯知识」的问题上**（意图 `knowledge`，以及没有意图的
 经典链路）。原因是实跑读数里，混合问题读到一整节带路径的正文就判定证据够了、少查一次数据库
-（见 [docs/ROADMAP.md](docs/ROADMAP.md) 的 v8.5）。`database` / `mixed` / `none` 意图的检索仍走原来的父块扩展。
+（见 [docs/ROADMAP.md](docs/ROADMAP.md) 的 v8.6）。`database` / `mixed` / `none` 意图的检索仍走原来的父块扩展。
 
 开关在每次检索时读，不在启动时定死，所以同一个进程里可以开/关交替对照：
 
@@ -760,7 +818,7 @@ python3 scripts/measure_tree_index_ab.py --values off,on,off --keep-reports
   不是噪声。第二轮按意图收窄以后这条回退没了（三轮都是 1.000），代价堵住的同时收益也没出现：开档轮三项命中
   指标与暖「关」轮逐字相同。耗时两轮都判不可判定——同一设置的两个「关」轮自己就差 17.9%～32.6%，
   而且「变快最多」的几条都是数据库意图、这一路没作用于它们。所以默认档仍是关。
-  完整读数与成因见 [docs/ROADMAP.md](docs/ROADMAP.md) 的 v8.5。
+  完整读数与成因见 [docs/ROADMAP.md](docs/ROADMAP.md) 的 v8.6。
 - 树索引是文件，跟 BM25 一样要在内容变化后重建：重新 ingest 以后需要再跑一次 `build_tree_index.py`。
 
 ## 只读公网演示（Render）

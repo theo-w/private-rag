@@ -1,0 +1,633 @@
+{
+  "meta": {
+    "report_title": "# private-rag 检索策略评估报告：v6_scan_table",
+    "generated_at": "2026-11-23T15:11:03+08:00",
+    "dataset": "eval/v6_scan_table.jsonl",
+    "dataset_sha256": "f82101d5701ea5d782f4b5c77f08e12ce8719b616108ff2a393fbf9d76d2b0e3",
+    "dataset_total": 6,
+    "samples_total": 6,
+    "samples_answerable": 5,
+    "samples_refusal": 1,
+    "sample_ids": [
+      "v6st-01",
+      "v6st-02",
+      "v6st-03",
+      "v6st-04",
+      "v6st-05",
+      "v6st-06"
+    ],
+    "categories": {
+      "ingestion": 4,
+      "refusal": 1,
+      "multi_step": 1
+    },
+    "configs": [
+      "full"
+    ],
+    "agent": {
+      "enabled": false,
+      "configs": []
+    },
+    "dataset_is_default": false,
+    "output_markdown": "eval/reports/v8_parse_ab_scan_mineru.md",
+    "output_json": "eval/reports/v8_parse_ab_scan_mineru.json",
+    "llm_model": "qwen3.8:27b-mlx",
+    "judge_model": "qwen3.8:27b-mlx",
+    "embed_model": "bge-m3",
+    "ragas": {
+      "enabled": false,
+      "configs": [],
+      "limit": null,
+      "metrics": [
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall"
+      ],
+      "strictness": 3,
+      "max_workers": 1,
+      "cache": true,
+      "cache_dir": "storage/eval_cache"
+    },
+    "ragas_errors": {},
+    "duration_seconds": 52.04,
+    "git_commit": "530418c302c8a09f171795828343d649e2e73dea",
+    "git_dirty": true,
+    "run_note": "解析后端 mineru（standard 档）"
+  },
+  "samples_meta": [
+    {
+      "id": "v6st-01",
+      "question": "库存盘点表中键盘的数量和单价分别是多少？",
+      "category": "ingestion",
+      "answerable": true,
+      "expected_source": "eval/fixtures/v6_scan_table.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "v6st-02",
+      "question": "库存盘点表中鼠标的数量和单价分别是多少？",
+      "category": "ingestion",
+      "answerable": true,
+      "expected_source": "eval/fixtures/v6_scan_table.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "v6st-03",
+      "question": "库存盘点表的表格有哪几列？",
+      "category": "ingestion",
+      "answerable": true,
+      "expected_source": "eval/fixtures/v6_scan_table.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "v6st-04",
+      "question": "这份盘点表正文里的备注写了什么？",
+      "category": "ingestion",
+      "answerable": true,
+      "expected_source": "eval/fixtures/v6_scan_table.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "v6st-05",
+      "question": "盘点表里打印机的数量是多少？",
+      "category": "refusal",
+      "answerable": false,
+      "expected_source": "",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "v6st-06",
+      "question": "按盘点表计算，键盘按单价卖出的总金额是多少？",
+      "category": "multi_step",
+      "answerable": true,
+      "expected_source": "eval/fixtures/v6_scan_table.md",
+      "expected_sources": [],
+      "history_turns": 0
+    }
+  ],
+  "configs": {
+    "full": {
+      "spec": {
+        "name": "full",
+        "label": "混合召回 + 精排（v4 基线）",
+        "use_lexical": true,
+        "use_rerank": true,
+        "top_k": 3,
+        "use_parent": false,
+        "query_rewrite": "off",
+        "context_max_chars": 6000,
+        "is_agent": false
+      },
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.5,
+        "mrr@3": 0.9,
+        "source_hit": 0.0,
+        "both_sides_hit": null,
+        "answer_rate": 1.0,
+        "refusal_accuracy": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "avg_latency_ms": 8673.184527833333,
+        "avg_retrieval_ms": 259.89955566666663,
+        "avg_generation_ms": 8413.284972166666,
+        "generation_cache_hits": 0,
+        "avg_retrieved": 2.0,
+        "avg_context_chars": 51.0,
+        "avg_query_count": 1.0,
+        "avg_tool_calls": null,
+        "avg_tool_steps": null,
+        "avg_tool_calls_knowledge": null,
+        "avg_tool_calls_database": null,
+        "avg_tool_calls_mixed": null,
+        "dual_tool_rate": null,
+        "dual_tool_rate_knowledge": null,
+        "dual_tool_rate_database": null,
+        "dual_tool_rate_mixed": null,
+        "gate_intercept_rate": null,
+        "used_parent_rate": 0.0,
+        "rewrite_fallbacks": 0,
+        "n_answerable": 5,
+        "n_refusal": 1,
+        "n_errors": 0
+      },
+      "ragas": null,
+      "n_results": 6
+    }
+  },
+  "samples": [
+    {
+      "id": "v6st-01",
+      "config": "full",
+      "category": "ingestion",
+      "answerable": true,
+      "question": "库存盘点表中键盘的数量和单价分别是多少？",
+      "reference": "键盘数量 12，单价 99.5。",
+      "evidence": [
+        "键盘 12 99.5"
+      ],
+      "expected_source": "eval/fixtures/v6_scan_table.md",
+      "expected_sources": [],
+      "answer": "根据库存盘点表（草稿）[2] 中的数据 [1]，键盘的数量为 **12**，单价为 **99.5**。",
+      "contexts": [
+        "产品,数量,单价,键盘,12,99.5,鼠标,30,45.0",
+        "库存盘点表（草稿）\n备注:以上为草稿数据。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v6_scan_table.pdf 第 1 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v6_scan_table.pdf",
+          "snippet": "产品,数量,单价,键盘,12,99.5,鼠标,30,45.0",
+          "page": 1,
+          "table": "v6_scan_table_table_1",
+          "score": 2.68359375
+        },
+        {
+          "index": 2,
+          "title": "v6_scan_table.pdf 第 1 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v6_scan_table.pdf",
+          "snippet": "库存盘点表（草稿） 备注:以上为草稿数据。",
+          "page": 1,
+          "table": null,
+          "score": -3.970703125
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v6_scan_table.pdf",
+        "eval/fixtures/v6_scan_table.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 51,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 2,
+      "refusal": false,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 467.23,
+      "generation_ms": 10046.6,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.5,
+        "mrr@3": 1.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "v6st-02",
+      "config": "full",
+      "category": "ingestion",
+      "answerable": true,
+      "question": "库存盘点表中鼠标的数量和单价分别是多少？",
+      "reference": "鼠标数量 30，单价 45.0。",
+      "evidence": [
+        "鼠标 30 45.0"
+      ],
+      "expected_source": "eval/fixtures/v6_scan_table.md",
+      "expected_sources": [],
+      "answer": "根据库存盘点表（草稿）的数据，鼠标的数量为 **30**，单价为 **45.0** 元。[1][2]",
+      "contexts": [
+        "产品,数量,单价,键盘,12,99.5,鼠标,30,45.0",
+        "库存盘点表（草稿）\n备注:以上为草稿数据。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v6_scan_table.pdf 第 1 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v6_scan_table.pdf",
+          "snippet": "产品,数量,单价,键盘,12,99.5,鼠标,30,45.0",
+          "page": 1,
+          "table": "v6_scan_table_table_1",
+          "score": 2.09765625
+        },
+        {
+          "index": 2,
+          "title": "v6_scan_table.pdf 第 1 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v6_scan_table.pdf",
+          "snippet": "库存盘点表（草稿） 备注:以上为草稿数据。",
+          "page": 1,
+          "table": null,
+          "score": -4.02734375
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v6_scan_table.pdf",
+        "eval/fixtures/v6_scan_table.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 51,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 2,
+      "refusal": false,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 216.63,
+      "generation_ms": 6968.57,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.5,
+        "mrr@3": 1.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "v6st-03",
+      "config": "full",
+      "category": "ingestion",
+      "answerable": true,
+      "question": "库存盘点表的表格有哪几列？",
+      "reference": "三列：产品、数量、单价。",
+      "evidence": [
+        "产品 数量 单价"
+      ],
+      "expected_source": "eval/fixtures/v6_scan_table.md",
+      "expected_sources": [],
+      "answer": "根据上下文，库存盘点表的表格包含以下三列：**产品、数量、单价** [2]。\n\n表格中的具体数据为：键盘（数量12，单价99.5）和鼠标（数量30，单价45.0）[2]。该表格来源于库存盘点表（草稿）[1]。",
+      "contexts": [
+        "库存盘点表（草稿）\n备注:以上为草稿数据。",
+        "产品,数量,单价,键盘,12,99.5,鼠标,30,45.0"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v6_scan_table.pdf 第 1 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v6_scan_table.pdf",
+          "snippet": "库存盘点表（草稿） 备注:以上为草稿数据。",
+          "page": 1,
+          "table": null,
+          "score": -2.7890625
+        },
+        {
+          "index": 2,
+          "title": "v6_scan_table.pdf 第 1 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v6_scan_table.pdf",
+          "snippet": "产品,数量,单价,键盘,12,99.5,鼠标,30,45.0",
+          "page": 1,
+          "table": "v6_scan_table_table_1",
+          "score": -4.5859375
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v6_scan_table.pdf",
+        "eval/fixtures/v6_scan_table.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 51,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 2,
+      "refusal": false,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 228.69,
+      "generation_ms": 11769.15,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.5,
+        "mrr@3": 0.5,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "v6st-04",
+      "config": "full",
+      "category": "ingestion",
+      "answerable": true,
+      "question": "这份盘点表正文里的备注写了什么？",
+      "reference": "备注：以上为草稿数据。",
+      "evidence": [
+        "以上为草稿数据"
+      ],
+      "expected_source": "eval/fixtures/v6_scan_table.md",
+      "expected_sources": [],
+      "answer": "这份盘点表正文里的备注写的是：\"以上为草稿数据。\" [1]",
+      "contexts": [
+        "库存盘点表（草稿）\n备注:以上为草稿数据。",
+        "产品,数量,单价,键盘,12,99.5,鼠标,30,45.0"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v6_scan_table.pdf 第 1 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v6_scan_table.pdf",
+          "snippet": "库存盘点表（草稿） 备注:以上为草稿数据。",
+          "page": 1,
+          "table": null,
+          "score": 1.046875
+        },
+        {
+          "index": 2,
+          "title": "v6_scan_table.pdf 第 1 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v6_scan_table.pdf",
+          "snippet": "产品,数量,单价,键盘,12,99.5,鼠标,30,45.0",
+          "page": 1,
+          "table": "v6_scan_table_table_1",
+          "score": -5.83984375
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v6_scan_table.pdf",
+        "eval/fixtures/v6_scan_table.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 51,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 2,
+      "refusal": false,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 230.78,
+      "generation_ms": 4712.06,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.5,
+        "mrr@3": 1.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "v6st-05",
+      "config": "full",
+      "category": "refusal",
+      "answerable": false,
+      "question": "盘点表里打印机的数量是多少？",
+      "reference": "",
+      "evidence": [],
+      "expected_source": "",
+      "expected_sources": [],
+      "answer": "【资料中没有相关信息】\n\n上下文的盘点表表格中仅列出了\"键盘\"（数量12）和\"鼠标\"（数量30）[2]，并未包含\"打印机\"的相关信息。",
+      "contexts": [
+        "库存盘点表（草稿）\n备注:以上为草稿数据。",
+        "产品,数量,单价,键盘,12,99.5,鼠标,30,45.0"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v6_scan_table.pdf 第 1 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v6_scan_table.pdf",
+          "snippet": "库存盘点表（草稿） 备注:以上为草稿数据。",
+          "page": 1,
+          "table": null,
+          "score": -4.01171875
+        },
+        {
+          "index": 2,
+          "title": "v6_scan_table.pdf 第 1 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v6_scan_table.pdf",
+          "snippet": "产品,数量,单价,键盘,12,99.5,鼠标,30,45.0",
+          "page": 1,
+          "table": "v6_scan_table_table_1",
+          "score": -5.8046875
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v6_scan_table.pdf",
+        "eval/fixtures/v6_scan_table.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 51,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 2,
+      "refusal": true,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 172.34,
+      "generation_ms": 7175.14,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": null,
+        "evidence_recall@3": null,
+        "context_precision@3": null,
+        "mrr@3": null,
+        "source_hit": null,
+        "citation_rate": null,
+        "citation_validity": null,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "v6st-06",
+      "config": "full",
+      "category": "multi_step",
+      "answerable": true,
+      "question": "按盘点表计算，键盘按单价卖出的总金额是多少？",
+      "reference": "12 × 99.5 = 1194。",
+      "evidence": [
+        "键盘 12 99.5"
+      ],
+      "expected_source": "eval/fixtures/v6_scan_table.md",
+      "expected_sources": [],
+      "answer": "根据盘点表中的数据，键盘的数量为 12，单价为 99.5 [1]，因此键盘按单价卖出的总金额为：\n\n**12 × 99.5 = 1194 元**\n\n（注：该数据来源于库存盘点表（草稿），备注说明以上为草稿数据。）[2]",
+      "contexts": [
+        "产品,数量,单价,键盘,12,99.5,鼠标,30,45.0",
+        "库存盘点表（草稿）\n备注:以上为草稿数据。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v6_scan_table.pdf 第 1 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v6_scan_table.pdf",
+          "snippet": "产品,数量,单价,键盘,12,99.5,鼠标,30,45.0",
+          "page": 1,
+          "table": "v6_scan_table_table_1",
+          "score": 2.0625
+        },
+        {
+          "index": 2,
+          "title": "v6_scan_table.pdf 第 1 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v6_scan_table.pdf",
+          "snippet": "库存盘点表（草稿） 备注:以上为草稿数据。",
+          "page": 1,
+          "table": null,
+          "score": -5.1640625
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v6_scan_table.pdf",
+        "eval/fixtures/v6_scan_table.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 51,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 2,
+      "refusal": false,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 243.72,
+      "generation_ms": 9808.21,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.5,
+        "mrr@3": 1.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    }
+  ]
+}

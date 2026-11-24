@@ -1,0 +1,8 @@
+# v8 解析基准评估专用知识库：只入四页扫描件 PDF（带边框 / 合并单元格 / 无框线 / 六列），
+# 文字底稿 eval/fixtures/v8_parse_bench.md 仅用于评估集证据校验，不入库。
+# 与 config/sources.eval.scan.yaml（v6 那 6 条的语料）分开建库，
+# 这样自建侧的读数仍能对上 v6.2 的 ON/OFF 报告（那边库里只有 v6 fixture）。
+sources:
+  - type: file
+    path: eval/fixtures/v8_parse_bench.pdf
+    tags: [eval, parse-bench]
