@@ -349,6 +349,8 @@ v7.5 双侧门控打开以后 agentic 单条 88.1s，PR #24 给运行时挂上 `
       `scripts/measure_planner_latency.py` 直接量单次调用：同一条真实证据文本、`temperature=0`、
       `num_predict=AGENT_PLANNER_TOKENS`。实测路由开思考 40.4 秒（245 输出 token）→ 关思考 6.3 秒
       （61 token），步进决策 62.8 秒 → 5.1 秒，最终作答 52.8 秒 → 5.7 秒。
+      注意最终作答那一格当时带的是 `num_predict=AGENT_PLANNER_TOKENS`（运行时不带这个上限），
+      后来按运行时参数重测是 10.3 秒 → 2.95 秒，最终作答的数字以 v8.2 为准。
 - [x] FC 通道不是提速点：同一条提示词换成原生 function calling，路由关思考 6.9 秒、步进关思考 8.1 秒，
       比 JSON + 关思考更慢，输入还多约 320 token（工具 schema 占用），且实测 m01 步进有一次没返回
       `tool_calls`（MLX 模型的工具调用格式不稳，正是 v7 选 JSON 通道的理由）。方向与上面 v7.5 那组
@@ -408,10 +410,45 @@ v7.5 双侧门控打开以后 agentic 单条 88.1s，PR #24 给运行时挂上 `
       - **换机器、换模型、换精排就不可比**：这组数测于本机 Ollama 0.40.16 + `qwen3.8:27b-mlx` + `bge-m3`
         + `BAAI/bge-reranker-v2-m3` + MLX 后端，串行单并发。模型或后端任一变化都要重测基线再比。
       - 三轮同条件（同一隔离评估库、同 `--skip-ragas`、串行单并发），入库侧没动，语料快照一致。
-- [ ] 最终作答的思考没动：实测它是最大单项（52.8 秒 → 5.7 秒），但引用与缺证说明的质量依赖它，本轮不动。
-      要继续压延迟就得带引用质量的对照读数，属于下一轮。
+- [x] 最终作答的思考：已加开关并按运行时参数重测，结论是「省约 7 秒但换来三条误拒」，默认保留思考，
+      读数与逐条变化见下面的 v8.2。
 - [ ] 换成更小的决策模型（`RAG_AGENT_LLM_MODEL`）本轮没测：关掉思考以后决策调用只剩 5–6 秒，
       换模型的收益要连同意图判定稳定性一起量。
+
+## v8.2 详细验收（最终作答的思考开关）
+
+v8.1 把决策调用的思考按环节关掉以后，单条 56.6 秒；这一轮量剩下的最大项——最终作答要不要先思考。
+只加开关，提示词、门控、步数与指标判定式都没动。
+
+- [x] 开关：`RAG_AGENT_ANSWER_THINKING` 取 `keep` / `on` / `off`，默认 `keep`——`keep` 连 `reasoning`
+      都不传，保持模型默认；只有显式 `on` / `off` 才写死这个参数。`generate_final_answer` 与
+      `stream_final_answer`（MCP 服务与 demo 的流式路径）共用 `_final_llm`，其余生成参数一字未改。
+      经典 RAG 链路在 `private_rag/generation.py` 里另有一处 `ChatOllama`，不受这个开关影响。
+- [x] 单次实测（按运行时真实参数，同一证据文本、`temperature=0`、不带 `num_predict`）：
+      `keep` 10.30 秒、`on` 10.30 秒、`off` 2.95 秒。`keep` 与 `on` 相同，说明默认确实在思考；
+      关掉一条省约 7.4 秒。v8.1 里记的「52.8 秒 → 5.7 秒」是测量脚本带 `num_predict=2000` 那一格，
+      高估了这一项，以本节为准。
+- [x] 前后对比（同一提交 `8cb27ad`、同一隔离评估库 `rag_eval_v8_latency`、同模型、串行单并发、
+      `--skip-ragas`、离线加载精排）：
+
+| 轮次 | 最终作答 | 单条均耗时 | 检索 | 生成 | answer_rate | source_hit | refusal_accuracy | both_sides_hit | citation_rate | citation_validity | evidence_hit@3 | mrr@3 | context_precision@3 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A | `keep`（默认） | 40.6s | 0.9s | 39.6s | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 0.840 | 0.7667 | 0.547 |
+| B | `off` | 36.6s（约 -10%） | 1.4s | 35.2s | **0.880** | **0.960** | 1.000 | 1.000 | 1.000 | 1.000 | **0.800** | **0.7267** | 0.560 |
+
+- [x] 逐条变化（B vs A）：`c03` / `m01` / `m04` 三条应回答样本从作答变成拒答（`answer_rate` 22/25 = 0.880），
+      `m04` 同时 `source_hit` 1.0 → 0.0（拖低 `evidence_hit@3` 与 `mrr@3`）；`d02` 意图 `mixed` → `database`、
+      工具调用 3 → 1；`r01` 意图 `knowledge` → `mixed`、`insufficient_evidence` → `max_steps`（拒答仍正确）;
+      `n_errors` 0。引用两项（`citation_rate` / `citation_validity`）保持 1.000，说明关思考不影响引用格式，
+      影响的是「要不要承认证据不足」。
+- [x] 结论：默认保留 `keep`。引用指标守住了，但三条误拒是不能接受的代价，而省下的只有约 4 秒/条（-9.7%）。
+      开关与读数留下，想换速度用 `RAG_AGENT_ANSWER_THINKING=off`，并自己承担误拒。
+- [x] 抖动这条限制必须一起看：A 轮与 PR #26 里同配置的 route 档（同默认行为）测得 40.6s vs 56.6s、
+      `source_hit` 1.000 vs 0.960、`d02` 意图 `mixed` vs `database`。`temperature=0` 下 MLX 仍有
+      非确定性，取证次数与拒答都会随之变，29 条样本上 ±3 条拒答可能就是噪声。要判这种量级的差异，
+      需要更大的评估集或同配置重复轮——下一轮先解决这个，再谈继续压延迟。
+- [x] 测试 7 条新增（默认 `keep` 不传 `reasoning`、`on`/`off` 显式传、显式参数优先于配置、
+      流式路径共用开关、无证据不调用模型、取值归一含非法值回退），全量 `python3 -m pytest tests -q` = 543 passed。
 
 ## 分支与提交约定
 

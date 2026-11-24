@@ -666,3 +666,29 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
   模型与权重都没变、不影响可比性，但要写进 `--run-note`。
 - **关掉决策思考会改变路由判定**：全关那轮三条 multi_step 样本的意图从 `database` 变成 `mixed`，
   双侧门控接着禁止提前 `final`，`answer_rate` 因此从 1.000 掉到 0.880。默认档保留路由的思考就是这个原因。
+
+### 最终作答思考的前后对比（2026-11-23，`v8-latency-final-nothink`）
+
+量 `RAG_AGENT_ANSWER_THINKING`（`keep` / `on` / `off`，默认 `keep`）；结论与逐条变化见 `docs/ROADMAP.md`
+的 v8.2：关思考省约 10% 但换来三条误拒，所以默认保留思考。复现命令是上面同一批参数，加一个环境变量，
+两轮都要跑（A 不带、B 带 `off`），报告写到新文件：
+
+```bash
+# A：保持模型默认（keep）
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
+  --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 \
+  --output eval/reports/v8_latency_final_thinking_keep.md \
+  --json-output eval/reports/v8_latency_final_thinking_keep.json \
+  --run-note "最终作答 RAG_AGENT_ANSWER_THINKING=keep"
+
+# B：关思考
+RAG_AGENT_ANSWER_THINKING=off python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl \
+  --configs agent --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 \
+  --output eval/reports/v8_latency_final_thinking_off.md \
+  --json-output eval/reports/v8_latency_final_thinking_off.json \
+  --run-note "最终作答 RAG_AGENT_ANSWER_THINKING=off"
+```
+
+两轮都带 `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`（精排走本地缓存，权重没变）。
+这一对读数是同一提交上跑的，所以前后对比只用这一对：同配置跨轮抖动很大（本轮 A 40.6s，
+PR #26 里同默认行为的 route 档 56.6s，`source_hit` 也差 0.04），29 条上 ±3 条拒答可能就是噪声。

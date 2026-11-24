@@ -16,6 +16,7 @@ from typing import Any, Optional, Sequence
 from langchain_ollama import ChatOllama
 
 from private_rag.config import (
+    AGENT_ANSWER_THINKING,
     AGENT_LLM_MODEL,
     AGENT_PLANNER_THINKING_STAGES,
     AGENT_PLANNER_TOKENS,
@@ -288,6 +289,29 @@ def build_final_prompt(
     )
 
 
+def _answer_reasoning(thinking: Optional[str] = None) -> Optional[bool]:
+    """最终作答要不要让模型先思考。
+
+    ``keep`` 返回 None，意思是连 ``reasoning`` 都不传，保持模型默认行为；
+    只有显式 ``on`` / ``off`` 才写死这个参数。
+    """
+    mode = (thinking or AGENT_ANSWER_THINKING).strip().lower()
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return None
+
+
+def _final_llm(model: str, thinking: Optional[str] = None) -> ChatOllama:
+    """最终作答用的模型实例：参数与改动前一致，只在开关显式时多传 reasoning。"""
+    kwargs: dict[str, Any] = {"model": model, "num_ctx": 8192, "keep_alive": "10m"}
+    reasoning = _answer_reasoning(thinking)
+    if reasoning is not None:
+        kwargs["reasoning"] = reasoning
+    return ChatOllama(**kwargs)
+
+
 def generate_final_answer(
     question: str,
     evidence: str,
@@ -295,11 +319,12 @@ def generate_final_answer(
     model: str = AGENT_LLM_MODEL,
     history: Optional[History] = None,
     missing: str = "",
+    thinking: Optional[str] = None,
 ) -> str:
     """基于已收集的证据生成最终回答；没有证据时不调用模型，直接拒答。"""
     if not evidence.strip():
         return REFUSAL
-    llm = ChatOllama(model=model, num_ctx=8192, keep_alive="10m")
+    llm = _final_llm(model, thinking)
     response = llm.invoke(build_final_prompt(question, evidence, history, missing=missing))
     text = _content_text(response.content).strip()
     return text or REFUSAL
@@ -312,6 +337,7 @@ def stream_final_answer(
     model: str = AGENT_LLM_MODEL,
     history: Optional[History] = None,
     missing: str = "",
+    thinking: Optional[str] = None,
 ) -> "Iterator[str]":
     """基于已收集的证据流式生成最终回答；没有证据时直接 yield 拒答。"""
     from typing import Iterator
@@ -319,7 +345,7 @@ def stream_final_answer(
     if not evidence.strip():
         yield REFUSAL
         return
-    llm = ChatOllama(model=model, num_ctx=8192, keep_alive="10m")
+    llm = _final_llm(model, thinking)
     prompt = build_final_prompt(question, evidence, history, missing=missing)
     for response in llm.stream(prompt):
         text = _content_text(response.content).strip()

@@ -132,6 +132,24 @@ AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)
 # 步进决策次数多、输出同样只是一小段 JSON，关掉最划算。
 # 置 all（或 1/true）两个环节都保留思考，置 off 全部关掉。最终作答不受这个开关影响。
 AGENT_PLANNER_THINKING_STAGES = _env_stages("RAG_AGENT_PLANNER_THINKING", "route")
+
+
+def _answer_thinking_mode(raw: str) -> str:
+    """最终作答思考开关的取值归一：``keep`` / ``on`` / ``off``，其余一律回退 ``keep``。"""
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return "on"
+    if value in {"0", "false", "no", "off"}:
+        return "off"
+    return value if value in {"keep", "on", "off"} else "keep"
+
+
+# 最终作答要不要让模型先思考：keep / on / off，默认 keep（连 reasoning 都不传，保持模型默认行为）。
+# 同一条证据文本本机实测 keep 与 on 都是 10.3 秒、off 是 2.95 秒，也就是默认确实在思考，
+# 关掉一条能省约 7 秒。但 29 条对照里关思考带来三条误拒（c03 / m01 / m04），
+# answer_rate 1.000 → 0.880、source_hit 1.000 → 0.960，所以默认保留思考，只留开关。
+# 读数与逐条变化见 docs/ROADMAP.md 的 v8.2。
+AGENT_ANSWER_THINKING = _answer_thinking_mode(os.getenv("RAG_AGENT_ANSWER_THINKING", "keep"))
 # 决策输出通道（v7 function calling 对比的实验开关）：
 # json —— format="json" 结构化输出（默认）；function —— 原生 function calling。
 # 本机 MLX 模型的工具调用格式不稳定，默认不启用；对比见 scripts/compare_fc_decisions.py。
