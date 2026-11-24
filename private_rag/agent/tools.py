@@ -101,13 +101,19 @@ class KnowledgeSearchTool(Tool):
         self.base_options = base_options or RetrievalOptions()
         self.top_k = top_k
         self.max_chars = max_chars
+        # 路由判出的意图，由 agentic 循环在路由之后写进来。树索引只在纯知识意图上启用，
+        # 而注册表是在路由之前装配的，所以只能在循环里补。
+        self.intent = ""
+
+    def set_intent(self, intent: str) -> None:
+        self.intent = str(intent or "")
 
     def run(self, args: dict[str, Any]) -> ToolResult:
         query = str(args.get("query") or args.get("q") or "").strip()
         if not query:
             return ToolResult(False, error="query 不能为空")
 
-        options = replace(self.base_options, top_k=self.top_k)
+        options = replace(self.base_options, top_k=self.top_k, intent=self.intent)
         try:
             trace = self.engine.retrieve_with_trace(query, options)
         except Exception as exc:  # 检索失败要作为观察回灌，而不是让整个请求崩掉

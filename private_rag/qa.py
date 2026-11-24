@@ -22,6 +22,7 @@ from private_rag.config import (
     TOP_K_RERANK,
     TREE_INDEX_ENABLED,
     TREE_INDEX_PATH,
+    TREE_KNOWLEDGE_ONLY,
 )
 from private_rag.generation import build_citations, generate_answer, stream_answer
 from private_rag.models import Citation
@@ -52,6 +53,23 @@ class RetrievalOptions:
     # 这样同一个进程里可以在两轮之间打开/关闭树索引做 A/B。
     use_tree: Optional[bool] = None
     query_rewrite: str = "off"
+    # 路由判出的意图（`knowledge` / `database` / `mixed` / `none`），只有树这一路的开关判定用得到；
+    # 空字符串表示「没有意图」——经典链路与固定检索就是这种，它们没有工具循环。
+    intent: str = ""
+
+
+def tree_enabled_for_intent(intent: str) -> bool:
+    """树这一路此刻要不要启用（每次检索时读配置，不是启动时定死）。
+
+    按意图收窄是因为实跑读数：打开这一路以后混合问题读到一整节带路径的正文就判定证据够了，
+    少查一次数据库，`both_sides_hit` 退一条（`docs/ROADMAP.md` 的 v8.5）。
+    没有意图也当知识处理：经典链路一次检索一次生成，不存在提前收手这回事。
+    """
+    if not TREE_INDEX_ENABLED:
+        return False
+    if not TREE_KNOWLEDGE_ONLY:
+        return True
+    return str(intent or "") in ("", "knowledge")
 
 
 @dataclass
@@ -212,7 +230,8 @@ class RagEngine:
             chunks = chunks[: options.top_k]
 
         use_tree = (
-            options.use_tree if options.use_tree is not None else TREE_INDEX_ENABLED
+            options.use_tree if options.use_tree is not None
+            else tree_enabled_for_intent(options.intent)
         )
         used_tree = False
         used_parent = False

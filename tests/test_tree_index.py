@@ -8,7 +8,9 @@ from __future__ import annotations
 import pickle
 from types import SimpleNamespace
 
-from private_rag.qa import RagEngine, RetrievalOptions
+from private_rag.agent.runtime import AgentRuntime
+from private_rag.agent.tools import KnowledgeSearchTool, ToolRegistry
+from private_rag.qa import RagEngine, RetrievalOptions, tree_enabled_for_intent
 from private_rag.query_rewrite import RewriteResult
 from private_rag.retrieval.hybrid import RetrievedChunk
 from private_rag.retrieval.tree import (
@@ -470,3 +472,85 @@ def test_readiness_warns_only_when_switch_is_on_but_index_missing(monkeypatch):
 
     monkeypatch.setattr("private_rag.qa.TREE_INDEX_ENABLED", False)
     assert not any("树索引" in w for w in _engine(None).readiness().warnings)
+
+
+def test_tree_intent_gate_only_allows_knowledge(monkeypatch):
+    monkeypatch.setattr("private_rag.qa.TREE_INDEX_ENABLED", True)
+    assert tree_enabled_for_intent("knowledge") is True
+    assert tree_enabled_for_intent("") is True  # 经典链路没有意图，按知识处理
+    assert tree_enabled_for_intent("mixed") is False
+    assert tree_enabled_for_intent("database") is False
+    assert tree_enabled_for_intent("none") is False
+
+    # 退回按意图收窄之前的行为：任何意图都启用
+    monkeypatch.setattr("private_rag.qa.TREE_KNOWLEDGE_ONLY", False)
+    assert tree_enabled_for_intent("mixed") is True
+
+    # 总开关关着的时候，意图再怎么判都不启用
+    monkeypatch.setattr("private_rag.qa.TREE_INDEX_ENABLED", False)
+    assert tree_enabled_for_intent("knowledge") is False
+
+
+def test_mixed_intent_keeps_parent_expansion(monkeypatch):
+    _patch_retriever(monkeypatch, [_chunk("c_mid", parent_id="p1")])
+    engine = _engine(_index())
+    monkeypatch.setattr("private_rag.qa.TREE_INDEX_ENABLED", True)
+
+    trace = engine.retrieve_with_trace(
+        "问题", RetrievalOptions(use_rerank=False, intent="mixed")
+    )
+
+    assert trace.used_tree is False
+    assert trace.used_parent is True
+    assert trace.chunks[0].text == C_PARENT
+
+
+def test_knowledge_intent_uses_tree_without_explicit_option(monkeypatch):
+    _patch_retriever(monkeypatch, [_chunk("c_mid", parent_id="p1")])
+    engine = _engine(_index())
+    monkeypatch.setattr("private_rag.qa.TREE_INDEX_ENABLED", True)
+
+    trace = engine.retrieve_with_trace(
+        "问题", RetrievalOptions(use_rerank=False, intent="knowledge")
+    )
+
+    assert trace.used_tree is True
+    assert trace.chunks[0].text.startswith(PATH_PREFIX)
+
+
+def test_kb_search_tool_passes_its_intent_into_retrieval():
+    captured: dict = {}
+
+    class FakeEngine:
+        def retrieve_with_trace(self, query, options):
+            captured["intent"] = options.intent
+            return SimpleNamespace(
+                chunks=[], queries=[query], context_chars=0,
+                used_parent=False, used_rerank=False, used_tree=False,
+            )
+
+    tool = KnowledgeSearchTool(FakeEngine())
+    assert tool.intent == ""  # 装配时还没有意图
+    tool.set_intent("mixed")
+    tool.run({"query": "问题"})
+    assert captured["intent"] == "mixed"
+
+
+def test_runtime_syncs_intent_only_onto_tools_that_accept_it():
+    class TakesIntent:
+        name = "kb_search"
+
+        def __init__(self) -> None:
+            self.intent = None
+
+        def set_intent(self, intent: str) -> None:
+            self.intent = intent
+
+    class PlainTool:
+        name = "sql_query"
+
+    kb = TakesIntent()
+    runtime = AgentRuntime(ToolRegistry([kb, PlainTool()]))
+    runtime._sync_tool_intent(ToolRegistry([kb, PlainTool()]), "knowledge")
+
+    assert kb.intent == "knowledge"
