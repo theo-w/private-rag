@@ -785,3 +785,40 @@ for mode in keep off keep; do
     --run-note "子集交替读数 $mode"
 done
 ```
+
+### agentic 延迟住在哪一段，以及路由思考限长（2026-11-24，`v8-eval-determinism`）
+
+v8.1 / v8.2 之后剩下的延迟具体住在哪个环节，此前没单独量过（报告只把一条分成「工具执行」与「其余」两块）。
+新脚本只做观察、不改行为：把「其余」再拆成路由 / 步进决策 / 最终作答三段，并记下每次调用的提示词长度与
+输入输出 token。
+
+```bash
+export RAG_COLLECTION_NAME=rag_eval_v8_latency
+export RAG_STORAGE_DIR=storage/eval/qdrant_v8_latency
+export RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_v8_latency/bm25.pkl
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+
+python3 scripts/profile_agent_calls.py --dataset eval/v7_agent_qa.jsonl --json /tmp/profile_full_baseline.json
+```
+
+29 条一轮的归属（测于 `4cb9fb6`）：路由 566.5s（48.1%）、步进决策 413.1s（35.1%）、最终作答 174.0s（14.8%），
+工具执行只占约 2%。两段的毛病不一样：路由是「想得太多」——同一条提示词的输出从 60 个字到 1215 个字，
+而决策 JSON 本身只要几十个字；步进决策是「读得太多」——单条最长 17.3s 里 14.8s 花在读提示词，真正写 JSON 只 2.5s。
+
+本轮采纳的改法是在路由提示词**末尾**加一句「思考控制在两三句以内，不要复述题目和工具说明」（默认生效，
+`RAG_DISABLE_AGENT_THINKING_BRIEF=1` 退回老提示词）。模型自带的思考档位（`reasoning=low` / `minimal`）实测管不住
+思考长度——同一条提示词只会变长或差不多——所以没做那个旋钮。按 v8.3 的口径在同一进程里交替量：
+
+```bash
+python3 scripts/measure_thinking_ab.py --setting thinking_brief --values off,on,off \
+  --prefix v8_latency_thinking_brief_ab --keep-reports
+```
+
+脚本按轮改 `private_rag.agent.prompts` 的模块属性再调用 `evaluate.main`，报告口径与平时跑评估完全一致，
+跑完直接打印每轮均耗时（第一轮标为作废）、指标差与逐条行为翻动。读数：暖轮 23.7s → 20.0s（-15.8%），
+四项门禁指标不退，`source_hit` 0.960 → 1.000（`m04` 一条带动 `evidence_hit@3`、`mrr@3`、
+`context_precision@3`）；逐条只有 3 条行为翻动，都不改变作答与拒答。细节见 `docs/ROADMAP.md` 的 v8.4。
+
+一个试过但没用的方向，记在这里免得再试：把步进提示词的静态规则挪到证据前面（想让模型复用固定前缀，少读提示词）
+实测三步 37.6s 对 37.8s，没有差别。这台 Ollama 的前缀缓存只在「整段开头与上一次请求完全相同」时才复用
+——同一份提示词原样重发才能把读提示词从 30s 压到 0.4s——重排段落顺序换不来复用。
