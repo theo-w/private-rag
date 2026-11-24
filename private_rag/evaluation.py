@@ -28,6 +28,7 @@ from private_rag.config import (
 )
 from private_rag.generation import REFUSAL, generate_answer
 from private_rag.qa import RetrievalOptions
+from private_rag.retrieval.tree import PATH_PREFIX as TREE_PATH_PREFIX
 
 # v7 agentic 评估集新增三类：database 需要运行时 SQL，mixed 需要知识库与 SQL 各出一段证据，
 # multi_step 需要先读观察再追问。既有数据集不含这三类，扩展白名单向后兼容。
@@ -219,6 +220,8 @@ class SampleResult:
     used_lexical: bool = False
     used_rerank: bool = False
     used_parent: bool = False
+    # 上下文里是否出现过树索引还原的章节（固定链路取检索结果，agentic 取证据块文本）
+    used_tree: bool = False
     query_rewrite: str = "off"
     query_count: int = 1
     context_chars: int = 0
@@ -681,6 +684,10 @@ def aggregate_results(results: Sequence[SampleResult]) -> dict[str, Any]:
         "used_parent_rate": _mean(
             [1.0 if item.used_parent else 0.0 for item in results]
         ),
+        # 树索引这一路的覆盖率：固定链路看检索 trace，agentic 看证据块里有没有章节路径
+        "used_tree_rate": _mean(
+            [1.0 if item.used_tree else 0.0 for item in results]
+        ),
         "rewrite_fallbacks": sum(1 for item in results if item.rewrite_fallback),
         "n_answerable": len(answerable),
         "n_refusal": len(refusal),
@@ -752,6 +759,7 @@ def collect_results(
                     used_lexical = trace.used_lexical
                     used_rerank = trace.used_rerank
                     result.used_parent = bool(trace.used_parent)
+                    result.used_tree = bool(getattr(trace, "used_tree", False))
                     result.query_rewrite = trace.query_rewrite
                     result.query_count = int(trace.query_count)
                     result.context_chars = int(trace.context_chars)
@@ -911,6 +919,10 @@ def collect_agent_results(
             ]
             result.retrieved = int(getattr(agent_result, "evidence_blocks", 0) or 0)
             result.context_chars = int(getattr(agent_result, "context_chars", 0) or 0)
+            # agentic 链路拿不到检索 trace，只能从证据块文本里认出章节路径
+            result.used_tree = any(
+                TREE_PATH_PREFIX in text for text in result.contexts
+            )
             result.query_count = max(1, kb_calls)
             result.retrieval_ms = tool_ms if tool_ms else elapsed_ms
             result.generation_ms = max(0.0, elapsed_ms - result.retrieval_ms)
@@ -1159,6 +1171,7 @@ DETERMINISTIC_METRICS = (
     "dual_tool_rate_mixed",
     "gate_intercept_rate",
     "used_parent_rate",
+    "used_tree_rate",
     "rewrite_fallbacks",
 )
 DELTA_METRICS = (
@@ -1195,6 +1208,7 @@ def _result_to_dict(result: SampleResult) -> dict:
         "used_lexical": result.used_lexical,
         "used_rerank": result.used_rerank,
         "used_parent": result.used_parent,
+        "used_tree": result.used_tree,
         "query_rewrite": result.query_rewrite,
         "query_count": result.query_count,
         "context_chars": result.context_chars,

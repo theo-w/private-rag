@@ -138,6 +138,7 @@ class KnowledgeSearchTool(Tool):
                 "queries": list(trace.queries),
                 "used_parent": trace.used_parent,
                 "used_rerank": trace.used_rerank,
+                "used_tree": bool(getattr(trace, "used_tree", False)),
                 "context_chars": trace.context_chars,
             },
         )
