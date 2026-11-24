@@ -149,6 +149,20 @@ class TestPlannerThinkingStages:
         generate_final_answer("问题", "[1] 证据")
         assert "reasoning" not in FakeChatOllama.calls[0]
 
+    def test_route_prompt_asks_for_brief_thinking_by_default(self):
+        prompt = build_route_prompt("香蕉怎么保存", "工具清单")
+        assert "思考控制在两三句以内" in prompt
+        # 规则与工具说明不能被挪动：模型的提示词前缀靠开头那部分复用
+        assert prompt.index("思考控制在两三句以内") > prompt.index("硬性规则")
+
+    def test_brief_thinking_note_can_be_turned_off(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_THINKING_BRIEF", False)
+        assert "思考控制在两三句以内" not in build_route_prompt("问题", "工具清单")
+
+    def test_step_prompt_has_no_brief_thinking_note(self):
+        # 步进决策默认不开思考，加这句只会改变提示词而省不到时间
+        assert "思考控制在两三句以内" not in build_step_prompt("问题", "工具清单", "证据", ["步骤1"])
+
     def test_stage_value_parsing_falls_back_to_default(self, monkeypatch):
         from private_rag.config import _env_stages
 

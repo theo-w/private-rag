@@ -20,6 +20,7 @@ from private_rag.config import (
     AGENT_LLM_MODEL,
     AGENT_PLANNER_THINKING_STAGES,
     AGENT_PLANNER_TOKENS,
+    AGENT_THINKING_BRIEF,
     MAX_QUESTION_CHARS,
 )
 from private_rag.generation import REFUSAL, History, render_history
@@ -196,6 +197,8 @@ def _planner_reasoning(kind: str, thinking: Optional[bool]) -> bool:
     """某个决策环节要不要让模型先思考。
 
     默认按环节读配置（而不是写死在参数默认值里），这样测试与运行期改配置都能生效。
+    思考的长度管不住：这台 Ollama(0.40.16) 的 reasoning 档位（low/minimal）实测只会让思考
+    变长或差不多，限长要靠提示词里那句要求（见 ``THINKING_BRIEF_NOTE``）。
     """
     if thinking is not None:
         return bool(thinking)
@@ -213,7 +216,8 @@ def ask_json(
     """向模型要一段 JSON；解析失败抛 PlannerError。
 
     思考按环节开关（``RAG_AGENT_PLANNER_THINKING``，默认只让路由思考）：决策输出是
-    一小段结构化 JSON，思考 token 既吃输出预算又吃时间。
+    一小段结构化 JSON，思考 token 既吃输出预算又吃时间。开着思考的路由另外会被
+    ``THINKING_BRIEF_NOTE`` 要求写短一点（见 ``build_route_prompt``）。
     """
     llm = ChatOllama(
         model=model,
@@ -233,16 +237,25 @@ def ask_json(
         raise PlannerError(f"{type(exc).__name__}: {exc}") from exc
 
 
+# 要求模型把思考写短的一句话。路由开着思考，而思考长度管不住：同一条路由提示词实测
+# 输出 60~1215 个 token，决策 JSON 本身只要几十个字。这台 Ollama 的 reasoning 档位
+# （low/minimal）实测压不住长度，提示词里加这句实测有效（同一条提示词两遍：
+# k01 245→171 个输出 token、10.1s→8.4s；s01 514→263 个、23.2s→11.5s）。
+# 这句放在提示词最末尾，前面的规则与工具说明原样不动，模型的提示词前缀缓存仍然生效。
+THINKING_BRIEF_NOTE = "\n\n思考控制在两三句以内，不要复述题目和工具说明。"
+
+
 def build_route_prompt(
     question: str,
     tool_specs: str,
     history: Optional[History] = None,
 ) -> str:
-    return ROUTER_PROMPT.format(
+    prompt = ROUTER_PROMPT.format(
         tool_specs=tool_specs,
         history_section=_history_section(history),
         question=question[:MAX_QUESTION_CHARS],
     )
+    return prompt + THINKING_BRIEF_NOTE if AGENT_THINKING_BRIEF else prompt
 
 
 def build_step_prompt(

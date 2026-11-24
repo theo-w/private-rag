@@ -158,6 +158,11 @@ AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)
 # 步进决策次数多、输出同样只是一小段 JSON，关掉最划算。
 # 置 all（或 1/true）两个环节都保留思考，置 off 全部关掉。最终作答不受这个开关影响。
 AGENT_PLANNER_THINKING_STAGES = _env_stages("RAG_AGENT_PLANNER_THINKING", "route")
+# 要不要在路由提示词末尾要求模型把思考写短。决策 JSON 只要几十个字，思考实测能写到上千个
+# 输出 token（同一条路由提示词 60~1215 个），路由那一次调用因此占掉整轮 48% 的时间，
+# 而且长度很不稳定。这台 Ollama(0.40.16) 的 reasoning 档位（low/minimal）实测管不住思考长度，
+# 提示词里加一句长度约束实测能把路由调用砍掉约一半。置 1 退回不加这句的老提示词。
+AGENT_THINKING_BRIEF = not _env_flag("RAG_DISABLE_AGENT_THINKING_BRIEF")
 
 
 def _answer_thinking_mode(raw: str) -> str:
