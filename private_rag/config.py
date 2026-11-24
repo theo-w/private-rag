@@ -24,6 +24,25 @@ def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+# 「哪些环节启用」型取值：真值等价于全部环节，假值等价于都不启用
+_TRUTHY_WORDS = {"1", "true", "yes", "on", "all"}
+_FALSY_WORDS = {"0", "false", "no", "off", "none"}
+
+
+def _env_stages(name: str, default: str) -> frozenset:
+    """读取环节集合：``all``/真值取全部环节，``off``/假值取空集，其余按逗号分隔。
+
+    只认已声明的环节名，非法取值回退到 ``default``，不会因为拼错开关而静默失效。
+    """
+    raw = os.getenv(name, "").strip().lower()
+    if raw in _TRUTHY_WORDS:
+        return frozenset({"route", "step"})
+    if raw in _FALSY_WORDS:
+        return frozenset()
+    stages = frozenset(part for part in raw.split(",") if part in {"route", "step"})
+    return stages or frozenset({default})
+
+
 def _env_path(name: str, default: Path) -> Path:
     """读取路径环境变量；相对路径按项目根目录解析，空值回退默认。"""
     raw = os.getenv(name, "").strip()
@@ -104,6 +123,15 @@ AGENT_NONE_PROBE = not _env_flag("RAG_DISABLE_AGENT_NONE_PROBE")
 # 决策 JSON 的输出预算。推理型模型会先输出一段不可见的思考内容，
 # 预算给小了正文就是空的，路由会整段回退到关键词判断。
 AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)
+# 决策调用里哪些环节让模型先思考：route / step / all / off，默认只让路由思考。
+# 思考 token 既计入上面的输出预算（撞满就把决策 JSON 截断，见 planner_unavailable），
+# 又占掉每次决策调用的绝大部分时间（本机实测同一条提示词：路由开思考 40.4 秒 /
+# 245 输出 token，关思考 6.3 秒 / 61 输出 token；步进决策 62.8 秒 -> 5.1 秒）。
+# 之所以默认保留路由：路由判错意图的代价最大——误判成 mixed 会触发双侧门控，
+# 把步数烧光并稀释证据上下文，实测三条 multi_step 样本因此从作答变成拒答。
+# 步进决策次数多、输出同样只是一小段 JSON，关掉最划算。
+# 置 all（或 1/true）两个环节都保留思考，置 off 全部关掉。最终作答不受这个开关影响。
+AGENT_PLANNER_THINKING_STAGES = _env_stages("RAG_AGENT_PLANNER_THINKING", "route")
 # 决策输出通道（v7 function calling 对比的实验开关）：
 # json —— format="json" 结构化输出（默认）；function —— 原生 function calling。
 # 本机 MLX 模型的工具调用格式不稳定，默认不启用；对比见 scripts/compare_fc_decisions.py。

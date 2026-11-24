@@ -17,6 +17,7 @@ from private_rag.agent.prompts import (
     build_final_prompt,
     build_route_prompt,
     build_step_prompt,
+    generate_final_answer,
     heuristic_route,
     parse_decision,
 )
@@ -99,6 +100,61 @@ class TestPlannerTokenBudget:
         route = LlmPlanner(model="fake-model").route("最便宜的香蕉多少钱", "工具清单")
         assert route.intent == "database"
         assert route.tool == "sql_query"
+
+
+class TestPlannerThinkingStages:
+    """思考按决策环节开关：默认只让路由思考，步进决策关掉。
+
+    实测同一条提示词，路由开思考 40.4 秒 / 关思考 6.3 秒；全关时路由会把三条
+    multi_step 样本误判成 mixed，双侧门控烧光步数并把证据上下文挤掉，最终拒答。
+    """
+
+    def test_route_keeps_thinking_by_default(self):
+        FakeChatOllama.payload = route_payload()
+        LlmPlanner(model="fake-model").route("问题", "工具清单")
+        assert FakeChatOllama.calls[0]["reasoning"] is True
+
+    def test_decide_turns_thinking_off_by_default(self):
+        FakeChatOllama.payload = json.dumps(
+            {"action": "final", "sufficient": True, "missing": "", "answer": "答案"},
+            ensure_ascii=False,
+        )
+        LlmPlanner(model="fake-model").decide("问题", "工具清单", "证据", ["检索到 1 段"])
+        assert FakeChatOllama.calls[0]["reasoning"] is False
+
+    def test_switch_can_enable_step_thinking(self, monkeypatch):
+        # RAG_AGENT_PLANNER_THINKING=all 时两个环节都保留思考
+        monkeypatch.setattr(prompts_module, "AGENT_PLANNER_THINKING_STAGES", frozenset({"route", "step"}))
+        FakeChatOllama.payload = route_payload()
+        LlmPlanner(model="fake-model").decide("问题", "工具清单", "证据", ["检索到 1 段"])
+        assert FakeChatOllama.calls[0]["reasoning"] is True
+
+    def test_switch_can_turn_off_every_stage(self, monkeypatch):
+        # RAG_AGENT_PLANNER_THINKING=off 时连路由也不思考（换取最快速度，接受路由判意更粗）
+        monkeypatch.setattr(prompts_module, "AGENT_PLANNER_THINKING_STAGES", frozenset())
+        FakeChatOllama.payload = route_payload()
+        LlmPlanner(model="fake-model").route("问题", "工具清单")
+        assert FakeChatOllama.calls[0]["reasoning"] is False
+
+    def test_final_answer_is_not_affected_by_the_switch(self, monkeypatch):
+        # 最终作答要写引用与缺证说明，思考保持模型默认，不由这个开关决定
+        monkeypatch.setattr(prompts_module, "AGENT_PLANNER_THINKING_STAGES", frozenset())
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert "reasoning" not in FakeChatOllama.calls[0]
+
+    def test_stage_value_parsing_falls_back_to_default(self, monkeypatch):
+        from private_rag.config import _env_stages
+
+        monkeypatch.setenv("RAG_AGENT_PLANNER_THINKING", "off")
+        assert _env_stages("RAG_AGENT_PLANNER_THINKING", "route") == frozenset()
+        monkeypatch.setenv("RAG_AGENT_PLANNER_THINKING", "1")
+        assert _env_stages("RAG_AGENT_PLANNER_THINKING", "route") == frozenset({"route", "step"})
+        monkeypatch.setenv("RAG_AGENT_PLANNER_THINKING", "step")
+        assert _env_stages("RAG_AGENT_PLANNER_THINKING", "route") == frozenset({"step"})
+        # 拼错的取值不静默失效：回退默认环节
+        monkeypatch.setenv("RAG_AGENT_PLANNER_THINKING", "routeee")
+        assert _env_stages("RAG_AGENT_PLANNER_THINKING", "route") == frozenset({"route"})
 
 
 class TestRouterPromptDataAvailability:

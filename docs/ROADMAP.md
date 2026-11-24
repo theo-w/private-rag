@@ -338,6 +338,81 @@ v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上
 - [ ] 鉴权与多用户：当前与本机 HTTP 服务同为「能启动进程的人即可读」，开了 `--allow-sql` 之后还包括白名单内的
       业务表，要给别人用需要先加鉴权或换 Qdrant server 模式
 
+## v8.1 详细验收（决策调用的思考开关与单条 agentic 延迟）
+
+v7.5 双侧门控打开以后 agentic 单条 88.1s，PR #24 给运行时挂上 `sql_query` 以后涨到 110.1s。
+本轮只动延迟，答案口径（提示词、门控、步数、指标判定式）一律没动。
+
+- [x] 耗时归属：报告把单条耗时分成「工具执行」与「其余」两块，基线 110.1s 里 `avg_retrieval_ms` 只有
+      1.2s，其余 108.9s 全在 LLM 调用（路由 + 每次步进决策 + 最终作答）。轨迹里只记路由耗时
+      （`storage/traces/agent.jsonl` 均值 29.3s），步进决策的时间没有单独记录，因此用
+      `scripts/measure_planner_latency.py` 直接量单次调用：同一条真实证据文本、`temperature=0`、
+      `num_predict=AGENT_PLANNER_TOKENS`。实测路由开思考 40.4 秒（245 输出 token）→ 关思考 6.3 秒
+      （61 token），步进决策 62.8 秒 → 5.1 秒，最终作答 52.8 秒 → 5.7 秒。
+- [x] FC 通道不是提速点：同一条提示词换成原生 function calling，路由关思考 6.9 秒、步进关思考 8.1 秒，
+      比 JSON + 关思考更慢，输入还多约 320 token（工具 schema 占用），且实测 m01 步进有一次没返回
+      `tool_calls`（MLX 模型的工具调用格式不稳，正是 v7 选 JSON 通道的理由）。方向与上面 v7.5 那组
+      FC 对比读数一致。
+- [x] 改动：`RAG_AGENT_PLANNER_THINKING` 按环节开关，取值 `off` / `route` / `step` / `all`（真值等价 `all`，
+      假值等价 `off`，拼错回退默认），默认 `route`。`ask_json` 增加 `kind`，`ask_json` / `ask_tool_json`
+      按环节传 `reasoning`，`LlmPlanner._ask` 把环节透传给两条输出通道。最终作答不读这个开关。
+- [x] 为什么默认保留路由的思考，而不是全关：先跑两个环节全关（`off`）那一轮，单条 110.1s → 24.5s（-77.7%）
+      但 `answer_rate` 1.000 → 0.880 —— s01 / s02 / s03 三条 multi_step 的路由意图从 `database` 变成
+      `mixed`，v7.5 的双侧门控于是禁止提前 `final`，四次工具调用把关键 SQL 结果挤出
+      `AGENT_CONTEXT_CHARS=7000` 的证据预算，最终按缺证拒答。保留路由的思考、只关步进决策，
+      29 条意图逐条与基线一致，四项指标不回退。
+- [x] 前后对比（`eval/v7_agent_qa.jsonl` 29 条、生成模型 `qwen3.8:27b-mlx`、串行单并发、同一隔离评估库
+      `rag_eval_v8_latency` + `storage/eval/qdrant_v8_latency` + `storage/eval/lexical_v8_latency/bm25.pkl`
+      共 245 个向量，入库侧三轮都没动；`--skip-ragas`，只比确定性指标）：
+
+| 轮次 | 出处 | 单条均耗时 | 检索 | 生成 | answer_rate | source_hit | refusal_accuracy | both_sides_hit | evidence_hit@3 | context_precision@3 | mrr@3 | avg_tool_calls | 均步数 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 基线：决策全开思考 | `530418c`（dirty 仅测试文件） | 110.1s | 1.2s | 108.9s | 1.000 | 0.960 | 1.000 | 1.000 | 0.800 | 0.560 | 0.7267 | 1.931 | 4.62 |
+| `off`：两个环节全关 | `e46f59b`（测时提交，分支上已合成一条） | 24.5s | 0.8s | 23.7s | **0.880** | 0.960 | 1.000 | 1.000 | **0.720** | **0.427** | **0.6533** | 1.931 | 4.38 |
+| **默认 `route`** | `8704ef5`（测时提交，分支上已合成一条） | **56.6s（约 -49%）** | 1.0s | 55.6s | 1.000 | 0.960 | 1.000 | 1.000 | 0.800 | **0.533** | 0.7267 | 1.931 | 4.45 |
+
+- [x] 默认档唯一的一项指标回退：`context_precision@3` 0.560 → 0.533（-0.027），同时 `avg_context_chars`
+      1481 → 1575。步进决策不思考以后取证顺序略有变化，塞进最终上下文的块里无关块占比略升；
+      `evidence_hit@3` 与 `mrr@3` 没动，说明该召回的还是召回到，只是排在前面的噪声多了一点。
+      29 条样本上 -0.027 是 1 个量级的差别，只能当方向看。
+- [x] 逐条变化（默认档 vs 基线）：意图 29/29 全部一致；`planner_unavailable` 三条（c01 / d05 / k05）全部变成
+      `final`——思考不再吃掉 `AGENT_PLANNER_TOKENS` 的输出预算，决策 JSON 不再被截断，这是本改动附带的
+      稳健性收益；d02 从 `max_steps` 变 `final`、门控拦截 3 → 1；m03 多一次门控、m04 门控 2 → 1、
+      s03 多一次工具调用但都照常作答；r02 少一次调用；逐条 `source_hit` 没有变化；`n_errors` 0。
+- [x] `off` 档的回退点名（这就是不把全关当默认的依据，逐条见 `eval/reports/v8_latency_thinking_off.md`）：
+      s01 / s02 / s03 三条 multi_step 的路由意图 `database` → `mixed`、`stop_reason` `final` → `max_steps`、
+      拒答 False → True，即三条应回答的样本被误拒（`answer_rate` 22/25 = 0.880）；k05 的 `source_hit`
+      1.0 → 0.0（`evidence_hit@3` 与 `mrr@3` 因此掉到 0.720 / 0.6533），m04 的 `source_hit` 0.0 → 1.0；
+      r01 / r03 两条应拒答样本的意图从 `mixed` 变成 `knowledge` / `database`，`stop_reason` 从 `max_steps`
+      变 `insufficient_evidence`（拒答仍然正确，所以 `refusal_accuracy` 保持 1.000）。
+- [x] `avg_tool_calls` 三轮都是 1.931：关掉步进思考并没有让循环提前停止取证（门控与提示词仍守着两侧），
+      省下的时间全部来自决策调用本身，没有靠少查换速度。
+- [x] 测试 7 条新增（`tests/test_agent_planner.py`、`tests/test_agent_function_calling.py`）：默认档路由保留
+      思考 / 步进关思考、`all` 与 `off` 的生效、最终作答不带 `reasoning`、`_env_stages` 取值解析含非法值回退、
+      function calling 两条通道的同一环节判断；全部注入假 `ChatOllama`，不打模型、不联网。
+      全量 `python3 -m pytest tests -q` = **536 passed**（既有 529 + 新增 7），0 failed / 0 skipped。
+- [x] 报告：`eval/reports/v8_latency_baseline_thinking_on.{md,json}`、
+      `eval/reports/v8_latency_thinking_off.{md,json}`、`eval/reports/v8_latency_route_thinking.{md,json}`。
+      基线那轮是在工作区把两个延迟相关文件临时退回 `530418c` 跑的（`git diff > /tmp/v8_thinking.patch`
+      再 `git checkout --`，跑完 `git apply` 还原），所以它的 `meta.git_dirty=true` 来自未提交的测试文件；
+      `route` 档那轮 `meta.git_dirty=true` 来自正在写入的报告文件本身，代码与本 PR 的提交一致。
+      三份报告头的 `meta.git_commit` 记的是测量当时的提交，其中 `e46f59b` / `8704ef5` 后来合成一条，
+      只在这些报告里留痕——引用出处时以测时状态为准，别拿它们当分支上的提交。
+      第三轮开头精排模型加载要做联网 HEAD 校验而当时 `huggingface.co` 不通，重试 5 次以后 transformers
+      回退本地缓存继续跑，没有换模型也没换检索配置。
+- [x] 口径与限制，引用这组数字时一并带上：
+      - **29 条样本只支撑方向**，不支撑百分比：±1 条就是 ±4 个百分点，`context_precision@3` 那种 -0.027
+        的量级也在噪声范围内；要说「稳定降到多少」需要更大的评估集。
+      - **`avg_latency_ms` 是端到端单条耗时**，含路由、每次步进决策、工具执行、双侧门控的重试与最终作答，
+        不是纯模型时间；本轮 56.6s 里工具执行 1.0s，其余都是 LLM 调用。
+      - **换机器、换模型、换精排就不可比**：这组数测于本机 Ollama 0.40.16 + `qwen3.8:27b-mlx` + `bge-m3`
+        + `BAAI/bge-reranker-v2-m3` + MLX 后端，串行单并发。模型或后端任一变化都要重测基线再比。
+      - 三轮同条件（同一隔离评估库、同 `--skip-ragas`、串行单并发），入库侧没动，语料快照一致。
+- [ ] 最终作答的思考没动：实测它是最大单项（52.8 秒 → 5.7 秒），但引用与缺证说明的质量依赖它，本轮不动。
+      要继续压延迟就得带引用质量的对照读数，属于下一轮。
+- [ ] 换成更小的决策模型（`RAG_AGENT_LLM_MODEL`）本轮没测：关掉思考以后决策调用只剩 5–6 秒，
+      换模型的收益要连同意图判定稳定性一起量。
+
 ## 分支与提交约定
 
 - `main`：稳定可演示版本，只通过阶段分支合并更新。
