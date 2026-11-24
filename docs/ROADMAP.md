@@ -338,6 +338,55 @@ v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上
 - [ ] 鉴权与多用户：当前与本机 HTTP 服务同为「能启动进程的人即可读」，开了 `--allow-sql` 之后还包括白名单内的
       业务表，要给别人用需要先加鉴权或换 Qdrant server 模式
 
+## v8.5 详细验收（章节树索引：命中块还原成带层级路径的章节上下文）
+
+背景：父块扩展解决「召回准但读得太少」，可它的边界是按字符数切出来的，跟文档结构无关——一段话正好断在
+「这里有五个关键角色：」后面，那五个角色就掉进下一个父块，模型读到的永远是半句话（v5 报告里 q07 就是这个形状）。
+本轮加一条**与混合检索并列的第二路**：命中块换成「它所在的那一节 + 这节在文档里的路径」。
+
+编号说明：v8.1–v8.4 是在途的延迟与测量分支（PR #26/#27/#25/#28）已占用的编号，本分支与它们互不依赖、
+不 rebase，所以接在 v8.5。合并时这一节与它们的节都是新增段落，顺序按合并先后即可。
+
+- [x] 先确认结构信息到底有什么：块元数据只有 `doc_id`/`title`/`page`/`table`/`file_name`/`format`/
+      `parent_id`/`parent_index`/`parent_count`/`chunk_index`，**没有标题层级**，标题只存在于块文本里。
+      所以树是重建的：沿 `parent_index` 把同一文档的父块拼回整篇正文（父块不重叠，拼起来就是原文顺序），
+      在拼回来的正文里扫 Markdown 标题行切出互不重叠的章节片段，再按偏移把每个块归到它正文所在的最深一级章节。
+- [x] `private_rag/retrieval/tree.py`：`parse_heading()`（≤6 级、去掉 ATX 收尾 `#`、空标题不算标题）、
+      `build_index(records)`（纯函数，不碰存储）、`TreeIndex`（节点表 + 块→节点映射，`path_label()` 用 ` › ` 连接）、
+      `locate_chunk()`（容忍空白差异，判「这个块的正文能不能在章节正文里找到」）、`window_around_hit()`（以命中块
+      为中心在章节内开窗，一侧被堵住时额度让给另一侧）、`attach_tree_context()`（替换上下文文本、同章节去重）。
+      归属与查询用同一个「能不能定位」判定，避免归到一个还原不出上下文的节点上。
+- [x] 存放与 BM25 词法索引同一套做法（照 `retrieval/lexical.py`）：独立落盘一个 pickle、`tempfile` + `os.replace`
+      原子替换、带版本号，版本不匹配/损坏/类型不对一律当没有（返回 `None`）。
+      **不新建 Qdrant 集合、不改块的写入格式**，已入库的知识库不用重新 ingest。
+      `scripts/build_tree_index.py` 离线从 Qdrant payload 构建（`--eval` 走评估库，环境变量先于 config 导入）。
+- [x] 接线：`RagEngine` 多一个 `tree` 参数，`build_engine()` 只要文件在就加载；`retrieve_with_trace()` 里
+      树这一路成功还原时**不再做父块扩展**（两次替换文本会互相覆盖，上下文口径就说不清了），还原不出来
+      （块正文跨出片段、定位不到）就退回与 `expand_parents` 同一口径的父块/子块回退。
+      两路共用 `CONTEXT_MAX_CHARS`，不会把上下文撑大；`snippet_text` 仍是命中的子块原文，引用口径不变。
+- [x] 开关 `RAG_ENABLE_TREE_INDEX`（`private_rag/config.py`，默认关）：用 ENABLE 而不是 DISABLE，是为了默认值
+      保持现有行为不变。开关在**每次检索时**读（`RetrievalOptions.use_tree=None` 表示「按配置」），
+      所以同一个进程里可以开/关交替对照；`readiness()` 只在开关打开又缺索引时警告。
+      另有 `RAG_TREE_INDEX_PATH` 与 `RAG_TREE_SECTION_CHARS`（默认等于 `PARENT_CHUNK_SIZE`，
+      这样 A/B 只差在边界语义——标题边界 vs 固定窗口——块数与总预算都对得上）。
+- [x] 评估侧读数：`SampleResult.used_tree`（确定性链路取 `RetrievalTrace.used_tree`，agentic 那一栏按
+      上下文里有没有 `章节路径: ` 前缀判），聚合出 `used_tree_rate`，进 `DETERMINISTIC_METRICS`；
+      `kb_search` 的结构化结果也带 `used_tree`。`eval_env.configure_eval_env()` 给评估链路单独一份索引路径
+      （`storage/eval/tree/`）。`scripts/measure_tree_index_ab.py` 按 v8.3 的口径在同一进程交替跑。
+- [x] 测试 27 条新增（`tests/test_tree_index.py`）：标题解析、嵌套路径、更深一级归属、章节正文只到下一个标题为止、
+      跨片段块退回父块章节且还原不出上下文、没有父块/没有 `doc_id` 的退化、`build_from_store`（打桩 `scroll_all`，
+      不打开真实 Qdrant）、落盘读回与三种坏文件、定位与开窗的边界、上下文替换与去重与回退与截断、
+      检索链路接线（默认关仍走父块扩展、打开后 `used_tree`/`used_parent=False`、同进程可来回切、缺索引退回父块）。
+      全部内存假数据，不打模型、不联网、不开真实 Qdrant。
+      全量 `python3 -m pytest tests -q` = **556 passed**（既有 529 + 新增 27），0 failed / 0 skipped
+- [x] 评估库上的实测结构（构建日志，不是估计）：节点 109 / 文档 9 / 有块的章节 100 / 块 245；
+      245 个块**全部归属成功且能在章节正文里定位**（100.0%）；块所在层级分布 1 级 24、2 级 133、3 级 88；
+      章节长度平均 755 字符、**中位数 376 字符**、超过 2000 的只有 7 个；平均每块送出的窗口 1039 字符
+      （父块扩展是 2000 字符/块）。也就是说这一路送进模型的文本通常更少——更聚焦，但也意味着原来靠父块
+      窗口兜住的前后文没有了，这正是下面对照要回答的问题。
+- [ ] 本机实跑读数（2026-11-24，`eval/v7_agent_qa.jsonl` 29 条 × `agent`，同一进程 `off,on,off` 三轮、
+      串行单并发、隔离评估库、`--skip-ragas`，报告 `eval/reports/tree_ab_{1,2,3}_{off,on,off}`）：待填
+
 ## 分支与提交约定
 
 - `main`：稳定可演示版本，只通过阶段分支合并更新。

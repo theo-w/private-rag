@@ -272,6 +272,9 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent,ful
   --output eval/reports/v7_agent_report.md --json-output eval/reports/v7_agent_report.json
 # 只看“会检索但不让查库”的能力上限
 python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --no-agent-sql --skip-ragas
+# 树索引（v8.5）：先给评估库建索引，再在同一进程里开/关交替跑
+python3 scripts/build_tree_index.py --eval
+python3 scripts/measure_tree_index_ab.py --values off,on,off --keep-reports
 ```
 
 `--agent-max-steps`（默认 `AGENT_MAX_STEPS`）与 `--agent-sources` 可覆盖循环边界与运行时数据源。
