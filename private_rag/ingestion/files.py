@@ -59,6 +59,18 @@ def iter_files(target: Path, include: list[str] | None = None) -> list[Path]:
     return files
 
 
+def _build_scan_backend(path: Path):
+    """按 `RAG_SCAN_PARSER` 装配扫描件解析后端；`selfbuilt` 返回 None（走现有链路）。
+
+    从 `private_rag.config` 取当前值而不是在模块导入时绑定，测试才能就地改开关。
+    供测试打桩。
+    """
+    from private_rag import config
+    from private_rag.ingestion.scan_parse import build_scan_backend
+
+    return build_scan_backend(config.SCAN_PARSER, path)
+
+
 def _is_scanned(text: str) -> bool:
     """判断页面是否为扫描件（文本为空或几乎没有可识别字符）。"""
     stripped = text.strip()
@@ -82,50 +94,77 @@ def _load_pdf_with_pdfplumber(path: Path, relative: str, source_key: str,
     file_name = path.name
     file_stem = path.stem
 
+    # v8 解析基准：外部解析后端整份 PDF 解析一次（模型冷启动只付一次），逐页取用。
+    # 装配失败时把原因记进 errors 再改用自建链路——静默换链路会让第三方侧的读数混进自建侧。
+    backend = None
+    try:
+        backend = _build_scan_backend(path)
+    except Exception as exc:
+        errors.append(f"扫描件解析后端不可用（{relative}）：{exc}；本文件改用自建链路")
+
     try:
         pdfplumber = _try_import_pdfplumber()
         with pdfplumber.open(str(path)) as pdf:
+            if backend is not None and backend.page_count != len(pdf.pages):
+                errors.append(
+                    f"{backend.name} 返回 {backend.page_count} 页，PDF 实有 {len(pdf.pages)} 页；"
+                    "缺的页改用自建链路，多出来的页忽略"
+                )
             for page_index, page in enumerate(pdf.pages, start=1):
                 # 提取文本
                 text = page.extract_text() or ""
                 scanned = _is_scanned(text)
 
-                # 扫描件：OCR + 版面表格提取
+                # 扫描件：外部解析后端整页给正文与表格，否则走自建 OCR + 版面表格提取
                 if scanned:
-                    from private_rag.ingestion.ocr import render_page as _render_page
-                    from private_rag.ingestion.ocr import ocr_image as _ocr_image
-                    from private_rag.ingestion.ocr import filter_ocr_result as _filter_ocr
-                    from private_rag.ingestion.ocr import OCRResult
+                    parse = backend.parse_page(page_index) if backend is not None else None
 
-                    # 渲染一次（避免重复渲染）
-                    image = _render_page(page)
-
-                    # OCR 识别
-                    ocr_result = _ocr_image(image)
-                    if not ocr_result.text.strip():
-                        # 纯图片页无内容，跳过
-                        continue
-
-                    # 版面表格提取
-                    table_rects: list[tuple[int, int, int, int]] = []
-                    try:
-                        from private_rag.config import SCAN_TABLE_ENABLED
-
-                        if SCAN_TABLE_ENABLED:
-                            from private_rag.ingestion.table_layout import (
-                                extract_scan_tables as _extract_scan_tables,
+                    if parse is not None:
+                        # 后端已区分正文与表格，不需要表格矩形；正文为空但检出了表格仍要入库
+                        if not parse.text.strip() and not parse.tables:
+                            continue
+                        text = parse.text
+                        tables = parse.tables
+                    else:
+                        if backend is not None:
+                            errors.append(
+                                f"{backend.name} 未返回 {relative} 页 {page_index} 的结果，本页改用自建链路"
                             )
-                            scan_result = _extract_scan_tables(image, ocr_result.boxes)
-                            tables = scan_result.tables
-                            table_rects = scan_result.rects
-                        else:
-                            tables = []
-                    except Exception as exc:
-                        errors.append(f"版面表格提取失败 {relative} 页 {page_index}：{exc}")
-                        tables = []
 
-                    # 过滤表格区域文本，避免正文与表格重复
-                    text = _filter_ocr(ocr_result, table_rects).text
+                        from private_rag.ingestion.ocr import render_page as _render_page
+                        from private_rag.ingestion.ocr import ocr_image as _ocr_image
+                        from private_rag.ingestion.ocr import filter_ocr_result as _filter_ocr
+                        from private_rag.ingestion.ocr import OCRResult
+
+                        # 渲染一次（避免重复渲染）
+                        image = _render_page(page)
+
+                        # OCR 识别
+                        ocr_result = _ocr_image(image)
+                        if not ocr_result.text.strip():
+                            # 纯图片页无内容，跳过
+                            continue
+
+                        # 版面表格提取
+                        table_rects: list[tuple[int, int, int, int]] = []
+                        try:
+                            from private_rag.config import SCAN_TABLE_ENABLED
+
+                            if SCAN_TABLE_ENABLED:
+                                from private_rag.ingestion.table_layout import (
+                                    extract_scan_tables as _extract_scan_tables,
+                                )
+                                scan_result = _extract_scan_tables(image, ocr_result.boxes)
+                                tables = scan_result.tables
+                                table_rects = scan_result.rects
+                            else:
+                                tables = []
+                        except Exception as exc:
+                            errors.append(f"版面表格提取失败 {relative} 页 {page_index}：{exc}")
+                            tables = []
+
+                        # 过滤表格区域文本，避免正文与表格重复
+                        text = _filter_ocr(ocr_result, table_rects).text
 
                     # 写入表格文档
                     for table_index, table_row in enumerate(tables, start=1):

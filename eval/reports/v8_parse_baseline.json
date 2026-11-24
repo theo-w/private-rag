@@ -1,0 +1,494 @@
+{
+  "fixture": "/Users/wly/Documents/private-rag/.claude/worktrees/lucid-volhard-660071/eval/fixtures/v8_parse_bench.pdf",
+  "results": {
+    "selfbuilt": {
+      "pages": [
+        {
+          "page": 1,
+          "label": "带边框 3x3",
+          "expected_tables": 1,
+          "actual_tables": 1,
+          "table_recall": 1.0,
+          "cell_accuracy": 0.8888888888888888,
+          "structure_ok": 1.0,
+          "body_purity": 1.0,
+          "contaminated_rows": 0,
+          "body_chars": 22,
+          "parse_ms": 1133,
+          "actual_tables_preview": [
+            {
+              "shape": [
+                3,
+                3
+              ],
+              "rows": [
+                [
+                  "产品",
+                  "数量",
+                  "单价"
+                ],
+                [
+                  "显示器",
+                  "",
+                  "1299.0"
+                ],
+                [
+                  "硬盘",
+                  "25",
+                  "380.0"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "page": 2,
+          "label": "合并单元格",
+          "expected_tables": 1,
+          "actual_tables": 1,
+          "table_recall": 1.0,
+          "cell_accuracy": 0.6666666666666666,
+          "structure_ok": 1.0,
+          "body_purity": 1.0,
+          "contaminated_rows": 0,
+          "body_chars": 29,
+          "parse_ms": 680,
+          "actual_tables_preview": [
+            {
+              "shape": [
+                4,
+                3
+              ],
+              "rows": [
+                [
+                  "部门",
+                  "人员",
+                  "人数"
+                ],
+                [
+                  "研发",
+                  "张三",
+                  "L"
+                ],
+                [
+                  "",
+                  "李四",
+                  "2"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "page": 3,
+          "label": "无框线表格",
+          "expected_tables": 1,
+          "actual_tables": 0,
+          "table_recall": 0.0,
+          "cell_accuracy": 0.0,
+          "structure_ok": 0.0,
+          "body_purity": 0.6666666666666667,
+          "contaminated_rows": 1,
+          "body_chars": 68,
+          "parse_ms": 717,
+          "actual_tables_preview": []
+        },
+        {
+          "page": 4,
+          "label": "六列表格",
+          "expected_tables": 1,
+          "actual_tables": 1,
+          "table_recall": 1.0,
+          "cell_accuracy": 1.0,
+          "structure_ok": 1.0,
+          "body_purity": 1.0,
+          "contaminated_rows": 0,
+          "body_chars": 27,
+          "parse_ms": 814,
+          "actual_tables_preview": [
+            {
+              "shape": [
+                3,
+                6
+              ],
+              "rows": [
+                [
+                  "季度",
+                  "华东",
+                  "华南",
+                  "华北",
+                  "西南",
+                  "合计"
+                ],
+                [
+                  "Q1",
+                  "120",
+                  "90",
+                  "70",
+                  "40",
+                  "320"
+                ],
+                [
+                  "Q2",
+                  "130",
+                  "95",
+                  "75",
+                  "45",
+                  "345"
+                ]
+              ]
+            }
+          ]
+        }
+      ],
+      "aggregate": {
+        "pages": 4,
+        "table_recall": 0.75,
+        "cell_accuracy": 0.6388888888888888,
+        "structure_ok": 0.75,
+        "body_purity": 0.9166666666666667,
+        "contaminated_rows": 1,
+        "detected_tables": 3,
+        "expected_tables": 4,
+        "body_chars": 146,
+        "parse_ms_total": 3344,
+        "parse_ms_per_page": 836
+      }
+    },
+    "docling": {
+      "pages": [
+        {
+          "page": 1,
+          "label": "带边框 3x3",
+          "expected_tables": 1,
+          "actual_tables": 1,
+          "table_recall": 1.0,
+          "cell_accuracy": 1.0,
+          "structure_ok": 1.0,
+          "body_purity": 1.0,
+          "contaminated_rows": 0,
+          "body_chars": 22,
+          "parse_ms": 2720,
+          "actual_tables_preview": [
+            {
+              "shape": [
+                3,
+                3
+              ],
+              "rows": [
+                [
+                  "产品",
+                  "数量",
+                  "单价"
+                ],
+                [
+                  "显示器",
+                  "8",
+                  "1299.0"
+                ],
+                [
+                  "硬盘",
+                  "25",
+                  "380.0"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "page": 2,
+          "label": "合并单元格",
+          "expected_tables": 1,
+          "actual_tables": 1,
+          "table_recall": 1.0,
+          "cell_accuracy": 1.0,
+          "structure_ok": 1.0,
+          "body_purity": 1.0,
+          "contaminated_rows": 0,
+          "body_chars": 31,
+          "parse_ms": 2720,
+          "actual_tables_preview": [
+            {
+              "shape": [
+                4,
+                3
+              ],
+              "rows": [
+                [
+                  "部门",
+                  "人员",
+                  "人数"
+                ],
+                [
+                  "研发",
+                  "张三",
+                  "1"
+                ],
+                [
+                  "研发",
+                  "李四",
+                  "2"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "page": 3,
+          "label": "无框线表格",
+          "expected_tables": 1,
+          "actual_tables": 1,
+          "table_recall": 1.0,
+          "cell_accuracy": 1.0,
+          "structure_ok": 1.0,
+          "body_purity": 1.0,
+          "contaminated_rows": 0,
+          "body_chars": 29,
+          "parse_ms": 2720,
+          "actual_tables_preview": [
+            {
+              "shape": [
+                3,
+                4
+              ],
+              "rows": [
+                [
+                  "供应商",
+                  "品类",
+                  "起订量",
+                  "交期"
+                ],
+                [
+                  "恒达",
+                  "键盘",
+                  "50",
+                  "15天"
+                ],
+                [
+                  "华南",
+                  "鼠标",
+                  "100",
+                  "20天"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "page": 4,
+          "label": "六列表格",
+          "expected_tables": 1,
+          "actual_tables": 1,
+          "table_recall": 1.0,
+          "cell_accuracy": 1.0,
+          "structure_ok": 1.0,
+          "body_purity": 1.0,
+          "contaminated_rows": 0,
+          "body_chars": 31,
+          "parse_ms": 2720,
+          "actual_tables_preview": [
+            {
+              "shape": [
+                3,
+                6
+              ],
+              "rows": [
+                [
+                  "季度",
+                  "华东",
+                  "华南",
+                  "华北",
+                  "西南",
+                  "合计"
+                ],
+                [
+                  "Q1",
+                  "120",
+                  "90",
+                  "70",
+                  "40",
+                  "320"
+                ],
+                [
+                  "Q2",
+                  "130",
+                  "95",
+                  "75",
+                  "45",
+                  "345"
+                ]
+              ]
+            }
+          ]
+        }
+      ],
+      "aggregate": {
+        "pages": 4,
+        "table_recall": 1.0,
+        "cell_accuracy": 1.0,
+        "structure_ok": 1.0,
+        "body_purity": 1.0,
+        "contaminated_rows": 0,
+        "detected_tables": 4,
+        "expected_tables": 4,
+        "body_chars": 113,
+        "parse_ms_total": 10880,
+        "parse_ms_per_page": 2720
+      }
+    },
+    "mineru": {
+      "pages": [
+        {
+          "page": 1,
+          "label": "带边框 3x3",
+          "expected_tables": 1,
+          "actual_tables": 1,
+          "table_recall": 1.0,
+          "cell_accuracy": 1.0,
+          "structure_ok": 1.0,
+          "body_purity": 1.0,
+          "contaminated_rows": 0,
+          "body_chars": 23,
+          "parse_ms": 3256,
+          "actual_tables_preview": [
+            {
+              "shape": [
+                3,
+                3
+              ],
+              "rows": [
+                [
+                  "产品",
+                  "数量",
+                  "单价"
+                ],
+                [
+                  "显示器",
+                  "8",
+                  "1299.0"
+                ],
+                [
+                  "硬盘",
+                  "25",
+                  "380.0"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "page": 2,
+          "label": "合并单元格",
+          "expected_tables": 1,
+          "actual_tables": 1,
+          "table_recall": 1.0,
+          "cell_accuracy": 1.0,
+          "structure_ok": 1.0,
+          "body_purity": 1.0,
+          "contaminated_rows": 0,
+          "body_chars": 29,
+          "parse_ms": 3256,
+          "actual_tables_preview": [
+            {
+              "shape": [
+                4,
+                3
+              ],
+              "rows": [
+                [
+                  "部门",
+                  "人员",
+                  "人数"
+                ],
+                [
+                  "研发",
+                  "张三",
+                  "1"
+                ],
+                [
+                  "研发",
+                  "李四",
+                  "2"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "page": 3,
+          "label": "无框线表格",
+          "expected_tables": 1,
+          "actual_tables": 0,
+          "table_recall": 0.0,
+          "cell_accuracy": 0.0,
+          "structure_ok": 0.0,
+          "body_purity": 0.0,
+          "contaminated_rows": 3,
+          "body_chars": 70,
+          "parse_ms": 3256,
+          "actual_tables_preview": []
+        },
+        {
+          "page": 4,
+          "label": "六列表格",
+          "expected_tables": 1,
+          "actual_tables": 1,
+          "table_recall": 1.0,
+          "cell_accuracy": 1.0,
+          "structure_ok": 1.0,
+          "body_purity": 1.0,
+          "contaminated_rows": 0,
+          "body_chars": 27,
+          "parse_ms": 3256,
+          "actual_tables_preview": [
+            {
+              "shape": [
+                3,
+                6
+              ],
+              "rows": [
+                [
+                  "季度",
+                  "华东",
+                  "华南",
+                  "华北",
+                  "西南",
+                  "合计"
+                ],
+                [
+                  "Q1",
+                  "120",
+                  "90",
+                  "70",
+                  "40",
+                  "320"
+                ],
+                [
+                  "Q2",
+                  "130",
+                  "95",
+                  "75",
+                  "45",
+                  "345"
+                ]
+              ]
+            }
+          ]
+        }
+      ],
+      "aggregate": {
+        "pages": 4,
+        "table_recall": 0.75,
+        "cell_accuracy": 0.75,
+        "structure_ok": 0.75,
+        "body_purity": 0.75,
+        "contaminated_rows": 3,
+        "detected_tables": 3,
+        "expected_tables": 4,
+        "body_chars": 149,
+        "parse_ms_total": 13024,
+        "parse_ms_per_page": 3256
+      }
+    }
+  }
+}
