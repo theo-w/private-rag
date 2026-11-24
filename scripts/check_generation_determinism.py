@@ -1,7 +1,8 @@
 """量「同一输入重复调用会不会给出同一份输出」——评估读数能不能复现，先看这个。
 
-同一条证据文本连续生成 N 次，对输出取 SHA256 指纹并数唯一个数。默认走评估环境
-（``configure_eval_env()`` 会把最终作答温度钉成 0），想看改动前的行为加 ``--unpinned``。
+同一条证据文本连续生成 N 次，对输出取 SHA256 指纹并数唯一个数。覆盖三处调用：
+agentic 的最终作答、步进决策、经典 RAG 的生成。默认走评估环境
+（``configure_eval_env()`` 会把两条链路的生成温度钉成 0），想看改动前的行为加 ``--unpinned``。
 
 用法：
     python3 scripts/check_generation_determinism.py --repeat 4
@@ -27,7 +28,10 @@ from private_rag.eval_env import configure_eval_env  # noqa: E402  必须在导�
 configure_eval_env()
 
 import private_rag.agent.prompts as prompts  # noqa: E402
+import private_rag.config as config  # noqa: E402
 from private_rag.agent.prompts import ask_json, build_step_prompt, generate_final_answer  # noqa: E402
+from private_rag.generation import generate_answer  # noqa: E402
+from private_rag.retrieval.hybrid import RetrievedChunk  # noqa: E402
 
 QUESTION = "这款咖啡豆的保存方式是什么？开封后能放多久？"
 EVIDENCE = """[1] 《咖啡储存手册》第三章：烘焙后的咖啡豆在常温密封罐里可以保存 4 周；开封后建议在 7 天内用完。
@@ -36,6 +40,19 @@ EVIDENCE = """[1] 《咖啡储存手册》第三章：烘焙后的咖啡豆在�
 STEP_PROMPT = build_step_prompt(
     QUESTION, "kb_search / sql_query", "已有证据摘要", ["第 1 步：kb_search 返回 3 条"]
 )
+
+
+def classic_chunks() -> list[RetrievedChunk]:
+    """经典链路的输入是检索片段，内容与 agentic 那条用同一段证据。"""
+    return [
+        RetrievedChunk(
+            point_id=f"p{index}",
+            text=line.split("：", 1)[1] if "：" in line else line,
+            metadata={"title": f"片段{index}", "source_type": "file", "doc_id": f"doc-{index}"},
+            rerank_score=0.9 - index / 10,
+        )
+        for index, line in enumerate(EVIDENCE.split("\n"), start=1)
+    ]
 
 
 def fingerprint(value) -> str:
@@ -70,18 +87,26 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    chunks = classic_chunks()
     if args.unpinned:
-        prompts.AGENT_ANSWER_TEMPERATURE = None
-        prompts.AGENT_LLM_SEED = None
+        # 改动前两条链路的生成都不传温度，也没有一处传 seed
+        config.AGENT_ANSWER_TEMPERATURE = None
+        config.GENERATION_TEMPERATURE = None
+        config.LLM_SEED = None
+    # 思考开关在 prompts 里是导入时读的值，必须改模块属性才生效（改 config 不会被读到）
     prompts.AGENT_ANSWER_THINKING = args.thinking
 
-    print(f"参数：temperature={prompts.AGENT_ANSWER_TEMPERATURE} seed={prompts.AGENT_LLM_SEED} "
-          f"thinking={prompts.AGENT_ANSWER_THINKING} repeat={args.repeat}")
-    answer_unique = repeat("最终作答", args.repeat, lambda: generate_final_answer(QUESTION, EVIDENCE))
+    print(f"参数：作答温度={config.AGENT_ANSWER_TEMPERATURE} 经典生成温度={config.GENERATION_TEMPERATURE} "
+          f"seed={config.LLM_SEED} thinking={prompts.AGENT_ANSWER_THINKING} repeat={args.repeat}")
+    answer_unique = repeat("最终作答（agentic）", args.repeat, lambda: generate_final_answer(QUESTION, EVIDENCE))
     step_unique = repeat("步进决策", args.repeat, lambda: ask_json(STEP_PROMPT, kind="step"))
+    # generate_answer 返回「答案 + 引用列表」，指纹只取答案文本
+    classic_unique = repeat(
+        "经典链路生成（固定链路）", args.repeat, lambda: generate_answer(QUESTION, chunks)[0]
+    )
     print("\n结论：唯一输出 1 个才算复现。这台 MLX 后端不接受 seed，复现只能靠 temperature=0；"
           "带思考时即使温度为 0 也会抖（见 docs/ROADMAP.md 的 v8.3）。")
-    return 0 if answer_unique == 1 and step_unique == 1 else 1
+    return 0 if answer_unique == 1 and step_unique == 1 and classic_unique == 1 else 1
 
 
 if __name__ == "__main__":

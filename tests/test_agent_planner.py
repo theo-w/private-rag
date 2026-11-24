@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 import private_rag.agent.prompts as prompts_module
+from private_rag import config
 from private_rag.agent.planner import LlmPlanner
 from private_rag.agent.prompts import (
     PlannerError,
@@ -223,8 +224,8 @@ class TestEvalDeterminismParams:
     """
 
     def test_runtime_passes_neither(self, monkeypatch):
-        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_TEMPERATURE", None)
-        monkeypatch.setattr(prompts_module, "AGENT_LLM_SEED", None)
+        monkeypatch.setattr(config, "AGENT_ANSWER_TEMPERATURE", None)
+        monkeypatch.setattr(config, "LLM_SEED", None)
         FakeChatOllama.payload = "答案 [1]"
         generate_final_answer("问题", "[1] 证据")
         assert "temperature" not in FakeChatOllama.calls[0]
@@ -236,7 +237,7 @@ class TestEvalDeterminismParams:
         assert "seed" not in FakeChatOllama.calls[1]
 
     def test_pinned_seed_reaches_answer_and_decisions(self, monkeypatch):
-        monkeypatch.setattr(prompts_module, "AGENT_LLM_SEED", 7)
+        monkeypatch.setattr(config, "LLM_SEED", 7)
         FakeChatOllama.payload = "答案 [1]"
         generate_final_answer("问题", "[1] 证据")
         assert FakeChatOllama.calls[0]["seed"] == 7
@@ -248,8 +249,8 @@ class TestEvalDeterminismParams:
         assert FakeChatOllama.calls[2]["seed"] == 7
 
     def test_pinned_answer_temperature_only_affects_answer(self, monkeypatch):
-        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_TEMPERATURE", 0.0)
-        monkeypatch.setattr(prompts_module, "AGENT_LLM_SEED", None)
+        monkeypatch.setattr(config, "AGENT_ANSWER_TEMPERATURE", 0.0)
+        monkeypatch.setattr(config, "LLM_SEED", None)
         FakeChatOllama.payload = "答案 [1]"
         generate_final_answer("问题", "[1] 证据")
         assert FakeChatOllama.calls[0]["temperature"] == 0.0
@@ -274,11 +275,17 @@ class TestEvalDeterminismParams:
 
         from private_rag.eval_env import configure_eval_env
 
-        for name in ("RAG_AGENT_ANSWER_TEMPERATURE", "RAG_AGENT_LLM_SEED"):
+        # 两条链路的生成温度都要钉住：固定链路跑 full / none 时走的是 generation.py 的生成
+        for name in (
+            "RAG_AGENT_ANSWER_TEMPERATURE",
+            "RAG_GENERATION_TEMPERATURE",
+            "RAG_LLM_SEED",
+        ):
             monkeypatch.delenv(name, raising=False)
         configure_eval_env()
         assert os.environ["RAG_AGENT_ANSWER_TEMPERATURE"] == "0"
-        assert os.environ["RAG_AGENT_LLM_SEED"] == "7"
+        assert os.environ["RAG_GENERATION_TEMPERATURE"] == "0"
+        assert os.environ["RAG_LLM_SEED"] == "7"
 
     def test_eval_env_keeps_exported_override(self, monkeypatch):
         import os

@@ -706,11 +706,17 @@ python3 scripts/check_generation_determinism.py --repeat 4 --thinking off
 python3 scripts/check_generation_determinism.py --repeat 4 --unpinned   # 复现改动前：不传温度与 seed
 ```
 
+脚本覆盖三处调用：agentic 的最终作答、步进决策、经典 RAG 的生成（`generate_answer`）。
 实测结论（细节见 `docs/ROADMAP.md` 的 v8.3）：不传 `temperature` 时四次调用四个输出——改动前的
 最终作答正是这样；`temperature=0` 且关思考时四次同一输出；`temperature=1` 加固定 `seed` 仍然每次都不同，
 也就是**这台 MLX 后端不接受 seed**，复现只能靠温度为 0；默认档带思考，温度为 0 也还是会抖。
-`configure_eval_env()` 因此默认写入 `RAG_AGENT_ANSWER_TEMPERATURE=0` 与 `RAG_AGENT_LLM_SEED=7`
-（后者留着表达意图，实际不起作用），只影响评估链路，想跑采样版 `export` 覆盖即可。
+`configure_eval_env()` 因此默认写入 `RAG_AGENT_ANSWER_TEMPERATURE=0`、`RAG_GENERATION_TEMPERATURE=0`
+与 `RAG_LLM_SEED=7`（seed 留着表达意图，实际不起作用），只影响评估链路，想跑采样版 `export` 覆盖即可。
+采样参数集中在 `private_rag/llm_params.py` 一处，四条调用共用：agentic 最终作答、决策调用、
+经典链路的生成、查询改写。跑 `full` / `none` 这些固定链路配置时同样会被钉住，重跑才可比
+（钉上前后各测一次：经典链路从「重复 2 次 2 个输出」变成「重复 4 次 1 个输出」）。
+一个要说清的限制：温度为 0 时输出是「基本一致」而不是逐字保证——累计 9 次调用里 1 次给出不同文本，
+所以逐字比对不能当证据，可复现性只在指标层成立。
 
 噪声底用同配置重复三轮量（默认档，参数与前几轮完全一致）：
 

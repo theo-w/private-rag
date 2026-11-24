@@ -461,23 +461,47 @@ v8.1 把决策调用的思考按环节关掉以后，单条 56.6 秒；这一轮
 根因：最终作答的 `ChatOllama` 从来不传 `temperature`（改动前只传 `num_ctx` 与 `keep_alive`），
 用的是服务端默认抽样；决策调用虽然传了 `temperature=0`，但整条链路没有一处传 `seed`。
 
-- [x] 新增 `RAG_AGENT_ANSWER_TEMPERATURE` 与 `RAG_AGENT_LLM_SEED`：默认都不传，运行时行为一字未改；
-      `configure_eval_env()` 写入默认值 `0` 与 `7`，只影响评估链路（serve/demo 不读这里），已有值优先。
+- [x] 新增 `RAG_AGENT_ANSWER_TEMPERATURE`、`RAG_GENERATION_TEMPERATURE` 与 `RAG_LLM_SEED`：默认都不传，
+      运行时行为一字未改；`configure_eval_env()` 写入默认值 `0`、`0` 与 `7`，只影响评估链路
+      （serve/demo 不读这里），已有值优先。采样参数集中在新模块 `private_rag/llm_params.py`，
+      从 `config` 现读（不是导入时抓快照），所以四条调用共用同一处逻辑：agentic 的最终作答、
+      步进/路由决策、经典链路的生成、查询改写。
 - [x] 同一证据文本重复调用（输出取 SHA256 指纹）：
 
 | 参数组合 | 重复次数 | 唯一输出数 | 结论 |
 | --- | --- | --- | --- |
 | 不传 temperature（改动前的最终作答） | 4 | 4 | 每次都不同——就是两轮读数对不上的原因 |
-| `temperature=0` + 关思考 | 4 | 1 | 可复现 |
+| `temperature=0` + 关思考 | 4 | 1 | 输出一致 |
 | `temperature=0` + 保持思考（默认档） | 2 | 2 | 仍有抖动 |
 | `temperature=1` + 固定 seed | 3 | 3 | 这台 MLX 后端不接受 seed |
 | 步进决策（`temperature=0`、默认关思考） | 3 | 1 | 可复现 |
 
+**更正（同日，把经典链路一起钉上以后重测）**：`temperature=0` + 关思考下的 agentic 最终作答是
+「基本一致」而不是「逐字保证」——累计 9 次调用里 1 次给出不同文本（指纹 `55d0eeabdeba`，其余 8 次同为
+`25da4c7c958b`），同一进程内连续四次则完全一致。也就是这台 MLX 后端的贪心解码（每次挑概率最高的词）
+偶发不稳定，复现是大概率一致。所以逐字比对不能当证据，可复现性只在指标层成立（同配置三轮九项指标完全一致）。
+
 - [x] 两条口径由此确定：复现只能靠 `temperature=0`，`seed` 在这台后端上没有实际作用（写进代码注释，
       别指望它）；默认档带思考，仍会抖，所以单次跑出的结论不能直接当因果。
-- [x] 范围只到 agentic 链路：经典 RAG 的生成在 `private_rag/generation.py` 里另有一处 `ChatOllama`，
-      同样不传温度，跑 `full` / `none` 这些配置的评估照样不可复现。本套读数全是 `--configs agent`，
-      所以先不动它；要一起钉得给经典链路加同样的开关。
+- [x] 范围覆盖两条链路（用户随后要求「经典链路也钉上」）：经典 RAG 的生成
+      （`generate_answer` / `stream_answer`）以前同样不传温度，跑 `full` / `none` 这些配置的评估
+      照样重跑不一致，现在与 agentic 共用同一套参数；查询改写原本就传 `temperature=0`，现在带上
+      同一个 seed。本套噪声底读数仍全是 `--configs agent`——固定链路只做过下面的单点复现检查，
+      没有跑整轮对照。
+- [x] 钉上以后重测同一件事（`--thinking off`，同一条证据重复调用，`check_generation_determinism.py`
+      现在同时量三处调用）：
+
+| 调用 | 钉死（温度 0 + seed 7） | 改动前（都不传） |
+| --- | --- | --- |
+| 经典链路生成 | 重复 4 次 → 1 个输出 | 重复 2 次 → 2 个输出 |
+| 步进决策 | 重复 4 次 → 1 个输出 | 重复 2 次 → 1 个输出（本来就传温度 0） |
+| agentic 最终作答 | 重复 4 次 → 1 个输出 | 重复 2 次 → 2 个输出 |
+
+      钉上温度让经典链路从「每次都不同」变成同一输出，跑 `full` / `none` 的前后对比从此可比；
+      步进决策一直可复现，没变化。
+- [x] 修掉测量脚本自身的两个坑（否则读数会误导）：思考开关 `RAG_AGENT_ANSWER_THINKING` 在
+      `private_rag/agent/prompts.py` 里是导入时读的值，脚本只改 `config` 不会被读到（那次「2 次 2 个输出」
+      其实测的是默认档而不是关思考）；`generate_answer` 返回「答案 + 引用列表」，取指纹要只取答案文本。
 - [x] 同配置重复三轮量噪声底（默认档、同一隔离评估库、串行、同一提交，报告
       `eval/reports/v8_noise_floor_repeat_{1,2,3}`）：
       - 九项质量指标三轮完全一致：`answer_rate` 1.000、`source_hit` 0.960、`refusal_accuracy` 1.000、

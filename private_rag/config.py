@@ -182,7 +182,14 @@ AGENT_ANSWER_THINKING = _answer_thinking_mode(os.getenv("RAG_AGENT_ANSWER_THINKI
 # 因为最终作答从来没传 temperature，用的是服务端默认值，29 条上 ±3 条拒答可能只是抽样噪声。
 # 钉死以后前后对比才谈得上归因，见 docs/ROADMAP.md 的 v8.3。
 AGENT_ANSWER_TEMPERATURE = _env_optional_float("RAG_AGENT_ANSWER_TEMPERATURE")
-AGENT_LLM_SEED = _env_optional_int("RAG_AGENT_LLM_SEED")
+# 经典 RAG 链路（generate_answer / stream_answer）的生成温度：改动前同样不传温度，
+# 所以跑 full / none 这些配置的评估照样重跑不一致。评估链路把它与 agentic 一起钉成 0，
+# 运行时（demo、serve）仍然不传，行为不变。
+GENERATION_TEMPERATURE = _env_optional_float("RAG_GENERATION_TEMPERATURE")
+# 随机种子：agentic 的决策与最终作答、经典链路的生成与查询改写共用这一个值
+# （原名 RAG_AGENT_LLM_SEED，现在不只 agentic 在读了）。实测这台 MLX 后端不接受 seed，
+# 复现靠温度为 0；它留着是为了让调用意图明确。
+LLM_SEED = _env_optional_int("RAG_LLM_SEED")
 # 决策输出通道（v7 function calling 对比的实验开关）：
 # json —— format="json" 结构化输出（默认）；function —— 原生 function calling。
 # 本机 MLX 模型的工具调用格式不稳定，默认不启用；对比见 scripts/compare_fc_decisions.py。

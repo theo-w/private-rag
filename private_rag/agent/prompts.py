@@ -16,15 +16,14 @@ from typing import Any, Optional, Sequence
 from langchain_ollama import ChatOllama
 
 from private_rag.config import (
-    AGENT_ANSWER_TEMPERATURE,
     AGENT_ANSWER_THINKING,
     AGENT_LLM_MODEL,
-    AGENT_LLM_SEED,
     AGENT_PLANNER_THINKING_STAGES,
     AGENT_PLANNER_TOKENS,
     MAX_QUESTION_CHARS,
 )
 from private_rag.generation import REFUSAL, History, render_history
+from private_rag.llm_params import agent_answer_kwargs, seed_kwargs
 
 # 明确指向「库里精确数据」的线索；LLM 不可用时用它决定首选工具
 DATABASE_HINTS: tuple[str, ...] = (
@@ -193,15 +192,6 @@ def _history_section(history: Optional[History]) -> str:
     return f"对话历史（仅用于理解当前问题的指代，不能作为事实依据）：\n{text}\n\n"
 
 
-def _seed_kwargs() -> dict[str, Any]:
-    """决策与作答调用要不要钉随机种子。
-
-    没配置就不传（保持服务端默认）；评估链路会钉一个固定值，这样同配置的两次评估
-    才能逐条对齐，前后对比的差别才不至于混进抽样噪声。
-    """
-    return {"seed": AGENT_LLM_SEED} if AGENT_LLM_SEED is not None else {}
-
-
 def _planner_reasoning(kind: str, thinking: Optional[bool]) -> bool:
     """某个决策环节要不要让模型先思考。
 
@@ -234,7 +224,7 @@ def ask_json(
         disable_streaming=True,
         keep_alive="10m",
         reasoning=_planner_reasoning(kind, thinking),
-        **_seed_kwargs(),
+        **seed_kwargs(),
     )
     response = llm.invoke(prompt)
     try:
@@ -326,9 +316,8 @@ def _final_llm(model: str, thinking: Optional[str] = None) -> ChatOllama:
     reasoning = _answer_reasoning(thinking)
     if reasoning is not None:
         kwargs["reasoning"] = reasoning
-    if AGENT_ANSWER_TEMPERATURE is not None:
-        kwargs["temperature"] = AGENT_ANSWER_TEMPERATURE
-    kwargs.update(_seed_kwargs())
+    kwargs.update(agent_answer_kwargs())
+    kwargs.update(seed_kwargs())
     return ChatOllama(**kwargs)
 
 
@@ -547,7 +536,7 @@ def ask_tool_json(
         disable_streaming=True,
         keep_alive="10m",
         reasoning=_planner_reasoning(kind, thinking),
-        **_seed_kwargs(),
+        **seed_kwargs(),
     ).bind_tools([schema])
     response = llm.invoke(prompt)
     tool_calls = getattr(response, "tool_calls", None) or []
