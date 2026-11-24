@@ -1,0 +1,14 @@
+# v8 解析基准的第三方解析器依赖（可选后端，不进 requirements.txt、不进 CI）。
+#
+# 为什么不进主依赖：本仓库与 CI 钉死 Python 3.9，而 docling 自 2.70.0 起不要 3.9、
+# MinerU 4.x 要 >=3.11。第三方只能装进另一个解释器的独立虚拟环境，主进程用 subprocess
+# 调驱动脚本——选型与代价见 docs/adr/0007。
+#
+# 装法（仓库根目录）：
+#   uv venv --python /opt/homebrew/bin/python3.11 .venv-parse
+#   uv pip install --python .venv-parse/bin/python -r requirements-parse-bench.txt
+#
+# 换机器要重装：模型权重首次运行才下载（MinerU 几 GB），RAG_PARSE_VENV_PYTHON 可指向已有解释器。
+
+docling==2.151.1
+mineru==4.2.3

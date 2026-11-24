@@ -1,0 +1,908 @@
+{
+  "meta": {
+    "report_title": "# private-rag 检索策略评估报告：v8_parse_bench",
+    "generated_at": "2026-11-23T13:20:55+08:00",
+    "dataset": "eval/v8_parse_bench.jsonl",
+    "dataset_sha256": "2e26731eea963d3812f5f6e846511a42897ab25fb794727eedd216193cbcc9f5",
+    "dataset_total": 8,
+    "samples_total": 8,
+    "samples_answerable": 7,
+    "samples_refusal": 1,
+    "sample_ids": [
+      "v8pb-01",
+      "v8pb-02",
+      "v8pb-03",
+      "v8pb-04",
+      "v8pb-05",
+      "v8pb-06",
+      "v8pb-07",
+      "v8pb-08"
+    ],
+    "categories": {
+      "ingestion": 5,
+      "multi_step": 2,
+      "refusal": 1
+    },
+    "configs": [
+      "full"
+    ],
+    "agent": {
+      "enabled": false,
+      "configs": []
+    },
+    "dataset_is_default": false,
+    "output_markdown": "eval/reports/v8_parse_ab_bench_selfbuilt.md",
+    "output_json": "eval/reports/v8_parse_ab_bench_selfbuilt.json",
+    "llm_model": "qwen3.8:27b-mlx",
+    "judge_model": "qwen3.8:27b-mlx",
+    "embed_model": "bge-m3",
+    "ragas": {
+      "enabled": false,
+      "configs": [],
+      "limit": null,
+      "metrics": [
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall"
+      ],
+      "strictness": 3,
+      "max_workers": 1,
+      "cache": true,
+      "cache_dir": "storage/eval_cache"
+    },
+    "ragas_errors": {},
+    "duration_seconds": 145.57,
+    "git_commit": "530418c302c8a09f171795828343d649e2e73dea",
+    "git_dirty": true,
+    "run_note": "解析后端 selfbuilt（v8 解析基准 A/B 自建侧）"
+  },
+  "samples_meta": [
+    {
+      "id": "v8pb-01",
+      "question": "供应商报价单里恒达的品类、起订量和交期分别是多少？",
+      "category": "ingestion",
+      "answerable": true,
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "v8pb-02",
+      "question": "供应商报价单的表格有哪几列？",
+      "category": "ingestion",
+      "answerable": true,
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "v8pb-03",
+      "question": "部门人员表里研发部门的张三和李四各有多少人？",
+      "category": "ingestion",
+      "answerable": true,
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "v8pb-04",
+      "question": "季度销售明细里 Q1 各区域销售额与合计是多少？",
+      "category": "ingestion",
+      "answerable": true,
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "v8pb-05",
+      "question": "报价单正文里写的报价有效期是多久？",
+      "category": "ingestion",
+      "answerable": true,
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "v8pb-06",
+      "question": "按季度销售明细，Q2 的合计比 Q1 的合计多多少？",
+      "category": "multi_step",
+      "answerable": true,
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "v8pb-07",
+      "question": "把报价单里恒达与华南的起订量相加是多少？",
+      "category": "multi_step",
+      "answerable": true,
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "v8pb-08",
+      "question": "配件库存表里打印机的单价是多少？",
+      "category": "refusal",
+      "answerable": false,
+      "expected_source": "",
+      "expected_sources": [],
+      "history_turns": 0
+    }
+  ],
+  "configs": {
+    "full": {
+      "spec": {
+        "name": "full",
+        "label": "混合召回 + 精排（v4 基线）",
+        "use_lexical": true,
+        "use_rerank": true,
+        "top_k": 3,
+        "use_parent": false,
+        "query_rewrite": "off",
+        "context_max_chars": 6000,
+        "is_agent": false
+      },
+      "metrics": {
+        "evidence_hit@3": 0.5714285714285714,
+        "evidence_recall@3": 0.5714285714285714,
+        "context_precision@3": 0.19047619047619047,
+        "mrr@3": 0.5714285714285714,
+        "source_hit": 0.0,
+        "both_sides_hit": null,
+        "answer_rate": 1.0,
+        "refusal_accuracy": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "avg_latency_ms": 18195.736052250002,
+        "avg_retrieval_ms": 427.5111510000023,
+        "avg_generation_ms": 17768.22490125,
+        "generation_cache_hits": 0,
+        "avg_retrieved": 3.0,
+        "avg_context_chars": 130.625,
+        "avg_query_count": 1.0,
+        "avg_tool_calls": null,
+        "avg_tool_steps": null,
+        "avg_tool_calls_knowledge": null,
+        "avg_tool_calls_database": null,
+        "avg_tool_calls_mixed": null,
+        "dual_tool_rate": null,
+        "dual_tool_rate_knowledge": null,
+        "dual_tool_rate_database": null,
+        "dual_tool_rate_mixed": null,
+        "gate_intercept_rate": null,
+        "used_parent_rate": 0.0,
+        "rewrite_fallbacks": 0,
+        "n_answerable": 7,
+        "n_refusal": 1,
+        "n_errors": 0
+      },
+      "ragas": null,
+      "n_results": 8
+    }
+  },
+  "samples": [
+    {
+      "id": "v8pb-01",
+      "config": "full",
+      "category": "ingestion",
+      "answerable": true,
+      "question": "供应商报价单里恒达的品类、起订量和交期分别是多少？",
+      "reference": "恒达：品类键盘，起订量 50，交期 15 天。",
+      "evidence": [
+        "恒达 键盘 50 15天"
+      ],
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "answer": "根据供应商报价单（第三页）的信息，恒达的品类为**键盘**，起订量为**50**，交期为**15天**。[1]",
+      "contexts": [
+        "供应商报价单（第三页，无框线）\n供应商 品类 起订量 交期\n15天 50 恒达 键盘\n20天 鼠标 100 华南\n以上报价有效期30天。",
+        "季度,华东,华南,华北,西南,合计,Q1,120,90,70,40,320,Q2,130,95,75,45,345",
+        "产品,数量,单价,显示器,,1299.0,硬盘,25,380.0"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v8_parse_bench.pdf 第 3 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "供应商报价单（第三页，无框线） 供应商 品类 起订量 交期 15天 50 恒达 键盘 20天 鼠标 100 华南 以上报价有效期30天。",
+          "page": 3,
+          "table": null,
+          "score": 4.671875
+        },
+        {
+          "index": 2,
+          "title": "v8_parse_bench.pdf 第 4 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "季度,华东,华南,华北,西南,合计,Q1,120,90,70,40,320,Q2,130,95,75,45,345",
+          "page": 4,
+          "table": "v8_parse_bench_table_1",
+          "score": -5.3515625
+        },
+        {
+          "index": 3,
+          "title": "v8_parse_bench.pdf 第 1 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "产品,数量,单价,显示器,,1299.0,硬盘,25,380.0",
+          "page": 1,
+          "table": "v8_parse_bench_table_1",
+          "score": -6.04296875
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 157,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 763.23,
+      "generation_ms": 45150.01,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "v8pb-02",
+      "config": "full",
+      "category": "ingestion",
+      "answerable": true,
+      "question": "供应商报价单的表格有哪几列？",
+      "reference": "四列：供应商、品类、起订量、交期。",
+      "evidence": [
+        "供应商 品类 起订量 交期"
+      ],
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "answer": "根据上下文，供应商报价单的表格共有四列，分别是：**供应商、品类、起订量、交期**。[1]",
+      "contexts": [
+        "供应商报价单（第三页，无框线）\n供应商 品类 起订量 交期\n15天 50 恒达 键盘\n20天 鼠标 100 华南\n以上报价有效期30天。",
+        "季度销售明细（第四页，六列）\n数据来源：内部报表系统。",
+        "部门,人员,人数,研发,张三,L,,李四,2,合计,,"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v8_parse_bench.pdf 第 3 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "供应商报价单（第三页，无框线） 供应商 品类 起订量 交期 15天 50 恒达 键盘 20天 鼠标 100 华南 以上报价有效期30天。",
+          "page": 3,
+          "table": null,
+          "score": -0.72705078125
+        },
+        {
+          "index": 2,
+          "title": "v8_parse_bench.pdf 第 4 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "季度销售明细（第四页，六列） 数据来源：内部报表系统。",
+          "page": 4,
+          "table": null,
+          "score": -4.74609375
+        },
+        {
+          "index": 3,
+          "title": "v8_parse_bench.pdf 第 2 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "部门,人员,人数,研发,张三,L,,李四,2,合计,,",
+          "page": 2,
+          "table": "v8_parse_bench_table_1",
+          "score": -6.37109375
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 122,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 424.87,
+      "generation_ms": 12447.24,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "v8pb-03",
+      "config": "full",
+      "category": "ingestion",
+      "answerable": true,
+      "question": "部门人员表里研发部门的张三和李四各有多少人？",
+      "reference": "研发部门张三 1 人、李四 2 人。",
+      "evidence": [
+        "研发 张三 1",
+        "研发 李四 2"
+      ],
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "answer": "根据上下文中的部门人员表（第二页，含合并单元格）[1][2]：\n\n- **研发部门**下：\n  - **张三**：人数栏显示为\"L\"（疑为表格解析异常，原值可能为\"1\"）[1]\n  - **李四**：人数为 **2** [1]\n\n备注：表中人数为在编人数 [2]。\n\n> 说明：张三对应的人数在原始解析中显示为\"L\"，疑似 OCR/表格解析将数字\"1\"误识为字母\"L\"，上下文未提供进一步澄清，故无法确认其确切数值。",
+      "contexts": [
+        "部门,人员,人数,研发,张三,L,,李四,2,合计,,",
+        "部门人员表（第二页，含合并单元格）\n备注：人数为在编人数。",
+        "季度,华东,华南,华北,西南,合计,Q1,120,90,70,40,320,Q2,130,95,75,45,345"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v8_parse_bench.pdf 第 2 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "部门,人员,人数,研发,张三,L,,李四,2,合计,,",
+          "page": 2,
+          "table": "v8_parse_bench_table_1",
+          "score": 4.66796875
+        },
+        {
+          "index": 2,
+          "title": "v8_parse_bench.pdf 第 2 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "部门人员表（第二页，含合并单元格） 备注：人数为在编人数。",
+          "page": 2,
+          "table": null,
+          "score": -2.501953125
+        },
+        {
+          "index": 3,
+          "title": "v8_parse_bench.pdf 第 4 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "季度,华东,华南,华北,西南,合计,Q1,120,90,70,40,320,Q2,130,95,75,45,345",
+          "page": 4,
+          "table": "v8_parse_bench_table_1",
+          "score": -7.34375
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 113,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 374.03,
+      "generation_ms": 39265.47,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "v8pb-04",
+      "config": "full",
+      "category": "ingestion",
+      "answerable": true,
+      "question": "季度销售明细里 Q1 各区域销售额与合计是多少？",
+      "reference": "Q1：华东 120、华南 90、华北 70、西南 40，合计 320。",
+      "evidence": [
+        "Q1 120 90 70 40 320"
+      ],
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "answer": "根据季度销售明细（第四页，六列）[2]，Q1 各区域销售额及合计如下 [1]：\n\n| 区域 | 销售额 |\n|------|--------|\n| 华东 | 120 |\n| 华南 | 90 |\n| 华北 | 70 |\n| 西南 | 40 |\n| **合计** | **320** |\n\n以上数据来源于内部报表系统 [2]。",
+      "contexts": [
+        "季度,华东,华南,华北,西南,合计,Q1,120,90,70,40,320,Q2,130,95,75,45,345",
+        "季度销售明细（第四页，六列）\n数据来源：内部报表系统。",
+        "部门,人员,人数,研发,张三,L,,李四,2,合计,,"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v8_parse_bench.pdf 第 4 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "季度,华东,华南,华北,西南,合计,Q1,120,90,70,40,320,Q2,130,95,75,45,345",
+          "page": 4,
+          "table": "v8_parse_bench_table_1",
+          "score": 2.498046875
+        },
+        {
+          "index": 2,
+          "title": "v8_parse_bench.pdf 第 4 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "季度销售明细（第四页，六列） 数据来源：内部报表系统。",
+          "page": 4,
+          "table": null,
+          "score": -3.3203125
+        },
+        {
+          "index": 3,
+          "title": "v8_parse_bench.pdf 第 2 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "部门,人员,人数,研发,张三,L,,李四,2,合计,,",
+          "page": 2,
+          "table": "v8_parse_bench_table_1",
+          "score": -4.4453125
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 111,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 383.75,
+      "generation_ms": 12943.21,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "v8pb-05",
+      "config": "full",
+      "category": "ingestion",
+      "answerable": true,
+      "question": "报价单正文里写的报价有效期是多久？",
+      "reference": "以上报价有效期 30 天。",
+      "evidence": [
+        "以上报价有效期 30 天"
+      ],
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "answer": "根据供应商报价单（第三页）正文，报价有效期为 **30天**。[1]",
+      "contexts": [
+        "供应商报价单（第三页，无框线）\n供应商 品类 起订量 交期\n15天 50 恒达 键盘\n20天 鼠标 100 华南\n以上报价有效期30天。",
+        "季度,华东,华南,华北,西南,合计,Q1,120,90,70,40,320,Q2,130,95,75,45,345",
+        "季度销售明细（第四页，六列）\n数据来源：内部报表系统。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v8_parse_bench.pdf 第 3 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "供应商报价单（第三页，无框线） 供应商 品类 起订量 交期 15天 50 恒达 键盘 20天 鼠标 100 华南 以上报价有效期30天。",
+          "page": 3,
+          "table": null,
+          "score": 2.65234375
+        },
+        {
+          "index": 2,
+          "title": "v8_parse_bench.pdf 第 4 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "季度,华东,华南,华北,西南,合计,Q1,120,90,70,40,320,Q2,130,95,75,45,345",
+          "page": 4,
+          "table": "v8_parse_bench_table_1",
+          "score": -6.87109375
+        },
+        {
+          "index": 3,
+          "title": "v8_parse_bench.pdf 第 4 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "季度销售明细（第四页，六列） 数据来源：内部报表系统。",
+          "page": 4,
+          "table": null,
+          "score": -9.640625
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 152,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 355.91,
+      "generation_ms": 4971.38,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "v8pb-06",
+      "config": "full",
+      "category": "multi_step",
+      "answerable": true,
+      "question": "按季度销售明细，Q2 的合计比 Q1 的合计多多少？",
+      "reference": "345 - 320 = 25。",
+      "evidence": [
+        "Q1 120 90 70 40 320",
+        "Q2 130 95 75 45 345"
+      ],
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "answer": "根据季度销售明细表格，Q1 的合计为 320，Q2 的合计为 345 [1]。\n\n因此，Q2 的合计比 Q1 的合计多 **25**（345 − 320 = 25）[1]。",
+      "contexts": [
+        "季度,华东,华南,华北,西南,合计,Q1,120,90,70,40,320,Q2,130,95,75,45,345",
+        "季度销售明细（第四页，六列）\n数据来源：内部报表系统。",
+        "部门,人员,人数,研发,张三,L,,李四,2,合计,,"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v8_parse_bench.pdf 第 4 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "季度,华东,华南,华北,西南,合计,Q1,120,90,70,40,320,Q2,130,95,75,45,345",
+          "page": 4,
+          "table": "v8_parse_bench_table_1",
+          "score": 4.48828125
+        },
+        {
+          "index": 2,
+          "title": "v8_parse_bench.pdf 第 4 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "季度销售明细（第四页，六列） 数据来源：内部报表系统。",
+          "page": 4,
+          "table": null,
+          "score": -3.44921875
+        },
+        {
+          "index": 3,
+          "title": "v8_parse_bench.pdf 第 2 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "部门,人员,人数,研发,张三,L,,李四,2,合计,,",
+          "page": 2,
+          "table": "v8_parse_bench_table_1",
+          "score": -4.7109375
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 111,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 378.49,
+      "generation_ms": 10388.95,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "v8pb-07",
+      "config": "full",
+      "category": "multi_step",
+      "answerable": true,
+      "question": "把报价单里恒达与华南的起订量相加是多少？",
+      "reference": "50 + 100 = 150。",
+      "evidence": [
+        "恒达 键盘 50 15天",
+        "华南 鼠标 100 20天"
+      ],
+      "expected_source": "eval/fixtures/v8_parse_bench.md",
+      "expected_sources": [],
+      "answer": "根据报价单，恒达的起订量为 50，华南的起订量为 100 [1]。两者相加为 **150**。",
+      "contexts": [
+        "供应商报价单（第三页，无框线）\n供应商 品类 起订量 交期\n15天 50 恒达 键盘\n20天 鼠标 100 华南\n以上报价有效期30天。",
+        "季度,华东,华南,华北,西南,合计,Q1,120,90,70,40,320,Q2,130,95,75,45,345",
+        "产品,数量,单价,显示器,,1299.0,硬盘,25,380.0"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v8_parse_bench.pdf 第 3 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "供应商报价单（第三页，无框线） 供应商 品类 起订量 交期 15天 50 恒达 键盘 20天 鼠标 100 华南 以上报价有效期30天。",
+          "page": 3,
+          "table": null,
+          "score": 2.240234375
+        },
+        {
+          "index": 2,
+          "title": "v8_parse_bench.pdf 第 4 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "季度,华东,华南,华北,西南,合计,Q1,120,90,70,40,320,Q2,130,95,75,45,345",
+          "page": 4,
+          "table": "v8_parse_bench_table_1",
+          "score": -1.603515625
+        },
+        {
+          "index": 3,
+          "title": "v8_parse_bench.pdf 第 1 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "产品,数量,单价,显示器,,1299.0,硬盘,25,380.0",
+          "page": 1,
+          "table": "v8_parse_bench_table_1",
+          "score": -5.875
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 157,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": false,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 392.89,
+      "generation_ms": 7302.42,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "v8pb-08",
+      "config": "full",
+      "category": "refusal",
+      "answerable": false,
+      "question": "配件库存表里打印机的单价是多少？",
+      "reference": "",
+      "evidence": [],
+      "expected_source": "",
+      "expected_sources": [],
+      "answer": "【资料中没有相关信息】",
+      "contexts": [
+        "配件库存表（第一页）\n备注：第一页为草稿数据",
+        "产品,数量,单价,显示器,,1299.0,硬盘,25,380.0",
+        "供应商报价单（第三页，无框线）\n供应商 品类 起订量 交期\n15天 50 恒达 键盘\n20天 鼠标 100 华南\n以上报价有效期30天。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "v8_parse_bench.pdf 第 1 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "配件库存表（第一页） 备注：第一页为草稿数据",
+          "page": 1,
+          "table": null,
+          "score": -3.58203125
+        },
+        {
+          "index": 2,
+          "title": "v8_parse_bench.pdf 第 1 页 表格 1",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "产品,数量,单价,显示器,,1299.0,硬盘,25,380.0",
+          "page": 1,
+          "table": "v8_parse_bench_table_1",
+          "score": -4.83984375
+        },
+        {
+          "index": 3,
+          "title": "v8_parse_bench.pdf 第 3 页",
+          "source_type": "file",
+          "source_uri": "eval/fixtures/v8_parse_bench.pdf",
+          "snippet": "供应商报价单（第三页，无框线） 供应商 品类 起订量 交期 15天 50 恒达 键盘 20天 鼠标 100 华南 以上报价有效期30天。",
+          "page": 3,
+          "table": null,
+          "score": -5.53515625
+        }
+      ],
+      "source_uris": [
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf",
+        "eval/fixtures/v8_parse_bench.pdf"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 122,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 3,
+      "refusal": true,
+      "intent": "",
+      "stop_reason": "",
+      "tool_calls": null,
+      "tool_steps": null,
+      "tool_names": [],
+      "gate_intercepts": 0,
+      "trace_id": "",
+      "history_turns": null,
+      "retrieval_ms": 346.92,
+      "generation_ms": 9677.11,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": null,
+        "evidence_recall@3": null,
+        "context_precision@3": null,
+        "mrr@3": null,
+        "source_hit": null,
+        "citation_rate": null,
+        "citation_validity": null,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    }
+  ]
+}

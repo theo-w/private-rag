@@ -1,0 +1,8 @@
+{"id": "v8pb-01", "question": "供应商报价单里恒达的品类、起订量和交期分别是多少？", "reference": "恒达：品类键盘，起订量 50，交期 15 天。", "evidence": ["恒达 键盘 50 15天"], "source": "eval/fixtures/v8_parse_bench.md", "category": "ingestion", "answerable": true}
+{"id": "v8pb-02", "question": "供应商报价单的表格有哪几列？", "reference": "四列：供应商、品类、起订量、交期。", "evidence": ["供应商 品类 起订量 交期"], "source": "eval/fixtures/v8_parse_bench.md", "category": "ingestion", "answerable": true}
+{"id": "v8pb-03", "question": "部门人员表里研发部门的张三和李四各有多少人？", "reference": "研发部门张三 1 人、李四 2 人。", "evidence": ["研发 张三 1", "研发 李四 2"], "source": "eval/fixtures/v8_parse_bench.md", "category": "ingestion", "answerable": true}
+{"id": "v8pb-04", "question": "季度销售明细里 Q1 各区域销售额与合计是多少？", "reference": "Q1：华东 120、华南 90、华北 70、西南 40，合计 320。", "evidence": ["Q1 120 90 70 40 320"], "source": "eval/fixtures/v8_parse_bench.md", "category": "ingestion", "answerable": true}
+{"id": "v8pb-05", "question": "报价单正文里写的报价有效期是多久？", "reference": "以上报价有效期 30 天。", "evidence": ["以上报价有效期 30 天"], "source": "eval/fixtures/v8_parse_bench.md", "category": "ingestion", "answerable": true}
+{"id": "v8pb-06", "question": "按季度销售明细，Q2 的合计比 Q1 的合计多多少？", "reference": "345 - 320 = 25。", "evidence": ["Q1 120 90 70 40 320", "Q2 130 95 75 45 345"], "source": "eval/fixtures/v8_parse_bench.md", "category": "multi_step", "answerable": true}
+{"id": "v8pb-07", "question": "把报价单里恒达与华南的起订量相加是多少？", "reference": "50 + 100 = 150。", "evidence": ["恒达 键盘 50 15天", "华南 鼠标 100 20天"], "source": "eval/fixtures/v8_parse_bench.md", "category": "multi_step", "answerable": true}
+{"id": "v8pb-08", "question": "配件库存表里打印机的单价是多少？", "reference": "", "evidence": [], "source": "", "category": "refusal", "answerable": false}

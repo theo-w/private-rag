@@ -158,6 +158,43 @@ RAG_COLLECTION_NAME=rag_scan_table_off RAG_STORAGE_DIR=storage/eval/qdrant_scan_
 python3 scripts/evaluate.py --configs dense,hybrid,full --ragas-configs dense,full \
   --judge-model qwen2.5:7b-instruct --cache-dir storage/eval_cache_qwen25_7b \
   --output eval/reports/v4_report.md --json-output eval/reports/v4_report.json
+
+# 9. v8 解析基准 A/B：自建扫描件解析栈 vs docling / MinerU（整页替换后端）
+#    第三方解析器要 Python >=3.10/3.11，装不进本仓库钉死的 3.9 → 独立虚拟环境，见 requirements-parse-bench.txt
+uv venv --python /opt/homebrew/bin/python3.11 .venv-parse
+uv pip install --python .venv-parse/bin/python -r requirements-parse-bench.txt
+# MinerU 4.2.3 的模型要预下载（驱动走 mineru-kit parse，不启文档库服务、不用 --remote）
+.venv-parse/bin/mineru-kit models download --tier standard -s modelscope
+python3 scripts/make_parse_bench_fixture.py    # 四页纯图片 PDF + 文字底稿 + golden JSON
+python3 scripts/parse_bench.py --preflight --backends docling,mineru   # 验 venv/库/模型/驱动输出，失败早停
+python3 scripts/parse_bench.py --backends selfbuilt,docling,mineru \
+  --output eval/reports/v8_parse_baseline.md --json-output eval/reports/v8_parse_baseline.json
+# 三侧各建一个评估库再各跑一遍（串行）。开关只在入库时生效：检索与作答读的是已入库的块
+for backend in selfbuilt docling mineru; do
+  RAG_SCAN_PARSER=$backend RAG_COLLECTION_NAME=rag_parse_bench_$backend \
+    RAG_STORAGE_DIR=storage/eval/qdrant_parse_bench_$backend \
+    RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_parse_bench_$backend/bm25.pkl \
+    python3 scripts/prepare_eval_kb.py --config config/sources.eval.parse.yaml --recreate
+  RAG_COLLECTION_NAME=rag_parse_bench_$backend \
+    RAG_STORAGE_DIR=storage/eval/qdrant_parse_bench_$backend \
+    RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_parse_bench_$backend/bm25.pkl \
+    python3 scripts/evaluate.py --dataset eval/v8_parse_bench.jsonl --configs full --skip-ragas \
+    --run-note "解析后端 $backend" \
+    --output eval/reports/v8_parse_ab_bench_$backend.md --json-output eval/reports/v8_parse_ab_bench_$backend.json
+done
+# v6 那 6 条在同三侧下复现一遍（语料是 v6 fixture，所以是另外三个库）
+for backend in selfbuilt docling mineru; do
+  RAG_SCAN_PARSER=$backend RAG_COLLECTION_NAME=rag_parse_scan_$backend \
+    RAG_STORAGE_DIR=storage/eval/qdrant_parse_scan_$backend \
+    RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_parse_scan_$backend/bm25.pkl \
+    python3 scripts/prepare_eval_kb.py --config config/sources.eval.scan.yaml --recreate
+  RAG_COLLECTION_NAME=rag_parse_scan_$backend \
+    RAG_STORAGE_DIR=storage/eval/qdrant_parse_scan_$backend \
+    RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_parse_scan_$backend/bm25.pkl \
+    python3 scripts/evaluate.py --dataset eval/v6_scan_table.jsonl --configs full --skip-ragas \
+    --run-note "解析后端 $backend" \
+    --output eval/reports/v8_parse_ab_scan_$backend.md --json-output eval/reports/v8_parse_ab_scan_$backend.json
+done
 ```
 
 评估库的语料就是仓库文档，因此**先定稿文档和数据集，再重建评估库并跑最终报告**。报告生成后如果又改了 README/docs，需要重跑 `prepare_eval_kb.py --recreate` 和评估。v5 主报告与 v4 回归共用同一个评估 Qdrant 路径，必须**串行运行**，否则会争抢本地锁。
@@ -822,3 +859,114 @@ python3 scripts/measure_thinking_ab.py --setting thinking_brief --values off,on,
 一个试过但没用的方向，记在这里免得再试：把步进提示词的静态规则挪到证据前面（想让模型复用固定前缀，少读提示词）
 实测三步 37.6s 对 37.8s，没有差别。这台 Ollama 的前缀缓存只在「整段开头与上一次请求完全相同」时才复用
 ——同一份提示词原样重发才能把读提示词从 30s 压到 0.4s——重排段落顺序换不来复用。
+
+## v8 解析基准集（`v8_parse_bench.jsonl`）
+
+要量的问题：v6.2 的消融证明自建版面表格把 `evidence_hit@3` 从 0.2 抬到 1.0，但那只是「比自己不开这个模块」
+——自建那套（RapidOCR + OpenCV 形态学找框 + rapid-table SLANet）与成熟解析器相比处在什么位置，从来没有读数。
+这一集与 `scripts/parse_bench.py` 负责给出这个位置。**目的是量出自建链路的位置，不是把它换掉**；
+是否切换由读数决定，单独记一条。
+
+### 口径：整页替换后端
+
+`RAG_SCAN_PARSER=selfbuilt|docling|mineru`（默认 `selfbuilt`）。非自建时第三方解析器自己做 OCR，
+某一页的**正文与表格都换来源**，不是只换表格模块——所以两侧命中差异里含 OCR 差异，不能全记到表格模块头上。
+下游 `doc_id` / 页码 / 表格名 / 逗号序列化 / 父子块切分一字未改，自建侧逐字节还是 v6.2 ON 侧那条链路，
+这是新读数能与 `v6_scan_table_on.md` 对齐的前提。为什么第三方走独立虚拟环境 + subprocess，见 `docs/adr/0007`。
+
+### fixture 与 golden
+
+`eval/fixtures/v8_parse_bench.pdf` 是四页纯图片（`scripts/make_parse_bench_fixture.py` 生成，四页规格单一来源）：
+
+| 页 | 形态 | 想量的点 |
+| --- | --- | --- |
+| 1 | 带边框 3×3 | 与 v6 fixture 同形，作对照基线 |
+| 2 | rowspan / colspan 合并单元格 | 自建的 span 展开与第三方的展开是否等价 |
+| 3 | **无框线**（只有文字对齐，画面里没有任何线条） | 自建靠形态学结构线找框，这是已知短板，主要区分点 |
+| 4 | 六列表格 | 多列时行列会不会错位 |
+
+`eval/fixtures/v8_parse_bench.md` 是文字底稿，只做 evidence 逐字校验、**不入库**（与 v6 同设计，
+所以 `source_hit` 恒 0 是口径而非检索失败）；`eval/fixtures/v8_parse_bench.golden.json` 是解析层 golden。
+评估集 8 条 = `ingestion` 5 + `multi_step` 2 + `refusal` 1。
+
+### evidence 的写法是口径能对齐的关键
+
+evidence 写成**整行连续短语**（如 `恒达 键盘 50 15天`），不写带标点的单元格内容。`normalize_text`
+是 NFKC + 小写 + 只保留 alnum，所以自建侧的逗号拼接行文本 `恒达,键盘,50,15天` 与第三方的 markdown
+管道行规范化后完全等价，两侧都能逐字命中。若 evidence 写成「起订量 50」这种跨格短语，某一侧的序列化方式
+就能单独让它失配，读数分不清是解析差还是口径不命中。
+
+### 两层读数
+
+- **解析层**（`scripts/parse_bench.py`，不打生成模型、不入库、秒级）：`table_recall`（单元格匹配率 ≥ 0.5
+  算认出这张表）、`cell_accuracy`（按行列位置比对，只统计期望非空的地格）、`structure_ok`（行列数对不对）、
+  `body_purity`（1 − 混入正文的期望行占比）。它的作用是把「解析真的差」与「evidence 口径没命中」分开——
+  端到端只看到命中与否，分不清是哪一种。
+- **端到端**（两个数据集 × 三侧 = 6 次，`full` 配置、Ragas 关闭）：沿用既有指标。`avg_latency_ms`
+  只含检索与生成，**解析耗时发生在入库侧**，在解析层报告里单独记。
+
+合并单元格的延续格两侧填法不同（自建填 `None`、第三方驱动填占位副本），golden 只比对期望非空的地格，
+这个差异不会进读数。
+
+### 三侧读数（2026-11-23，`git_commit = 530418c`，三侧 dirty 都 True）
+
+生成侧三侧完全一致（`qwen3.8:27b-mlx` + `bge-m3` + reranker，与 v6.2 ON 侧同配置），所以下面的差异只可能来自入库侧的解析。
+
+**解析层**（`eval/reports/v8_parse_baseline.md`，四页一次解析，不打模型）：
+
+| 后端 | 表格检出 | table_recall | cell_accuracy | structure_ok | body_purity | 一次解析耗时 |
+| --- | --- | --- | --- | --- | --- | --- |
+| selfbuilt | 3/4 | 0.75 | 0.64 | 0.75 | 0.92 | 3344 ms |
+| docling | 4/4 | 1.00 | 1.00 | 1.00 | 1.00 | 10880 ms |
+| mineru（standard 档） | 3/4 | 0.75 | 0.75 | 0.75 | 0.75 | 13024 ms |
+
+逐页区分点都落在同两处：页 1/2 自建把数字读丢（`1299.0` 前丢了 `8`、`1` 读成 `L`），第三两侧逐格全对；
+页 3（无框线）自建与 mineru 都是 0 张检出，docling 认出 `["恒达","键盘","50","15天"]`。mineru 那页把两行
+按正确顺序读进正文，所以 `body_purity` 0.75 是「表格行混进正文」而非「读丢内容」。
+
+**端到端**（`full` 配置、Ragas 关闭；三侧 `answer_rate`/`refusal_accuracy`/`citation_rate` 均 1.000，未列）：
+
+| 数据集 | 后端 | evidence_hit@3 | context_precision@3 | mrr@3 | 平均上下文字符 | 单条均耗时 |
+| --- | --- | --- | --- | --- | --- | --- |
+| v8_parse_bench 8 条 | selfbuilt | 0.571 | 0.190 | 0.571 | 130.6 | 18196 ms |
+| v8_parse_bench 8 条 | docling | **1.000** | 0.333 | 0.905 | 117.1 | 21583 ms |
+| v8_parse_bench 8 条 | mineru | **1.000** | 0.333 | **1.000** | 132.8 | 10150 ms |
+| v6_scan_table 6 条 | selfbuilt | 1.000 | 0.500 | 0.900 | 50.0 | 8040 ms |
+| v6_scan_table 6 条 | docling | 1.000 | 0.500 | 0.900 | 53.0 | 17466 ms |
+| v6_scan_table 6 条 | mineru | 1.000 | 0.500 | 0.900 | 51.0 | 8673 ms |
+
+两条读数方向：
+
+- **自建侧新集 3 条未命中，与解析层的缺陷一一对应**：`v8pb-01`/`v8pb-07`（无框线页 0 张检出，正文里那两行
+  还被 OCR 倒序成 `15天 50 恒达 键盘`）、`v8pb-03`（`研发 张三 1` 读成 `L`）。第三两侧 7 条全命中，
+  所以这 0.429 的差距是解析造成的，不是 evidence 口径造成的。
+- **v6 那 6 条三侧完全同分**（1.000 / 0.500 / 0.900），与 v6.2 的 ON 侧逐字一致——口径对齐成立，
+  第三方换掉整页 OCR 也没有把那 6 条的命中与排位改动。这说明 fixture 越简单，后端差异越不出读数；
+  区分点只在复杂页型上出现。
+- **mineru 的 `table_recall` 与自建同为 0.75，端到端却与 docling 一样 1.000**：无框线页它也没认成表格，
+  但它把那两行按正确顺序读成了正文，evidence 又是整行连续短语，逐字命中照样成立。所以「表格有没有认出来」
+  与「证据能不能召回」在这轮不是同一件事，切换决策不能只看 `table_recall`。
+
+耗时的三侧差异不进结论：`avg_latency_ms` 只含检索 + 生成，而三侧的生成耗时本身就相差很大（bench 侧
+17768 / 20878 / 9671 ms），模型冷热与并发争抢的影响比解析后端大。解析耗时在入库侧，见上面的解析层表。
+
+### 限制（引用这轮数字时一并带上）
+
+- **整条栈对比，不是只换表格模块**：正文 OCR 的来源也换了，命中差异里含 OCR 差异，不能全记到表格模块头上。
+- **fixture 是合成件**：四页都由 `scripts/make_parse_bench_fixture.py` 用本机字体绘制，不代表真实扫描件，
+  且 Linux 上字体不同、绘制不可复现——换机器只能复现指标算法，不能复现这张 PDF 的样子。
+- **`source_hit` 恒 0 是口径**：底稿 `v8_parse_bench.md` 只做 evidence 逐字校验、不入库，所以引用来源永远对不上底稿。
+- **样本量只支撑方向**：新集 8 条、v6 集 6 条，`full` 单配置、Ragas 关闭，不足以支撑结论。
+- **解析耗时不进 `avg_latency_ms`**：那是检索 + 生成的耗时，解析发生在入库侧，只在解析层报告里记。
+- **三侧耗时不能互相比较**：`avg_latency_ms` 里生成占九成，而这轮三侧的生成耗时本身就相差很大，模型冷热与
+  Ollama 争抢的影响大于解析后端本身。要量解析开销只看解析层报告的耗时列。
+- **无框线页自建 0 检出是设计出来的区分点**，不是回归；这一页正是用来分辨两侧高下的那一页。
+- **docling 的正文有字符损失，`body_purity` 量不到**：它把「配件库存表（第一页）」读成 `配件库存表 (第 页`、
+  把备注顺序打乱并多出杂散数字（`备注 人数为在编人数 0`）。`body_purity` 只统计「期望表格行有没有混进正文」，
+  所以它给 docling 1.00 并不等于正文无损。本轮 evidence 全是表格行与一句完整正文，这个损失没反映到命中上。
+- **MinerU 只测了 `standard` 档**：走 `mineru-kit parse --tier standard`（流水线小模型 + llama.cpp 的 VLM），
+  `basic` 档未单独测。档位由 `RAG_MINERU_TIER` 决定并参与解析缓存键，换档必然重解析，不要把两档的读数混看。
+  另外 MinerU 4.2.3 的批量解析入口不是 `mineru parse`（那是文档库 + 本地服务的 CLI），驱动用的是 `mineru-kit parse`。
+- **PaddleOCR-VL 未测**：要 CUDA 上的 vLLM/SGLang 服务，本机 Apple Silicon 跑不了，不要写成「三侧齐了」。
+- **换机器要重装**：`.venv-parse/` 不入库，模型权重首次解析才下载（MinerU 的 standard 档要 `mineru-kit models
+  download --tier standard`，basic 档实测 863 MB）；第三方与本机 3.9 完全隔离。

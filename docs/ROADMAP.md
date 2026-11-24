@@ -19,6 +19,7 @@
 | v7.4 | `v7.4-two-sided-source` + `worktree-fix-c-runtime-gate` | 评估口径改双侧：混合问题「到底查了几侧」变成可测读数 | ✅ 本分支完成 | 357 测试通过（+4 修法 A 单测）；评估集加可选字段 `expected_sources`（声明「文档侧 + SQL 侧」），新确定性读数 `both_sides_hit` 要求声明的每一侧都在**全量**引用列表里出现才判 1（不套 `@3` 窗口，只统计声明双侧的 6 条，其余记 `None` 不进均值），`source_hit`/`evidence_hit@3`/`citation_rate` 的定义与逐条取值一字未改，v7 / v7.2 / v7.3 报告仍可比；只引到一侧的双侧样本单独进「失败与关注案例」并写「只取到一侧证据」；按新口径回算 v7.3 那轮得 5/6 = 0.833（判 0 的正是 c03，同一条在旧指标下 `source_hit` 与 `evidence_hit@3` 全满分），本轮 29 条实跑 6/6 = 1.000（c03 这轮真的回查了 SQL，缺口是间歇的；c03 与 m04 的 SQL 引用都排在第 4 位，坐实了新读数不套 `@3` 窗口的必要性），`source_hit` 0.960 持平（两轮同为 m04 一条未命中），`mrr@3` 0.747→0.727 的变化全部来自 k05 一条排位后移，单条平均 89.8 秒→82.6 秒，报告 `eval/reports/v7_4_two_sided_report.md`；修法 A（提示词硬规则）已做：STEP_PROMPT 规则 1 限定 sufficient 只看「已收集的证据」（不含历史），新增规则 10 禁止 mixed 查询在任一侧无证据时选 final；FINAL_PROMPT 新增规则 7 要求历史里的事实必须先查证据，历史段渲染加上「不能作为事实依据」标注。A/B 重复采样 5×修法 A vs 5×无修法 A：修法 A 将 c03 的 SQL 回查率从 20%（1/5）提升到 100%（5/5），修法 A 有效；修法 C（运行时硬门禁）已合入 PR #19：`config.py` 新增 `AGENT_MIXED_GATE` 开关，`runtime.py` 新增 `_has_evidence_for()` + `run()`/`run_stream()` 中的双侧证据门控，mixed 意图任一侧零证据时拒绝 final 强制调用缺失工具；修法 C 合入后 373 测试通过（+6 修法 C 单测 +4 修法 A 单测），评估新增 7 个 per-intent 工具调用指标（`avg_tool_calls_knowledge/database/mixed` + `dual_tool_rate_*`），报告 `eval/reports/v7_agent_tool_calls_report.json`。**读数出处复核（2026-11-21）**：上面「本轮 29 条实跑 6/6 = 1.000」测于 `2e912379f`，是 `d43b314` 的祖先、早于修法 A，不能当修法 A 的依据；A/B 两组的 `meta.git_commit` 同为 `d43b314`，记录本身区分不了两组提示词，而被验证的规则又在 `978a63f` 里被顺手删掉、本分支已恢复，经过见下方「修法 A 的读数出处与一次提示词回退」。**门禁可观测性与测量出处基建（2026-11-22）**：门控拦截步骤从 `kind=stop` 改为 `kind=gate`（循环并没有停，是被强制继续取证，旧 kind 会把轨迹误读成「循环停了」），`AgentResult` 加 `gate_intercepts` 计数，评估新增确定性读数 `gate_intercept_rate`（intent 非空的 agentic 样本里至少被拦一次 final 的占比，固定链路不进分母）；`evaluate.py` 新增 `git_dirty()` 与 `--run-note`，报告头把 dirty 标记与跑批备注写进读数出处，汇总 JSON（`eval_report.py`）同步带 `git_dirty`/`run_note`；生成缓存键加提示词指纹 `_prompt_fingerprint()`（`generation` + `agent.prompts` 源码哈希；缓存目前只在进程内，指纹是防御性钉死，将来缓存落盘或进程内热改提示词时不会再复用旧答案）。门控单测改断言 `kind=gate` 与 `gate_intercepts`，另加 4 项单测（拦截计数进评估 / 占比口径 / dirty+备注渲染 / 指纹稳定），全量 430 passed。**修法 C 双通道复跑（2026-11-22）**：同一代码 `944ea77` 上 29 条 × gate ON/OFF 各一轮（ON 轮 dirty=False；OFF 轮 dirty=True 只是多了未提交的 ON 报告文件，两轮代码完全一致）——两轮 `both_sides_hit` 都是 1.000，差别在确定性：OFF 这轮 d02（意图 mixed 却只查了 SQL 一侧）把 `dual_tool_rate_mixed` 拉到 0.889，ON 把双工具率钉死 1.000、`gate_intercept_rate` 0.207（6/29 全在 mixed 意图，含 d02 这种未声明 `expected_sources` 但意图判 mixed 的题）；代价如实记录——单条均耗时 59.3s→88.1s（+49%），ON 有 6 条跑到 `max_steps` 才收口但答案质量未受损（d02 两轮 `source_hit` 均 1.0，SQL 证据恰好带出了保存文本），修法 A 兜住的缺口是概率性的、修法 C 是确定性的，与 A/B 结论一致；报告 `eval/reports/v7_5_gate_on.md` / `v7_5_gate_off.md` |
 | v7.5 | `claude/serene-tharp-761b47` | function calling 决策输出对比：`RAG_AGENT_PLANNER_MODE=json|function` 实验开关（`ask_tool_json`，同一提示词换输出通道），JSON 模式保持默认 | ✅ 本分支完成 | 420 测试通过（+10 mock 单测）；同一提示词双通道实跑读数（`eval/reports/fc_comparison_report.md`）：主模型 `qwen3.8:27b-mlx` FC 路由 12/12 可用（均耗时 18.8s vs JSON 27.0s）、步进形状 3/3 一致，两通道意图一致率 0.75；对照 `qwen2.5:7b-instruct` FC 成功 4/12（提示词仍写着「只输出 JSON」的混淆已如实写明）；结论与逐条读数见 v7 详细验收的 function calling 对比项 |
 | v8 | `v8-mcp-kb-search-ask` | MCP 暴露：手写最小 stdio JSON-RPC server（零新增依赖），对外只读工具 `kb_search` / `ask`，`--allow-sql` 才加 `sql_query` | ✅ 本分支完成 | 529 测试通过（既有 430 + 新增 99，不打模型、不打开真实 Qdrant）；`--list-tools` 与 `tools/list` 能看到工具与 input/output schema 并声明只读；本机实跑 `tools/call kb_search` 返回带 `[n]` 编号的证据与含 `page` 的引用载荷、`ask` 返回带 `[1][2]` 的回答与 `meta`，`--allow-sql` 用演示库授权跑通 `sql_query`（3 行结果 + `source_type=sql` 引用）且 `UPDATE` 被护栏拒；同一 `storage/` 被别的进程占用时退出码 3 并给出可操作提示；不暴露入库/写库，运行时 SQL 要过 `--allow-sql` + `allow_runtime_query` + `sql_guard` 三重门（与 agentic 共用 `build_tool_registry`）；选型与代价见 `docs/adr/0004`，边界见 `docs/adr/0005` 与取代其 SQL 一条的 `docs/adr/0006` |
+| v8.5 | `v8-parse-baseline-ab` | 解析基准 A/B：扫描件解析后端可换（`RAG_SCAN_PARSER=selfbuilt\|docling\|mineru`），第三方走独立虚拟环境 + subprocess；四页新 fixture（带边框 / 合并单元格 / 无框线 / 六列）与 8 条评估集；解析层 golden 指标 | ✅ 本分支完成（读数已出，结论「不切换默认后端」） | 577 测试通过（既有 529 + 新增 48，全部打桩，CI 不装第三方解析器）；解析层三侧：docling 4/4 张表、`table_recall` 1.00 / `cell_accuracy` 1.00，selfbuilt 3/4、0.75 / 0.64，mineru（standard 档）3/4、0.75 / 0.75，自建与 MinerU 的缺口都在无框线那一页；端到端三侧同模型：新集 8 条 `evidence_hit@3` selfbuilt 0.571（未命中三条与解析层三个缺陷一一对应）vs docling 1.000 / mineru 1.000，v6 那 6 条三侧同分 1.000 / 0.500 / 0.900 与 v6.2 ON 侧逐字一致；结论与代价见下面的 v8.5 详细验收与 `eval/reports/v8_parse_*` |
 | 语料接入 | `corpus-gdrive-sync` | Google Drive 语料预下载：本机 CLI（rclone / gdrive）把 Drive 文件落到 gitignore 的本地目录，再复用 `type: file` 源入库；联网只在下载这一步，不引入 Google SDK，`source_type` 不扩张 | ✅ 本分支完成（未接真实 Google 账号，见下方详细验收的未完成项） | 456 测试通过（+26 mock 单测，不联网、不打模型）；下载命令拼装与失败信息可测（rclone 导出格式钉 `pdf`、`--mode sync`/`--include`/`--dry-run`、缺 CLI 给安装提示、gdrive 在下载目录里执行且拒绝 dry-run）；仓库内下载目录未被 gitignore 时拒绝同步（ADR 0002 边界，默认目录另有真实 `git check-ignore` 探测）；假下载产物走现有 `run_ingest` 得 `added=2`、BM25 建成、二次运行整批跳过，引用 `source_type=file` + `tags=["gdrive"]`；README 有可操作的授权与「下载 → 入库」步骤，决策见 `docs/adr/0003-google-drive-corpus-cli-prefetch.md` |
 
 ## v2 详细验收（已完成）
@@ -627,6 +628,69 @@ v8.1 把决策调用的思考按环节关掉以后，单条 56.6 秒；这一轮
         「对上一轮」只在第 3 轮以后才比，第 2 轮的上一轮是冷启动，不能拿来当差值。
 - [ ] 剩下的两块还没动：步进决策 35%（读提示词为主，重排提示词实测无效，唯一的下一条是换更小的决策模型）
       与最终作答 15%（v8.2 已确认关思考会换来一条误拒）。
+
+## v8.5 详细验收（解析基准 A/B，本分支）
+
+这是 v8 优先级的第 2 项，编号按合进 `main` 的先后排，所以落在延迟那几节（v8.1–v8.4）以后。
+
+量出自建扫描件解析链路（渲染 → RapidOCR → OpenCV 形态学找表格框 → rapid-table SLANet → 按框过滤正文 OCR）
+与成熟解析器之间的位置关系。**完成判据是三侧读数 + 报告 + 复现命令齐备，不等于换掉自建解析器**：
+是否切换由读数决定，另记一条。三项口径由用户 2026-11-23 拍板——候选 = docling + MinerU（PaddleOCR-VL 要
+CUDA 上的 vLLM/SGLang 服务，本机 Apple Silicon 跑不了，如实记为未测）；对照口径 = **整页替换后端**
+（第三方连正文 OCR 一起换，不是只换表格模块）；样本 = `eval/v6_scan_table.jsonl` 6 条原样不动 + 新建复杂集。
+
+- [x] 后端开关与接缝：`private_rag/config.py` 新增 `SCAN_PARSER`（`selfbuilt|docling|mineru`，默认 `selfbuilt`）、
+      `PARSE_VENV_PYTHON`、`PARSE_BACKEND_TIMEOUT_SECONDS`（默认 300）、`PARSE_CACHE_DIR`；开关在**调用时**取
+      `config`，与 `SCAN_TABLE_ENABLED` 一样支持「入库前才设环境变量」的既有约定
+- [x] `private_rag/ingestion/scan_parse.py`：`ScanPageParse` / `ScanBackend.parse_page`（整份 PDF 一次解析、按页取用）、
+      驱动输出契约的严格校验（自报后端不符、零页、页号非法、`text` 非字符串都抛 `ScanBackendError`）、
+      按 PDF 字节内容缓存（键含契约版本与影响结果的 `variant`，MinerU 的档位就是它）、
+      缺解释器给可操作提示、超时提示先跑 preflight
+- [x] `files.py` 只在扫描件分支开头插一个分支：外部后端给 `(正文, 表格)` 就跳过 render/OCR/版面表格/`filter_ocr_result`；
+      后端缺某页 → 回退自建并把这件事写进 `errors`；页数不对齐另记一条。**表格与正文的文档装配、逗号序列化、
+      `doc_id`、`extra.table` 全部复用未改**，自建路径逐字节不变——这是与 v6.2 ON 侧可比的前提
+- [x] 第三方走独立虚拟环境 + subprocess（本仓库与 CI 钉死 3.9，docling 要 `>=3.10`、MinerU 要 `>=3.11`）：
+      `scripts/parse_drivers/{docling,mineru}_driver.py` 只用标准库 + 各自的库，`scripts/parse_drivers/_grid.py`
+      把三种表格形态（docling 的 span 单元格、MinerU 的 HTML、markdown 管道）统一收敛成 `list[list[str]]`，
+      合并单元格展开成占位副本；取舍与代价见 `docs/adr/0007-scan-parse-backend-out-of-process.md`
+- [x] 新 fixture 四页（`scripts/make_parse_bench_fixture.py`，规格单一来源）：带边框 3×3、rowspan/colspan 合并单元格、
+      **无框线**（自建靠形态学结构线找框，这是已知短板，主要区分点）、六列表格；同批产出文字底稿（只做 evidence
+      逐字校验、不入库）与 golden JSON；`--smoke` 用真实自建链路逐页核对
+- [x] 新评估集 `eval/v8_parse_bench.jsonl` 8 条（`ingestion` 5 + `multi_step` 2 + `refusal` 1），evidence 写成
+      **整行连续短语**：`normalize_text` 丢掉标点与空白，自建侧逗号拼接行与第三方 markdown 行规范化后等价，
+      两侧都能逐字命中——这是口径能对齐的关键。`config/sources.eval.parse.yaml` 只挂新 fixture
+- [x] `scripts/parse_bench.py`：`--preflight`（解释器 → 驱动 → import → 真跑一遍，逐步打印可操作提示，失败早停）
+      + golden 指标 `table_recall` / `cell_accuracy`（只比对期望非空地格）/ `structure_ok` / `body_purity`
+      + 报告渲染。这层不打生成模型、不入库，用来把「解析真的差」与「evidence 口径没命中」分开
+- [x] 测试 48 条新增（`tests/test_scan_parse_backend.py` + `tests/test_parse_bench.py`）：全部打桩子进程输出与自建
+      OCR，不装第三方解析器、不起子进程、不打模型；断言外部后端产物的 `doc_id` / `extra.table` / 逗号序列化与
+      自建侧一致、缺页回退并记错误、装配失败仍走自建、页数不对齐记错误、`_grid` 的 rowspan/colspan 展开、
+      `RAG_MINERU_TIER` 换档必然重解析（档位参与缓存键）。
+      全量 `python3 -m pytest tests -q` = **577 passed**（既有 529 + 新增 48）。CI 不装任何第三方解析器、
+      `requirements-ci.txt` 不动，只在「校验四份评估集」里加 `eval/v8_parse_bench.jsonl` 一条 `--validate-only`
+- [x] 文档：README「解析后端与解析基准（v8）」（可选后端、独立 venv、不在默认依赖、不静默降级、换 collection 要连
+      词法索引路径一起换）、`eval/README.md` 第 9 步复现命令与「v8 解析基准集」小节、`docs/adr/0007`、
+      `CONTEXT.md` 新增「解析后端」「整页替换」「解析层读数」三个术语
+- [x] 解析层三侧读数（`eval/reports/v8_parse_baseline.md`）与端到端三侧读数
+      （`eval/reports/v8_parse_ab_bench_<后端>.md` × 3、`v8_parse_ab_scan_<后端>.md` × 3）——复现命令见
+      `eval/README.md` 第 9 步。**解析层**（四页一次解析，不打模型）：selfbuilt 检出 3/4、`table_recall` 0.75、
+      `cell_accuracy` 0.64、`body_purity` 0.92、3344 ms；docling 4/4、1.00、1.00、1.00、10880 ms；
+      mineru（standard 档）3/4、0.75、0.75、0.75、13024 ms。缺口都落在同一处：无框线那一页自建与 mineru 都是
+      0 张检出，而自建还在页 1 丢了一个数字（`1299.0` 前的 `8`）、页 2 把 `1` 读成 `L`。**端到端**（`full`、Ragas 关闭、
+      三侧同 `qwen3.8:27b-mlx` + reranker，`git_commit = 530418c`）：新集 8 条 selfbuilt `evidence_hit@3` 0.571
+      （未命中 v8pb-01 / v8pb-03 / v8pb-07，与解析层三个缺陷一一对应）、docling 1.000、mineru 1.000；
+      v6 那 6 条三侧完全同分（1.000 / `context_precision@3` 0.500 / `mrr@3` 0.900），与 v6.2 的 ON 侧逐字一致。
+      MinerU 只测了 `standard` 档，走 `mineru-kit parse`（4.2.3 的 `mineru parse` 是文档库 + 本地服务那套 CLI），
+      档位由 `RAG_MINERU_TIER` 决定并参与缓存键
+- [x] 按读数写「是否切换后端」的结论：**不切换默认后端，`selfbuilt` 保持默认**，理由三条。
+      ①唯一被证实的自建短板是「无框线页找不出框」与两处 OCR 丢字，而 MinerU 同样没能把无框线页认成表格
+      （`table_recall` 与自建同为 0.75）——说明这不是「自建 vs 成熟解析器」的通用差距，而是形态学结构线这一条
+      具体做法的短板，换后端买不到普适提升。②端到端两侧与新集都是 7/7，切换在本轮两个集上买不到命中提升；
+      而且 mineru 那页表格没认出来却仍逐字命中（行被按正确顺序读进正文），可见 `table_recall` 不是切换判据本身。
+      ③切换代价是硬性的：独立 3.11 虚拟环境 + 数 GB 模型权重 + 首次解析 10–13 秒 / 4 页，而 docling 的正文还有
+      字符损失（「配件库存表（第一页）」读成 `配件库存表 (第 页`，`body_purity` 量不到这一项）。
+      真正值得做的下一步是**按页型混合**：有结构线的页继续自建，整页没有任何线条的页交给 docling（本轮两侧在
+      这一页上的差读数是 0 张 vs 1 张，判据可测）。但这要在真实语料上验一次再动默认值，不做合成 fixture 上的混合。
 
 ## 语料接入详细验收（Google Drive 预下载）
 
