@@ -4,8 +4,34 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _env_optional_float(name: str) -> Optional[float]:
+    """可选浮点参数：未设置或非法都返回 ``None``，意思是「不传给模型」。
+
+    这类参数的默认值必须由调用方保留（不传），否则一改环境变量就改变了运行时行为。
+    """
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _env_optional_int(name: str) -> Optional[int]:
+    """可选整数参数：未设置或非法都返回 ``None``，同 ``_env_optional_float``。"""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
 
 
 def _env_int(name: str, default: int) -> int:
@@ -22,6 +48,25 @@ def _env_int(name: str, default: int) -> int:
 
 def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+# 「哪些环节启用」型取值：真值等价于全部环节，假值等价于都不启用
+_TRUTHY_WORDS = {"1", "true", "yes", "on", "all"}
+_FALSY_WORDS = {"0", "false", "no", "off", "none"}
+
+
+def _env_stages(name: str, default: str) -> frozenset:
+    """读取环节集合：``all``/真值取全部环节，``off``/假值取空集，其余按逗号分隔。
+
+    只认已声明的环节名，非法取值回退到 ``default``，不会因为拼错开关而静默失效。
+    """
+    raw = os.getenv(name, "").strip().lower()
+    if raw in _TRUTHY_WORDS:
+        return frozenset({"route", "step"})
+    if raw in _FALSY_WORDS:
+        return frozenset()
+    stages = frozenset(part for part in raw.split(",") if part in {"route", "step"})
+    return stages or frozenset({default})
 
 
 def _env_path(name: str, default: Path) -> Path:
@@ -113,6 +158,52 @@ AGENT_NONE_PROBE = not _env_flag("RAG_DISABLE_AGENT_NONE_PROBE")
 # 决策 JSON 的输出预算。推理型模型会先输出一段不可见的思考内容，
 # 预算给小了正文就是空的，路由会整段回退到关键词判断。
 AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)
+# 决策调用里哪些环节让模型先思考：route / step / all / off，默认只让路由思考。
+# 思考 token 既计入上面的输出预算（撞满就把决策 JSON 截断，见 planner_unavailable），
+# 又占掉每次决策调用的绝大部分时间（本机实测同一条提示词：路由开思考 40.4 秒 /
+# 245 输出 token，关思考 6.3 秒 / 61 输出 token；步进决策 62.8 秒 -> 5.1 秒）。
+# 之所以默认保留路由：路由判错意图的代价最大——误判成 mixed 会触发双侧门控，
+# 把步数烧光并稀释证据上下文，实测三条 multi_step 样本因此从作答变成拒答。
+# 步进决策次数多、输出同样只是一小段 JSON，关掉最划算。
+# 置 all（或 1/true）两个环节都保留思考，置 off 全部关掉。最终作答不受这个开关影响。
+AGENT_PLANNER_THINKING_STAGES = _env_stages("RAG_AGENT_PLANNER_THINKING", "route")
+# 要不要在路由提示词末尾要求模型把思考写短。决策 JSON 只要几十个字，思考实测能写到上千个
+# 输出 token（同一条路由提示词 60~1215 个），路由那一次调用因此占掉整轮 48% 的时间，
+# 而且长度很不稳定。这台 Ollama(0.40.16) 的 reasoning 档位（low/minimal）实测管不住思考长度，
+# 提示词里加一句长度约束实测能把路由调用砍掉约一半。置 1 退回不加这句的老提示词。
+AGENT_THINKING_BRIEF = not _env_flag("RAG_DISABLE_AGENT_THINKING_BRIEF")
+
+
+def _answer_thinking_mode(raw: str) -> str:
+    """最终作答思考开关的取值归一：``keep`` / ``on`` / ``off``，其余一律回退 ``keep``。"""
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return "on"
+    if value in {"0", "false", "no", "off"}:
+        return "off"
+    return value if value in {"keep", "on", "off"} else "keep"
+
+
+# 最终作答要不要让模型先思考：keep / on / off，默认 keep（连 reasoning 都不传，保持模型默认行为）。
+# 同一条证据文本本机实测 keep 与 on 都是 10.3 秒、off 是 2.95 秒，也就是默认确实在思考，
+# 关掉一条能省约 7 秒。但 29 条对照里关思考带来三条误拒（c03 / m01 / m04），
+# answer_rate 1.000 → 0.880、source_hit 1.000 → 0.960，所以默认保留思考，只留开关。
+# 读数与逐条变化见 docs/ROADMAP.md 的 v8.2。
+AGENT_ANSWER_THINKING = _answer_thinking_mode(os.getenv("RAG_AGENT_ANSWER_THINKING", "keep"))
+# 采样参数与随机种子：默认都不传，运行时保持服务端的默认抽样行为。
+# 评估链路会在 configure_eval_env() 里把两者钉死（温度 0 + 固定 seed）——此前同一条默认配置的
+# 两轮评估对不上（单条均耗时 40.6s vs 56.6s、source_hit 1.000 vs 0.960、d02 意图 mixed vs database），
+# 因为最终作答从来没传 temperature，用的是服务端默认值，29 条上 ±3 条拒答可能只是抽样噪声。
+# 钉死以后前后对比才谈得上归因，见 docs/ROADMAP.md 的 v8.3。
+AGENT_ANSWER_TEMPERATURE = _env_optional_float("RAG_AGENT_ANSWER_TEMPERATURE")
+# 经典 RAG 链路（generate_answer / stream_answer）的生成温度：改动前同样不传温度，
+# 所以跑 full / none 这些配置的评估照样重跑不一致。评估链路把它与 agentic 一起钉成 0，
+# 运行时（demo、serve）仍然不传，行为不变。
+GENERATION_TEMPERATURE = _env_optional_float("RAG_GENERATION_TEMPERATURE")
+# 随机种子：agentic 的决策与最终作答、经典链路的生成与查询改写共用这一个值
+# （原名 RAG_AGENT_LLM_SEED，现在不只 agentic 在读了）。实测这台 MLX 后端不接受 seed，
+# 复现靠温度为 0；它留着是为了让调用意图明确。
+LLM_SEED = _env_optional_int("RAG_LLM_SEED")
 # 决策输出通道（v7 function calling 对比的实验开关）：
 # json —— format="json" 结构化输出（默认）；function —— 原生 function calling。
 # 本机 MLX 模型的工具调用格式不稳定，默认不启用；对比见 scripts/compare_fc_decisions.py。

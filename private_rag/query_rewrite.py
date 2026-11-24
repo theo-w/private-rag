@@ -9,6 +9,7 @@ from typing import Any
 from langchain_ollama import ChatOllama
 
 from private_rag.config import LLM_MODEL
+from private_rag.llm_params import seed_kwargs
 
 REWRITE_MODES = ("off", "multi", "hyde")
 MAX_VARIANTS = 2
@@ -122,6 +123,7 @@ def rewrite_queries(
             num_predict=512,
             disable_streaming=True,
             keep_alive="10m",
+            **seed_kwargs(),
         )
         response = llm.invoke(REWRITE_PROMPT.format(question=question))
         data = _parse_payload(_content_text(response.content))

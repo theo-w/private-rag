@@ -15,8 +15,16 @@ from typing import Any, Optional, Sequence
 
 from langchain_ollama import ChatOllama
 
-from private_rag.config import AGENT_LLM_MODEL, AGENT_PLANNER_TOKENS, MAX_QUESTION_CHARS
+from private_rag.config import (
+    AGENT_ANSWER_THINKING,
+    AGENT_LLM_MODEL,
+    AGENT_PLANNER_THINKING_STAGES,
+    AGENT_PLANNER_TOKENS,
+    AGENT_THINKING_BRIEF,
+    MAX_QUESTION_CHARS,
+)
 from private_rag.generation import REFUSAL, History, render_history
+from private_rag.llm_params import agent_answer_kwargs, seed_kwargs
 
 # 明确指向「库里精确数据」的线索；LLM 不可用时用它决定首选工具
 DATABASE_HINTS: tuple[str, ...] = (
@@ -185,10 +193,32 @@ def _history_section(history: Optional[History]) -> str:
     return f"对话历史（仅用于理解当前问题的指代，不能作为事实依据）：\n{text}\n\n"
 
 
+def _planner_reasoning(kind: str, thinking: Optional[bool]) -> bool:
+    """某个决策环节要不要让模型先思考。
+
+    默认按环节读配置（而不是写死在参数默认值里），这样测试与运行期改配置都能生效。
+    思考的长度管不住：这台 Ollama(0.40.16) 的 reasoning 档位（low/minimal）实测只会让思考
+    变长或差不多，限长要靠提示词里那句要求（见 ``THINKING_BRIEF_NOTE``）。
+    """
+    if thinking is not None:
+        return bool(thinking)
+    return kind in AGENT_PLANNER_THINKING_STAGES
+
+
 def ask_json(
-    prompt: str, *, model: str = AGENT_LLM_MODEL, num_predict: int = AGENT_PLANNER_TOKENS
+    prompt: str,
+    *,
+    kind: str = "step",
+    model: str = AGENT_LLM_MODEL,
+    num_predict: int = AGENT_PLANNER_TOKENS,
+    thinking: Optional[bool] = None,
 ) -> dict:
-    """向模型要一段 JSON；解析失败抛 PlannerError。"""
+    """向模型要一段 JSON；解析失败抛 PlannerError。
+
+    思考按环节开关（``RAG_AGENT_PLANNER_THINKING``，默认只让路由思考）：决策输出是
+    一小段结构化 JSON，思考 token 既吃输出预算又吃时间。开着思考的路由另外会被
+    ``THINKING_BRIEF_NOTE`` 要求写短一点（见 ``build_route_prompt``）。
+    """
     llm = ChatOllama(
         model=model,
         temperature=0,
@@ -197,6 +227,8 @@ def ask_json(
         num_predict=num_predict,
         disable_streaming=True,
         keep_alive="10m",
+        reasoning=_planner_reasoning(kind, thinking),
+        **seed_kwargs(),
     )
     response = llm.invoke(prompt)
     try:
@@ -205,16 +237,25 @@ def ask_json(
         raise PlannerError(f"{type(exc).__name__}: {exc}") from exc
 
 
+# 要求模型把思考写短的一句话。路由开着思考，而思考长度管不住：同一条路由提示词实测
+# 输出 60~1215 个 token，决策 JSON 本身只要几十个字。这台 Ollama 的 reasoning 档位
+# （low/minimal）实测压不住长度，提示词里加这句实测有效（同一条提示词两遍：
+# k01 245→171 个输出 token、10.1s→8.4s；s01 514→263 个、23.2s→11.5s）。
+# 这句放在提示词最末尾，前面的规则与工具说明原样不动，模型的提示词前缀缓存仍然生效。
+THINKING_BRIEF_NOTE = "\n\n思考控制在两三句以内，不要复述题目和工具说明。"
+
+
 def build_route_prompt(
     question: str,
     tool_specs: str,
     history: Optional[History] = None,
 ) -> str:
-    return ROUTER_PROMPT.format(
+    prompt = ROUTER_PROMPT.format(
         tool_specs=tool_specs,
         history_section=_history_section(history),
         question=question[:MAX_QUESTION_CHARS],
     )
+    return prompt + THINKING_BRIEF_NOTE if AGENT_THINKING_BRIEF else prompt
 
 
 def build_step_prompt(
@@ -263,6 +304,36 @@ def build_final_prompt(
     )
 
 
+def _answer_reasoning(thinking: Optional[str] = None) -> Optional[bool]:
+    """最终作答要不要让模型先思考。
+
+    ``keep`` 返回 None，意思是连 ``reasoning`` 都不传，保持模型默认行为；
+    只有显式 ``on`` / ``off`` 才写死这个参数。
+    """
+    mode = (thinking or AGENT_ANSWER_THINKING).strip().lower()
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return None
+
+
+def _final_llm(model: str, thinking: Optional[str] = None) -> ChatOllama:
+    """最终作答用的模型实例：默认参数与改动前一致，只有开关显式时才多传参数。
+
+    改动前这里既不传 ``temperature`` 也不传 ``seed``，也就是用服务端的默认抽样，
+    同一条证据两次生成可以给出不同答案；评估链路现在会把两者钉死（见
+    ``configure_eval_env``），运行时仍然不传，行为不变。
+    """
+    kwargs: dict[str, Any] = {"model": model, "num_ctx": 8192, "keep_alive": "10m"}
+    reasoning = _answer_reasoning(thinking)
+    if reasoning is not None:
+        kwargs["reasoning"] = reasoning
+    kwargs.update(agent_answer_kwargs())
+    kwargs.update(seed_kwargs())
+    return ChatOllama(**kwargs)
+
+
 def generate_final_answer(
     question: str,
     evidence: str,
@@ -270,11 +341,12 @@ def generate_final_answer(
     model: str = AGENT_LLM_MODEL,
     history: Optional[History] = None,
     missing: str = "",
+    thinking: Optional[str] = None,
 ) -> str:
     """基于已收集的证据生成最终回答；没有证据时不调用模型，直接拒答。"""
     if not evidence.strip():
         return REFUSAL
-    llm = ChatOllama(model=model, num_ctx=8192, keep_alive="10m")
+    llm = _final_llm(model, thinking)
     response = llm.invoke(build_final_prompt(question, evidence, history, missing=missing))
     text = _content_text(response.content).strip()
     return text or REFUSAL
@@ -287,6 +359,7 @@ def stream_final_answer(
     model: str = AGENT_LLM_MODEL,
     history: Optional[History] = None,
     missing: str = "",
+    thinking: Optional[str] = None,
 ) -> "Iterator[str]":
     """基于已收集的证据流式生成最终回答；没有证据时直接 yield 拒答。"""
     from typing import Iterator
@@ -294,7 +367,7 @@ def stream_final_answer(
     if not evidence.strip():
         yield REFUSAL
         return
-    llm = ChatOllama(model=model, num_ctx=8192, keep_alive="10m")
+    llm = _final_llm(model, thinking)
     prompt = build_final_prompt(question, evidence, history, missing=missing)
     for response in llm.stream(prompt):
         text = _content_text(response.content).strip()
@@ -457,6 +530,7 @@ def ask_tool_json(
     kind: str,
     model: str = AGENT_LLM_MODEL,
     num_predict: int = AGENT_PLANNER_TOKENS,
+    thinking: Optional[bool] = None,
 ) -> dict:
     """让模型用原生 function calling 给出与 JSON 模式同一份决策输出。
 
@@ -474,6 +548,8 @@ def ask_tool_json(
         num_predict=num_predict,
         disable_streaming=True,
         keep_alive="10m",
+        reasoning=_planner_reasoning(kind, thinking),
+        **seed_kwargs(),
     ).bind_tools([schema])
     response = llm.invoke(prompt)
     tool_calls = getattr(response, "tool_calls", None) or []

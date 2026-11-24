@@ -1765,8 +1765,10 @@ def render_markdown(report: dict) -> str:
         "双侧样本要跑得通，得用 agentic 组加 `--agent-sources`。"
     )
     lines.append(
-        "- 生成调用未固定采样参数（`ChatOllama` 默认温度/随机种子），"
-        "同一问题重跑可能得到不同答案；Ragas 磁盘缓存只在 prompt 完全一致时命中，"
+        "- 评估链路会把两条链路的生成温度钉成 0（`RAG_AGENT_ANSWER_TEMPERATURE` / "
+        "`RAG_GENERATION_TEMPERATURE`）并传固定 seed，同配置重跑的指标应当一致；"
+        "运行时（demo/serve）仍然不传这些参数。带思考的作答即使温度为 0 仍会让措辞抖，"
+        "判定口径见 docs/ROADMAP.md 的 v8.3；Ragas 磁盘缓存只在 prompt 完全一致时命中，"
         "因此重跑耗时不会归零。"
     )
     if agent_names:

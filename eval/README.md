@@ -627,3 +627,201 @@ JSON 合并后再聚合（合并是一次性脚本，聚合走仓库内 `aggrega
 - **评估语料是本仓库文档，这轮不是 v7.3 的语料快照**：`docs/v7.4-history-as-evidence.md` 已并入 main
   并被 `config/sources.eval.yaml` 入库，m01/m05/c03 等条目的引用列表里正常出现它。检索排位的差异里
   含这一项，不能全部记到代码改动头上。
+
+### 单条延迟复跑（2026-11-23，`v8-latency-planner-nothink`）
+
+量的是 agentic 单条耗时，只动决策调用的思考开关（`RAG_AGENT_PLANNER_THINKING`），提示词、门控、步数与
+指标判定式都没动。读数表与逐条变化见 `docs/ROADMAP.md` 的 v8.1 一节，复现命令：
+
+```bash
+# 三元组一起换到独立库，建一次给三轮共用（入库侧本轮没动，语料快照因此一致）
+export RAG_COLLECTION_NAME=rag_eval_v8_latency
+export RAG_STORAGE_DIR=storage/eval/qdrant_v8_latency
+export RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_v8_latency/bm25.pkl
+python3 scripts/prepare_eval_kb.py
+
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
+  --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 \
+  --output eval/reports/v8_latency_route_thinking.md \
+  --json-output eval/reports/v8_latency_route_thinking.json \
+  --run-note "决策环节 RAG_AGENT_PLANNER_THINKING=route（路由保留思考、步进决策关思考）"
+```
+
+基线（决策全开思考）与全关档（`RAG_AGENT_PLANNER_THINKING=off`）的同一批读数在
+`eval/reports/v8_latency_baseline_thinking_on.{md,json}` 与 `eval/reports/v8_latency_thinking_off.{md,json}`；
+基线是在工作区把 `private_rag/config.py` 与 `private_rag/agent/prompts.py` 临时退回基线提交跑的，
+报告头的 `git_dirty` 因此为 true（未提交的只有测试文件）。
+
+口径与限制，引用这轮数字时一并带上：
+
+- **三轮必须同条件**：同一三元组、同 `--configs agent`、同 `--agent-sources`、同 `--skip-ragas --max-workers 1`、
+  同生成模型 `qwen3.8:27b-mlx`。串行跑是为了不抢本机 Ollama，同时也是 Qdrant 本地模式的要求。
+- **报告里「检索」与「生成」两块不足以定位决策调用**：`avg_retrieval_ms` 只含工具执行，路由与步进决策
+  都落在 `avg_generation_ms` 里。要拆开用量 `scripts/measure_planner_latency.py`（同一证据文本逐格计时）。
+- **`avg_latency_ms` 是端到端单条耗时**：含路由、每次步进决策、工具执行、双侧门控的重试与最终作答，
+  不是纯模型时间。默认档 56.6s 里工具执行 1.0s，其余都是 LLM 调用。
+- **29 条样本只支撑方向**：±1 条就是 ±4 个百分点，`context_precision@3` 那类 -0.027 的量级也在噪声里。
+  要把「降到多少」当结论，需要更大的评估集。
+- **换机器 / 换模型 / 换精排不可比**：这组数测于本机 Ollama 0.40.16、`qwen3.8:27b-mlx`、`bge-m3`、
+  `BAAI/bge-reranker-v2-m3`、MLX 后端、串行单并发；任一变化都要重测基线再比。
+- **精排模型加载会做联网 HEAD 校验**：`BAAI/bge-reranker-v2-m3` 在网络不通时报 `Read timed out`，重试 5 次
+  以后 transformers 回退本地缓存继续跑。想跳过校验带 `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`，
+  模型与权重都没变、不影响可比性，但要写进 `--run-note`。
+- **关掉决策思考会改变路由判定**：全关那轮三条 multi_step 样本的意图从 `database` 变成 `mixed`，
+  双侧门控接着禁止提前 `final`，`answer_rate` 因此从 1.000 掉到 0.880。默认档保留路由的思考就是这个原因。
+
+### 最终作答思考的前后对比（2026-11-23，`v8-latency-final-nothink`）
+
+量 `RAG_AGENT_ANSWER_THINKING`（`keep` / `on` / `off`，默认 `keep`）；结论与逐条变化见 `docs/ROADMAP.md`
+的 v8.2：关思考省约 10% 但换来三条误拒，所以默认保留思考。复现命令是上面同一批参数，加一个环境变量，
+两轮都要跑（A 不带、B 带 `off`），报告写到新文件：
+
+```bash
+# A：保持模型默认（keep）
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
+  --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 \
+  --output eval/reports/v8_latency_final_thinking_keep.md \
+  --json-output eval/reports/v8_latency_final_thinking_keep.json \
+  --run-note "最终作答 RAG_AGENT_ANSWER_THINKING=keep"
+
+# B：关思考
+RAG_AGENT_ANSWER_THINKING=off python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl \
+  --configs agent --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 \
+  --output eval/reports/v8_latency_final_thinking_off.md \
+  --json-output eval/reports/v8_latency_final_thinking_off.json \
+  --run-note "最终作答 RAG_AGENT_ANSWER_THINKING=off"
+```
+
+两轮都带 `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`（精排走本地缓存，权重没变）。
+这一对读数是同一提交上跑的，所以前后对比只用这一对：同配置跨轮抖动很大（本轮 A 40.6s，
+PR #26 里同默认行为的 route 档 56.6s，`source_hit` 也差 0.04），29 条上 ±3 条拒答可能就是噪声。
+
+### 读数可复现吗（2026-11-23，`v8-eval-determinism`）
+
+上面那句「±3 条可能就是噪声」需要变成可判定的东西，所以先量复现性，再谈归因。
+另外那一节的耗时结论要按下面的口径重读：两轮各跑一次时冷热启动会让方向都反过来（v8.3 复核结果是
+关思考 -8.3%，且全量 29 条不可判定；误拒实际是 1 条不是 3 条）。
+
+```bash
+# 同一输入重复调用，数唯一输出个数（要打到本机 Ollama，不打网络）
+python3 scripts/check_generation_determinism.py --repeat 4
+python3 scripts/check_generation_determinism.py --repeat 4 --thinking off
+python3 scripts/check_generation_determinism.py --repeat 4 --unpinned   # 复现改动前：不传温度与 seed
+```
+
+脚本覆盖三处调用：agentic 的最终作答、步进决策、经典 RAG 的生成（`generate_answer`）。
+实测结论（细节见 `docs/ROADMAP.md` 的 v8.3）：不传 `temperature` 时四次调用四个输出——改动前的
+最终作答正是这样；`temperature=0` 且关思考时四次同一输出；`temperature=1` 加固定 `seed` 仍然每次都不同，
+也就是**这台 MLX 后端不接受 seed**，复现只能靠温度为 0；默认档带思考，温度为 0 也还是会抖。
+`configure_eval_env()` 因此默认写入 `RAG_AGENT_ANSWER_TEMPERATURE=0`、`RAG_GENERATION_TEMPERATURE=0`
+与 `RAG_LLM_SEED=7`（seed 留着表达意图，实际不起作用），只影响评估链路，想跑采样版 `export` 覆盖即可。
+采样参数集中在 `private_rag/llm_params.py` 一处，四条调用共用：agentic 最终作答、决策调用、
+经典链路的生成、查询改写。跑 `full` / `none` 这些固定链路配置时同样会被钉住，重跑才可比
+（钉上前后各测一次：经典链路从「重复 2 次 2 个输出」变成「重复 4 次 1 个输出」）。
+一个要说清的限制：温度为 0 时输出是「基本一致」而不是逐字保证——累计 9 次调用里 1 次给出不同文本，
+所以逐字比对不能当证据，可复现性只在指标层成立。
+
+噪声底用同配置重复三轮量（默认档，参数与前几轮完全一致）：
+
+```bash
+export RAG_COLLECTION_NAME=rag_eval_v8_latency
+export RAG_STORAGE_DIR=storage/eval/qdrant_v8_latency
+export RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_v8_latency/bm25.pkl
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+
+for n in 1 2 3; do
+  python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent \
+    --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 \
+    --output "eval/reports/v8_noise_floor_repeat_${n}.md" \
+    --json-output "eval/reports/v8_noise_floor_repeat_${n}.json" \
+    --run-note "同配置重复轮 ${n}"
+done
+```
+
+三轮跑完按逐条差异比对（拒答、意图、`stop_reason`、`source_hit`、工具调用数、答案文本、耗时），
+噪声底是：九项质量指标三轮完全一致，答案措辞每对轮次有 4~7 条不同但不改变指标，逐条行为只有 `r01`
+在第 1 轮翻动，而耗时第一轮比后两轮慢 52%（冷启动）——第 2、3 轮之间只差 0.2%。
+所以对照的口径写死为三条：**指标变化 ≥ 1 条样本（29 条上约 3.4pt）才当真；耗时读数作废第一轮；
+措辞变化不算证据**。细节见 `docs/ROADMAP.md` 的 v8.3。三轮跑完用这个脚本算噪声底：
+
+```bash
+python3 scripts/compare_eval_noise.py eval/reports/v8_noise_floor_repeat_1.json \
+  eval/reports/v8_noise_floor_repeat_2.json eval/reports/v8_noise_floor_repeat_3.json
+```
+
+它会列出「指标是否轮轮一致」和每一对轮次的逐条行为差异与耗时差。退出码非 0 表示有指标在轮次之间变了。
+
+固定链路（`full`：一次检索一次生成）也照同一套办法重复三轮量过，命令只差 `--configs` 与报告名
+（固定链路不需要 `--agent-sources`）：
+
+```bash
+for n in 1 2 3; do
+  python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs full \
+    --skip-ragas --max-workers 1 \
+    --output "eval/reports/v8_noise_floor_classic_${n}.md" \
+    --json-output "eval/reports/v8_noise_floor_classic_${n}.json" \
+    --run-note "固定链路同配置重复轮 ${n}"
+done
+```
+
+固定链路的噪声底：八项指标三轮完全一致（`answer_rate` 0.440、`source_hit` 0.320、`refusal_accuracy` 1.000、
+`both_sides_hit` 0.000、`evidence_hit@3` 0.240、`mrr@3` 0.220、`context_precision@3` 0.080），逐条行为
+一条都没翻动，答案措辞每对轮次 5~11 条不同；耗时第一轮比后两轮慢 41%~43%（同样是冷启动），
+第 2、3 轮之间只差 1.6%。两个地方要注意：
+
+- `citation_rate` / `citation_validity` 是唯一的例外（0.920 → 0.960）。它们数的是「答案文本里有没有引用编号、
+  编号在不在引用条数范围内」，所以措辞会直接推动它们——第 3 轮 `d03` 的拒答文案带了 `[编号]` 就被记成有效。
+  引用类指标变了先确认是不是某一条样本的文本变动，别当成功能差异。
+- 这些数字不能与上面 agentic 那组横向比：`eval/v7_agent_qa.jsonl` 是按 agentic 设计的（多步、混合问题、
+  要查库），固定链路一次检索一次生成，25 条可答里只答了 11 条，所以 `answer_rate` 只有 0.440，
+  `both_sides_hit` 0.000 也是同一原因（它不会去查 SQL 那一侧）。
+
+比耗时（A/B 两种设置）要在同一进程里交替跑，别各跑一轮：
+
+```bash
+# 4 条子集，keep → off → keep；两次 keep 的每条耗时应当相同，否则说明读数不可信
+grep -E '"id": ?"(s01|s02|s04|r02)"' eval/v7_agent_qa.jsonl > /tmp/subset.jsonl
+for mode in keep off keep; do
+  RAG_AGENT_ANSWER_THINKING=$mode python3 scripts/evaluate.py --dataset /tmp/subset.jsonl \
+    --configs agent --agent-sources config/sources.eval.agent.yaml --skip-ragas --max-workers 1 \
+    --output "/tmp/sub_${mode}.md" --json-output "/tmp/sub_${mode}.json" \
+    --run-note "子集交替读数 $mode"
+done
+```
+
+### agentic 延迟住在哪一段，以及路由思考限长（2026-11-24，`v8-eval-determinism`）
+
+v8.1 / v8.2 之后剩下的延迟具体住在哪个环节，此前没单独量过（报告只把一条分成「工具执行」与「其余」两块）。
+新脚本只做观察、不改行为：把「其余」再拆成路由 / 步进决策 / 最终作答三段，并记下每次调用的提示词长度与
+输入输出 token。
+
+```bash
+export RAG_COLLECTION_NAME=rag_eval_v8_latency
+export RAG_STORAGE_DIR=storage/eval/qdrant_v8_latency
+export RAG_LEXICAL_INDEX_PATH=storage/eval/lexical_v8_latency/bm25.pkl
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+
+python3 scripts/profile_agent_calls.py --dataset eval/v7_agent_qa.jsonl --json /tmp/profile_full_baseline.json
+```
+
+29 条一轮的归属（测于 `4cb9fb6`）：路由 566.5s（48.1%）、步进决策 413.1s（35.1%）、最终作答 174.0s（14.8%），
+工具执行只占约 2%。两段的毛病不一样：路由是「想得太多」——同一条提示词的输出从 60 个字到 1215 个字，
+而决策 JSON 本身只要几十个字；步进决策是「读得太多」——单条最长 17.3s 里 14.8s 花在读提示词，真正写 JSON 只 2.5s。
+
+本轮采纳的改法是在路由提示词**末尾**加一句「思考控制在两三句以内，不要复述题目和工具说明」（默认生效，
+`RAG_DISABLE_AGENT_THINKING_BRIEF=1` 退回老提示词）。模型自带的思考档位（`reasoning=low` / `minimal`）实测管不住
+思考长度——同一条提示词只会变长或差不多——所以没做那个旋钮。按 v8.3 的口径在同一进程里交替量：
+
+```bash
+python3 scripts/measure_thinking_ab.py --setting thinking_brief --values off,on,off \
+  --prefix v8_latency_thinking_brief_ab --keep-reports
+```
+
+脚本按轮改 `private_rag.agent.prompts` 的模块属性再调用 `evaluate.main`，报告口径与平时跑评估完全一致，
+跑完直接打印每轮均耗时（第一轮标为作废）、指标差与逐条行为翻动。读数：暖轮 23.7s → 20.0s（-15.8%），
+四项门禁指标不退，`source_hit` 0.960 → 1.000（`m04` 一条带动 `evidence_hit@3`、`mrr@3`、
+`context_precision@3`）；逐条只有 3 条行为翻动，都不改变作答与拒答。细节见 `docs/ROADMAP.md` 的 v8.4。
+
+一个试过但没用的方向，记在这里免得再试：把步进提示词的静态规则挪到证据前面（想让模型复用固定前缀，少读提示词）
+实测三步 37.6s 对 37.8s，没有差别。这台 Ollama 的前缀缓存只在「整段开头与上一次请求完全相同」时才复用
+——同一份提示词原样重发才能把读提示词从 30s 压到 0.4s——重排段落顺序换不来复用。
