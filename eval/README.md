@@ -825,3 +825,45 @@ python3 scripts/measure_thinking_ab.py --setting thinking_brief --values off,on,
 一个试过但没用的方向，记在这里免得再试：把步进提示词的静态规则挪到证据前面（想让模型复用固定前缀，少读提示词）
 实测三步 37.6s 对 37.8s，没有差别。这台 Ollama 的前缀缓存只在「整段开头与上一次请求完全相同」时才复用
 ——同一份提示词原样重发才能把读提示词从 30s 压到 0.4s——重排段落顺序换不来复用。
+
+### 章节树索引开/关复跑（2026-11-24，`claude/v8-tree-index-7ac6d0`）
+
+量的是「命中块换成它所在的章节 + 层级路径」这一路（`RAG_ENABLE_TREE_INDEX`，默认关）。检索召回、精排、
+步数、门控与指标判定式都没动，两档只差在上下文的边界语义（标题边界 vs 固定字符窗口）。
+
+```bash
+python3 scripts/init_demo_db.py
+python3 scripts/prepare_eval_kb.py --recreate
+python3 scripts/build_tree_index.py --eval          # 给评估库建章节树，245 个块全部归属成功
+
+python3 scripts/measure_tree_index_ab.py --values off,on,off --keep-reports
+```
+
+29 条 × `agent`，同一进程交替三轮（第一轮冷启动作废），隔离评估库，`--skip-ragas --max-workers 1`，
+评估链路钉死 `temperature=0` 与 `seed=7`。报告 `eval/reports/v8_5_tree_ab_{1,2,3}_{off,on,off}`，
+三轮都记 `git_commit = b85cb92`、`git_dirty = false`。
+
+| 轮次 | 设置 | 单条均耗时 | answer_rate | source_hit | refusal_accuracy | both_sides_hit | evidence_hit@3 | mrr@3 | context_precision@3 | used_tree_rate | avg_context_chars | avg_tool_calls |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 第 1 轮 | 关（冷启动，耗时作废） | 41.3s | 1.000 | 1.000 | 1.000 | 1.000 | 0.840 | 0.7933 | 0.5733 | 0.000 | 1498 | 1.724 |
+| 第 2 轮 | **开** | 51.3s | 1.000 | 1.000 | 1.000 | **0.833** | 0.840 | 0.7933 | 0.5733 | 0.621 | 1700 | 1.483 |
+| 第 3 轮 | 关（暖轮，参照） | 54.8s | 1.000 | 1.000 | 1.000 | 1.000 | 0.840 | 0.7933 | 0.5733 | 0.000 | 1403 | 1.621 |
+
+结论与限制，引用这轮数字时一并带上：
+
+- **两个「关」轮九项指标完全一致**（`compare_eval_noise.py` 判一致），逐条行为只有 `r03` 翻（意图
+  `mixed` → `database`、停止原因 `max_steps` → `insufficient_evidence`、工具 4 → 1，仍是正确拒答）。
+  开关带来的指标差别可以归因，但 `mixed` / `database` 样本的意图与步数本来就不完全钉得住。
+- **一项门禁回退：`both_sides_hit` 1.000 → 0.833，是 `c03` 一条**（≥1 条门槛，且两个「关」轮里它都是
+  4 次工具、两侧都引到）。开着这一路时它一次 `kb_search` 就作答，没回查 SQL——`source_hit` 与
+  `evidence_hit@3` 仍 1.0，答案没答错，是「少取一侧」。与 v7.4 记的「把检索到的文本当足够、不回查」
+  同源，本轮被这一路变成稳定触发。`m01` / `m04` 也提前收手（4 → 2 次工具）但两侧仍都引到。
+- **没有质量收益**：三项命中指标、引用两项三轮完全相同，`n_errors` 0。
+- **「开更快」是假象**：暖轮 51.3s 对 54.8s（-6.4%）全靠三条提前收手的样本（`m01` 130→52s、`m04` 117→62s、
+  `c03` 162→50s）；剔除这 3 条以后剩下 26 条是 50.9s 对 45.4s，开反而 **+12.3%**。
+- **上下文反而变大**：每样本 `avg_context_chars` 关 1403–1498、开 1700；逐块中位关 322 字符、开 629 字符
+  （父块扩展在共用预算里常被截断）。块数由模型的查询与步数决定（`avg_retrieved` 2.59 → 2.52），
+  不能把字符数变化全记给这一路。
+- **覆盖率 `used_tree_rate` 0.621**：18/29 条的上下文出现 `章节路径: `。没有路径的 11 条
+  （`d01`–`d06`、`s01`–`s04`、`c02`）只调 `sql_query`、不调 `kb_search`，属预期。
+- 这一路默认关闭，以上回退只在打开时出现；细节见 `docs/ROADMAP.md` 的 v8.5。
