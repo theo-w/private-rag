@@ -748,6 +748,31 @@ python3 scripts/compare_eval_noise.py eval/reports/v8_noise_floor_repeat_1.json 
 
 它会列出「指标是否轮轮一致」和每一对轮次的逐条行为差异与耗时差。退出码非 0 表示有指标在轮次之间变了。
 
+固定链路（`full`：一次检索一次生成）也照同一套办法重复三轮量过，命令只差 `--configs` 与报告名
+（固定链路不需要 `--agent-sources`）：
+
+```bash
+for n in 1 2 3; do
+  python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs full \
+    --skip-ragas --max-workers 1 \
+    --output "eval/reports/v8_noise_floor_classic_${n}.md" \
+    --json-output "eval/reports/v8_noise_floor_classic_${n}.json" \
+    --run-note "固定链路同配置重复轮 ${n}"
+done
+```
+
+固定链路的噪声底：八项指标三轮完全一致（`answer_rate` 0.440、`source_hit` 0.320、`refusal_accuracy` 1.000、
+`both_sides_hit` 0.000、`evidence_hit@3` 0.240、`mrr@3` 0.220、`context_precision@3` 0.080），逐条行为
+一条都没翻动，答案措辞每对轮次 5~11 条不同；耗时第一轮比后两轮慢 41%~43%（同样是冷启动），
+第 2、3 轮之间只差 1.6%。两个地方要注意：
+
+- `citation_rate` / `citation_validity` 是唯一的例外（0.920 → 0.960）。它们数的是「答案文本里有没有引用编号、
+  编号在不在引用条数范围内」，所以措辞会直接推动它们——第 3 轮 `d03` 的拒答文案带了 `[编号]` 就被记成有效。
+  引用类指标变了先确认是不是某一条样本的文本变动，别当成功能差异。
+- 这些数字不能与上面 agentic 那组横向比：`eval/v7_agent_qa.jsonl` 是按 agentic 设计的（多步、混合问题、
+  要查库），固定链路一次检索一次生成，25 条可答里只答了 11 条，所以 `answer_rate` 只有 0.440，
+  `both_sides_hit` 0.000 也是同一原因（它不会去查 SQL 那一侧）。
+
 比耗时（A/B 两种设置）要在同一进程里交替跑，别各跑一轮：
 
 ```bash
