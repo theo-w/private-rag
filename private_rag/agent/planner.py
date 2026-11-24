@@ -95,7 +95,7 @@ class LlmPlanner(Planner):
             return ask_tool_json(
                 prompt, kind=kind, model=self.model, num_predict=AGENT_PLANNER_TOKENS
             )
-        return ask_json(prompt, model=self.model, num_predict=AGENT_PLANNER_TOKENS)
+        return ask_json(prompt, kind=kind, model=self.model, num_predict=AGENT_PLANNER_TOKENS)
 
     def route(
         self,

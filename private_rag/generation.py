@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Iterator, Optional, Sequence
+from typing import Any, Iterator, Optional, Sequence
 
 from langchain_ollama import ChatOllama
 
 from private_rag.config import LLM_MODEL
+from private_rag.llm_params import classic_generation_kwargs, seed_kwargs
 from private_rag.models import Citation
 from private_rag.retrieval.hybrid import RetrievedChunk
 
@@ -104,6 +105,18 @@ def build_prompt(
     )
 
 
+def _llm_kwargs(model: str) -> dict[str, Any]:
+    """经典链路的模型参数：默认只有 ``model``，与改动前一致。
+
+    改动前这两处既不传温度也不传 seed，用的是服务端默认抽样，同一条上下文两次生成可以
+    给出不同答案；评估链路会把两者钉死（见 ``configure_eval_env``），运行时仍然不传。
+    """
+    kwargs: dict[str, Any] = {"model": model}
+    kwargs.update(classic_generation_kwargs())
+    kwargs.update(seed_kwargs())
+    return kwargs
+
+
 def generate_answer(
     question: str,
     chunks: Sequence[RetrievedChunk],
@@ -114,7 +127,7 @@ def generate_answer(
     if not chunks:
         return REFUSAL, []
 
-    response = ChatOllama(model=model).invoke(build_prompt(question, chunks, history))
+    response = ChatOllama(**_llm_kwargs(model)).invoke(build_prompt(question, chunks, history))
     return response.content, build_citations(chunks)
 
 
@@ -129,7 +142,7 @@ def stream_answer(
         yield REFUSAL
         return
 
-    llm = ChatOllama(model=model)
+    llm = ChatOllama(**_llm_kwargs(model))
     for response in llm.stream(build_prompt(question, chunks, history)):
         content = response.content
         if isinstance(content, list):
