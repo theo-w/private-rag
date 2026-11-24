@@ -36,6 +36,23 @@ METRICS = [
 ]
 
 
+def _num(value):
+    """指标值归一：``None`` 与 NaN 都算「不适用」。
+
+    NaN 与自身不相等，直接放进集合会让三轮都 NaN 的指标被误判成「轮轮不一致」——
+    固定链路（`full` / `none`）没挂运行时 SQL 源时 `both_sides_hit` 整列就是 NaN。
+    """
+    if value is None:
+        return None
+    if isinstance(value, float) and value != value:
+        return None
+    return value
+
+
+def _fmt(value) -> str:
+    return "不适用" if value is None else f"{value:.4f}"
+
+
 def load(path: str):
     with open(path) as fh:
         data = json.load(fh)
@@ -50,12 +67,15 @@ def main(paths: list[str]) -> int:
     print("=== 指标是否轮轮一致 ===")
     unstable = []
     for key in METRICS:
-        values = [metrics.get(key) for metrics, _ in rounds]
+        values = [_num(metrics.get(key)) for metrics, _ in rounds]
+        if all(v is None for v in values):
+            print(f"{key}: 不适用（这条链路不产生该指标）")
+            continue
         if len(set(values)) == 1:
-            print(f"{key}: 一致 {values[0]}")
+            print(f"{key}: 一致 {_fmt(values[0])}")
         else:
             unstable.append(key)
-            print(f"{key}: 不一致 {' / '.join(f'{v:.4f}' for v in values)}")
+            print(f"{key}: 不一致 {' / '.join(_fmt(v) for v in values)}")
 
     print("\n=== 两两配对 ===")
     for (i, (ma, sa)), (j, (mb, sb)) in itertools.combinations(list(enumerate(rounds)), 2):
