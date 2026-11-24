@@ -1,0 +1,10 @@
+# Google Drive 语料入库配置示例。
+# 先跑 scripts/sync_gdrive.py 把 Drive 文件下载到本地目录，再按这份配置入库；
+# 下载这一步之外，入库与检索链路都不联网。
+# 真实语料正文不进公开仓库（docs/adr/0002）：下载目录已 gitignore，这份示例也只有路径。
+sources:
+  - type: file
+    # 与 scripts/sync_gdrive.py 的默认下载目录一致，可用 RAG_GDRIVE_SYNC_DIR 覆盖
+    path: ${RAG_GDRIVE_SYNC_DIR:-data/gdrive}
+    tags: [gdrive]
+    # include: ["*.md", "*.pdf"]   # 可选：只入库下载目录里的一部分文件

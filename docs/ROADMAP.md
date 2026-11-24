@@ -20,6 +20,7 @@
 | v7.5 | `claude/serene-tharp-761b47` | function calling 决策输出对比：`RAG_AGENT_PLANNER_MODE=json|function` 实验开关（`ask_tool_json`，同一提示词换输出通道），JSON 模式保持默认 | ✅ 本分支完成 | 420 测试通过（+10 mock 单测）；同一提示词双通道实跑读数（`eval/reports/fc_comparison_report.md`）：主模型 `qwen3.8:27b-mlx` FC 路由 12/12 可用（均耗时 18.8s vs JSON 27.0s）、步进形状 3/3 一致，两通道意图一致率 0.75；对照 `qwen2.5:7b-instruct` FC 成功 4/12（提示词仍写着「只输出 JSON」的混淆已如实写明）；结论与逐条读数见 v7 详细验收的 function calling 对比项 |
 | v8 | `v8-mcp-kb-search-ask` | MCP 暴露：手写最小 stdio JSON-RPC server（零新增依赖），对外只读工具 `kb_search` / `ask`，`--allow-sql` 才加 `sql_query` | ✅ 本分支完成 | 529 测试通过（既有 430 + 新增 99，不打模型、不打开真实 Qdrant）；`--list-tools` 与 `tools/list` 能看到工具与 input/output schema 并声明只读；本机实跑 `tools/call kb_search` 返回带 `[n]` 编号的证据与含 `page` 的引用载荷、`ask` 返回带 `[1][2]` 的回答与 `meta`，`--allow-sql` 用演示库授权跑通 `sql_query`（3 行结果 + `source_type=sql` 引用）且 `UPDATE` 被护栏拒；同一 `storage/` 被别的进程占用时退出码 3 并给出可操作提示；不暴露入库/写库，运行时 SQL 要过 `--allow-sql` + `allow_runtime_query` + `sql_guard` 三重门（与 agentic 共用 `build_tool_registry`）；选型与代价见 `docs/adr/0004`，边界见 `docs/adr/0005` 与取代其 SQL 一条的 `docs/adr/0006` |
 | v8.5 | `v8-parse-baseline-ab` | 解析基准 A/B：扫描件解析后端可换（`RAG_SCAN_PARSER=selfbuilt\|docling\|mineru`），第三方走独立虚拟环境 + subprocess；四页新 fixture（带边框 / 合并单元格 / 无框线 / 六列）与 8 条评估集；解析层 golden 指标 | ✅ 本分支完成（读数已出，结论「不切换默认后端」） | 577 测试通过（既有 529 + 新增 48，全部打桩，CI 不装第三方解析器）；解析层三侧：docling 4/4 张表、`table_recall` 1.00 / `cell_accuracy` 1.00，selfbuilt 3/4、0.75 / 0.64，mineru（standard 档）3/4、0.75 / 0.75，自建与 MinerU 的缺口都在无框线那一页；端到端三侧同模型：新集 8 条 `evidence_hit@3` selfbuilt 0.571（未命中三条与解析层三个缺陷一一对应）vs docling 1.000 / mineru 1.000，v6 那 6 条三侧同分 1.000 / 0.500 / 0.900 与 v6.2 ON 侧逐字一致；结论与代价见下面的 v8.5 详细验收与 `eval/reports/v8_parse_*` |
+| 语料接入 | `corpus-gdrive-sync` | Google Drive 语料预下载：本机 CLI（rclone / gdrive）把 Drive 文件落到 gitignore 的本地目录，再复用 `type: file` 源入库；联网只在下载这一步，不引入 Google SDK，`source_type` 不扩张 | ✅ 本分支完成（未接真实 Google 账号，见下方详细验收的未完成项） | 456 测试通过（+26 mock 单测，不联网、不打模型）；下载命令拼装与失败信息可测（rclone 导出格式钉 `pdf`、`--mode sync`/`--include`/`--dry-run`、缺 CLI 给安装提示、gdrive 在下载目录里执行且拒绝 dry-run）；仓库内下载目录未被 gitignore 时拒绝同步（ADR 0002 边界，默认目录另有真实 `git check-ignore` 探测）；假下载产物走现有 `run_ingest` 得 `added=2`、BM25 建成、二次运行整批跳过，引用 `source_type=file` + `tags=["gdrive"]`；README 有可操作的授权与「下载 → 入库」步骤，决策见 `docs/adr/0003-google-drive-corpus-cli-prefetch.md` |
 
 ## v2 详细验收（已完成）
 
@@ -690,6 +691,22 @@ CUDA 上的 vLLM/SGLang 服务，本机 Apple Silicon 跑不了，如实记为�
       字符损失（「配件库存表（第一页）」读成 `配件库存表 (第 页`，`body_purity` 量不到这一项）。
       真正值得做的下一步是**按页型混合**：有结构线的页继续自建，整页没有任何线条的页交给 docling（本轮两侧在
       这一页上的差读数是 0 张 vs 1 张，判据可测）。但这要在真实语料上验一次再动默认值，不做合成 fixture 上的混合。
+
+## 语料接入详细验收（Google Drive 预下载）
+
+边界与选型见 [docs/adr/0003](adr/0003-google-drive-corpus-cli-prefetch.md)，用法见 README「Google Drive 语料接入（预下载）」。
+
+- [x] 下载工具是本机 CLI（默认 `rclone`，可切 `gdrive`），Python 侧零新增依赖——仓库钉 Python 3.9 且尽量少依赖
+- [x] 联网只在下载这一步：入库与检索链路不碰 Google API，仓库不引入 Google SDK
+- [x] 凭据只留本机（`~/.config/rclone/rclone.conf`、`~/.gdrive/`），不进命令行、不进日志、不进仓库
+- [x] 下载目录默认 `data/gdrive` 并写进 `.gitignore`；仓库内的目录未被忽略时拒绝同步（ADR 0002），逃生口 `--allow-tracked-dest`
+- [x] 复用现有链路：下载目录就是 `type: file` + `tags: [gdrive]` 的源，分块与嵌入一处未动；`source_type` 不扩张（API schema 与 CLI 仍是 file/web/sql）
+- [x] Google 原生文档导出格式钉成 `pdf`（入库链路只认 txt/md/pdf）；同步后清点目录、列出不支持的后缀，一个可入库文件都没有时明确失败而不是静默入库 0 条
+- [x] `--mode sync --ingest --prune` 让知识库跟着 Drive 的删除收缩；`--skip-sync` 只用已下载内容；`--` 之后的参数透传给下载工具
+- [x] 26 条 mock 单测：命令拼装与失败信息、目录安全边界（含真实 `git check-ignore` 探测）、目录清点、假下载产物走 `run_ingest` 的幂等；不依赖真实 Google 账号与 Ollama
+- [x] 真机冒烟（2026-11-22，本机 Ollama）：假下载产物（2 个 md/txt + 1 个 xlsx）走 CLI 用真实 `bge-m3` 入库到隔离 collection（`RAG_COLLECTION_NAME` / `RAG_STORAGE_DIR` / `RAG_LEXICAL_INDEX_PATH` 指向 /tmp，演示库未被动）——`新增 2 / 写入 2 chunk`、xlsx 被清点为不支持、BM25 建成；二次运行 `新增 0 / 跳过 2`；「橙子有什么营养」的向量检索第一条是橙子，metadata 为 `source_type=file` + `tags=["gdrive"]`
+- [ ] 真实 Google 账号端到端（授权 → 下载 → 入库 → 提问）没有跑过：仓库里不存在任何真实账号凭据，这一步只能由使用者在自己机器上按 README 验证
+- [ ] Drive 侧的权限粒度没有测：只读 scope 能否覆盖共享盘（shared drive）需要 `rclone config` 时另行确认
 
 ## 分支与提交约定
 
