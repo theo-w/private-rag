@@ -23,6 +23,14 @@ def configure_eval_env() -> None:
         "RAG_LEXICAL_INDEX_PATH": str(EVAL_LEXICAL_INDEX_PATH),
         # 评估跑的是样本，不是真实问答；不写进演示轨迹文件，避免污染 storage/traces
         "RAG_DISABLE_AGENT_TRACE": "1",
+        # 评估要的是可复现的前后对比，不是采样多样性：钉死两条链路的生成温度与全局 seed。
+        # 此前同一条默认配置的两轮评估都对不上（40.6s vs 56.6s、source_hit 1.000 vs 0.960、
+        # d02 意图 mixed vs database），钉死以后前后对比才能归因到改动本身。
+        # 固定链路（full / none 等配置）走的是 generation.py 的生成，同样不传温度，所以一起钉。
+        # 只影响评估链路（serve/demo 不读这里），且已有值优先，想跑采样版把它 export 掉。
+        "RAG_AGENT_ANSWER_TEMPERATURE": "0",
+        "RAG_GENERATION_TEMPERATURE": "0",
+        "RAG_LLM_SEED": "7",
     }
     for name, value in defaults.items():
         os.environ.setdefault(name, value)

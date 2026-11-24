@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+from private_rag import config
 from private_rag.generation import (
     REFUSAL,
     build_citations,
@@ -111,3 +114,57 @@ def test_stream_yields_llm_chunks(monkeypatch):
     monkeypatch.setattr("private_rag.generation.ChatOllama", FakeChat)
     tokens = list(stream_answer("问题", [_chunk(1)], history=[("user", "前文")]))
     assert "".join(tokens) == "苹果"
+
+
+class _KwargsRecorder:
+    """记录构造参数的假模型，用来检查有没有把采样参数传给服务端。"""
+
+    calls: list[dict] = []
+
+    def __init__(self, **kwargs):
+        _KwargsRecorder.calls.append(kwargs)
+
+    def invoke(self, prompt):
+        return SimpleNamespace(content="答案 [1]")
+
+    def stream(self, prompt):
+        yield SimpleNamespace(content="答案")
+
+
+def test_generation_passes_neither_temperature_nor_seed_by_default(monkeypatch):
+    # 改动前这两处只传 model，运行时必须保持这个行为
+    _KwargsRecorder.calls = []
+    monkeypatch.setattr(config, "GENERATION_TEMPERATURE", None)
+    monkeypatch.setattr(config, "LLM_SEED", None)
+    monkeypatch.setattr("private_rag.generation.ChatOllama", _KwargsRecorder)
+    generate_answer("问题", [_chunk(1)])
+    stream_answer("问题", [_chunk(1)]).__next__()
+    assert _KwargsRecorder.calls[0] == {"model": _KwargsRecorder.calls[0]["model"]}
+    assert _KwargsRecorder.calls[1] == {"model": _KwargsRecorder.calls[1]["model"]}
+
+
+def test_pinned_sampling_reaches_both_generation_paths(monkeypatch):
+    # 评估链路钉死以后，非流式与流式必须拿到同一套参数，否则逐条读数对不齐
+    _KwargsRecorder.calls = []
+    monkeypatch.setattr(config, "GENERATION_TEMPERATURE", 0.0)
+    monkeypatch.setattr(config, "LLM_SEED", 7)
+    monkeypatch.setattr("private_rag.generation.ChatOllama", _KwargsRecorder)
+    generate_answer("问题", [_chunk(1)])
+    stream_answer("问题", [_chunk(1)]).__next__()
+    assert _KwargsRecorder.calls[0]["temperature"] == 0.0
+    assert _KwargsRecorder.calls[0]["seed"] == 7
+    assert _KwargsRecorder.calls[1]["temperature"] == 0.0
+    assert _KwargsRecorder.calls[1]["seed"] == 7
+
+
+def test_generation_temperature_is_read_at_call_time(monkeypatch):
+    # 参数从 config 现读，运行期改配置立刻生效（脚本与测试都靠这一点）
+    _KwargsRecorder.calls = []
+    monkeypatch.setattr(config, "GENERATION_TEMPERATURE", None)
+    monkeypatch.setattr(config, "LLM_SEED", None)
+    monkeypatch.setattr("private_rag.generation.ChatOllama", _KwargsRecorder)
+    generate_answer("问题", [_chunk(1)])
+    assert "temperature" not in _KwargsRecorder.calls[0]
+    monkeypatch.setattr(config, "GENERATION_TEMPERATURE", 0.3)
+    generate_answer("问题", [_chunk(1)])
+    assert _KwargsRecorder.calls[1]["temperature"] == 0.3

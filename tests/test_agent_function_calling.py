@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
+from private_rag import config
 from private_rag.agent import prompts as prompts_module
 from private_rag.agent.planner import LlmPlanner
 from private_rag.agent.prompts import (
@@ -67,6 +68,28 @@ class TestAskToolJson:
         with patch.object(prompts_module, "ChatOllama", return_value=fake) as ctor:
             ask_tool_json("提示词", kind="route")
         assert ctor.call_args.kwargs["reasoning"] is False
+
+    def test_seed_only_passed_when_pinned(self, monkeypatch):
+        # 两条决策输出通道共用同一套采样参数，否则 function 模式的评估照样不可复现
+        msg = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "route_decision",
+                    "args": {"intent": "knowledge", "reason": "r", "action": {"tool": "kb_search", "args": {}}},
+                    "id": "1",
+                }
+            ],
+        )
+        monkeypatch.setattr(config, "LLM_SEED", None)
+        with patch.object(prompts_module, "ChatOllama", return_value=_fake_llm(msg)) as ctor:
+            ask_tool_json("提示词", kind="route")
+        assert "seed" not in ctor.call_args.kwargs
+
+        monkeypatch.setattr(config, "LLM_SEED", 7)
+        with patch.object(prompts_module, "ChatOllama", return_value=_fake_llm(msg)) as ctor:
+            ask_tool_json("提示词", kind="route")
+        assert ctor.call_args.kwargs["seed"] == 7
 
     def test_step_schema(self):
         msg = AIMessage(

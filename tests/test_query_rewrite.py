@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from private_rag import query_rewrite
+from private_rag import config, query_rewrite
 from private_rag.query_rewrite import (
     MAX_HYDE_CHARS,
     MAX_VARIANT_CHARS,
@@ -140,3 +140,14 @@ def test_non_object_json_falls_back(fake_chat):
 
     assert result.queries == ["问题"]
     assert result.fallback is True
+
+
+def test_seed_only_passed_when_pinned(fake_chat, monkeypatch):
+    # 改写查询会改变检索结果，评估钉死 seed 时这条调用也要拿到同一个值
+    monkeypatch.setattr(config, "LLM_SEED", None)
+    rewrite_queries("问题", "multi")
+    assert "seed" not in fake_chat.instances[0].kwargs
+
+    monkeypatch.setattr(config, "LLM_SEED", 7)
+    rewrite_queries("问题", "multi")
+    assert fake_chat.instances[1].kwargs["seed"] == 7
