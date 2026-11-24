@@ -751,7 +751,7 @@ vLLM/SGLang 服务，本机 Apple Silicon 跑不了。
 
 首轮读数（2026-11-23）：解析层 docling 四页表格全对（`table_recall` 1.00 / `cell_accuracy` 1.00），自建与
 MinerU 同为 0.75，缺口都集中在无框线那一页；端到端新集自建 5/7 命中（0.571），docling 与 MinerU 都 7/7。
-**默认后端仍是 `selfbuilt`**，是否切换的结论与代价写在 ROADMAP 的 v8.1 与 eval/README 的「三侧读数」。
+**默认后端仍是 `selfbuilt`**，是否切换的结论与代价写在 ROADMAP 的 v8.5 与 eval/README 的「三侧读数」。
 
 ## 只读公网演示（Render）
 

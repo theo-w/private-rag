@@ -11,14 +11,18 @@ from types import SimpleNamespace
 import pytest
 
 import private_rag.agent.prompts as prompts_module
+from private_rag import config
 from private_rag.agent.planner import LlmPlanner
 from private_rag.agent.prompts import (
     PlannerError,
+    ask_json,
     build_final_prompt,
     build_route_prompt,
     build_step_prompt,
+    generate_final_answer,
     heuristic_route,
     parse_decision,
+    stream_final_answer,
 )
 from private_rag.generation import REFUSAL
 from private_rag.config import AGENT_PLANNER_TOKENS
@@ -35,6 +39,9 @@ class FakeChatOllama:
 
     def invoke(self, prompt):
         return SimpleNamespace(content=FakeChatOllama.payload)
+
+    def stream(self, prompt):
+        yield SimpleNamespace(content=FakeChatOllama.payload)
 
 
 @pytest.fixture(autouse=True)
@@ -99,6 +106,210 @@ class TestPlannerTokenBudget:
         route = LlmPlanner(model="fake-model").route("最便宜的香蕉多少钱", "工具清单")
         assert route.intent == "database"
         assert route.tool == "sql_query"
+
+
+class TestPlannerThinkingStages:
+    """思考按决策环节开关：默认只让路由思考，步进决策关掉。
+
+    实测同一条提示词，路由开思考 40.4 秒 / 关思考 6.3 秒；全关时路由会把三条
+    multi_step 样本误判成 mixed，双侧门控烧光步数并把证据上下文挤掉，最终拒答。
+    """
+
+    def test_route_keeps_thinking_by_default(self):
+        FakeChatOllama.payload = route_payload()
+        LlmPlanner(model="fake-model").route("问题", "工具清单")
+        assert FakeChatOllama.calls[0]["reasoning"] is True
+
+    def test_decide_turns_thinking_off_by_default(self):
+        FakeChatOllama.payload = json.dumps(
+            {"action": "final", "sufficient": True, "missing": "", "answer": "答案"},
+            ensure_ascii=False,
+        )
+        LlmPlanner(model="fake-model").decide("问题", "工具清单", "证据", ["检索到 1 段"])
+        assert FakeChatOllama.calls[0]["reasoning"] is False
+
+    def test_switch_can_enable_step_thinking(self, monkeypatch):
+        # RAG_AGENT_PLANNER_THINKING=all 时两个环节都保留思考
+        monkeypatch.setattr(prompts_module, "AGENT_PLANNER_THINKING_STAGES", frozenset({"route", "step"}))
+        FakeChatOllama.payload = route_payload()
+        LlmPlanner(model="fake-model").decide("问题", "工具清单", "证据", ["检索到 1 段"])
+        assert FakeChatOllama.calls[0]["reasoning"] is True
+
+    def test_switch_can_turn_off_every_stage(self, monkeypatch):
+        # RAG_AGENT_PLANNER_THINKING=off 时连路由也不思考（换取最快速度，接受路由判意更粗）
+        monkeypatch.setattr(prompts_module, "AGENT_PLANNER_THINKING_STAGES", frozenset())
+        FakeChatOllama.payload = route_payload()
+        LlmPlanner(model="fake-model").route("问题", "工具清单")
+        assert FakeChatOllama.calls[0]["reasoning"] is False
+
+    def test_final_answer_is_not_affected_by_the_switch(self, monkeypatch):
+        # 最终作答要写引用与缺证说明，思考保持模型默认，不由这个开关决定
+        monkeypatch.setattr(prompts_module, "AGENT_PLANNER_THINKING_STAGES", frozenset())
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert "reasoning" not in FakeChatOllama.calls[0]
+
+    def test_route_prompt_asks_for_brief_thinking_by_default(self):
+        prompt = build_route_prompt("香蕉怎么保存", "工具清单")
+        assert "思考控制在两三句以内" in prompt
+        # 规则与工具说明不能被挪动：模型的提示词前缀靠开头那部分复用
+        assert prompt.index("思考控制在两三句以内") > prompt.index("硬性规则")
+
+    def test_brief_thinking_note_can_be_turned_off(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_THINKING_BRIEF", False)
+        assert "思考控制在两三句以内" not in build_route_prompt("问题", "工具清单")
+
+    def test_step_prompt_has_no_brief_thinking_note(self):
+        # 步进决策默认不开思考，加这句只会改变提示词而省不到时间
+        assert "思考控制在两三句以内" not in build_step_prompt("问题", "工具清单", "证据", ["步骤1"])
+
+    def test_stage_value_parsing_falls_back_to_default(self, monkeypatch):
+        from private_rag.config import _env_stages
+
+        monkeypatch.setenv("RAG_AGENT_PLANNER_THINKING", "off")
+        assert _env_stages("RAG_AGENT_PLANNER_THINKING", "route") == frozenset()
+        monkeypatch.setenv("RAG_AGENT_PLANNER_THINKING", "1")
+        assert _env_stages("RAG_AGENT_PLANNER_THINKING", "route") == frozenset({"route", "step"})
+        monkeypatch.setenv("RAG_AGENT_PLANNER_THINKING", "step")
+        assert _env_stages("RAG_AGENT_PLANNER_THINKING", "route") == frozenset({"step"})
+        # 拼错的取值不静默失效：回退默认环节
+        monkeypatch.setenv("RAG_AGENT_PLANNER_THINKING", "routeee")
+        assert _env_stages("RAG_AGENT_PLANNER_THINKING", "route") == frozenset({"route"})
+
+
+class TestAnswerThinkingSwitch:
+    """最终作答的思考开关：默认 ``keep`` 保持模型默认，只有显式 on/off 才传 ``reasoning``。
+
+    实测同一条证据文本 keep 与 on 都是 10.3 秒、off 是 2.95 秒，默认确实在思考；
+    但关掉以后 29 条对照出现三条误拒，所以默认保持 ``keep``，只留开关。读数见 docs/ROADMAP.md 的 v8.2。
+    """
+
+    def test_default_keeps_model_default(self):
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert "reasoning" not in FakeChatOllama.calls[0]
+
+    def test_off_passes_reasoning_false(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_THINKING", "off")
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert FakeChatOllama.calls[0]["reasoning"] is False
+
+    def test_on_passes_reasoning_true(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_THINKING", "on")
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert FakeChatOllama.calls[0]["reasoning"] is True
+
+    def test_explicit_argument_beats_config(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_THINKING", "off")
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据", thinking="keep")
+        assert "reasoning" not in FakeChatOllama.calls[0]
+
+    def test_stream_path_shares_the_switch(self, monkeypatch):
+        # MCP 服务与 demo 的流式路径用同一个开关，不能只有非流式生效
+        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_THINKING", "off")
+        FakeChatOllama.payload = "答案 [1]"
+        assert list(stream_final_answer("问题", "[1] 证据")) == ["答案 [1]"]
+        assert FakeChatOllama.calls[0]["reasoning"] is False
+
+    def test_no_evidence_still_skips_the_model(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_ANSWER_THINKING", "off")
+        assert generate_final_answer("问题", "   ") == REFUSAL
+        assert FakeChatOllama.calls == []
+
+    def test_value_parsing_falls_back_to_keep(self):
+        from private_rag.config import _answer_thinking_mode
+
+        assert _answer_thinking_mode("off") == "off"
+        assert _answer_thinking_mode("1") == "on"
+        assert _answer_thinking_mode("keep") == "keep"
+        # 拼错的取值不静默失效：回退到保持模型默认
+        assert _answer_thinking_mode("maybe") == "keep"
+        assert _answer_thinking_mode("") == "keep"
+
+
+class TestEvalDeterminismParams:
+    """采样参数与 seed：运行时都不传（保持服务端默认），评估链路才钉死。
+
+    钉死之前最终作答既不传 temperature 也不传 seed，同一条证据两次生成会给出不同答案，
+    同配置的两次评估也就对不上（见 docs/ROADMAP.md 的 v8.3）。
+    """
+
+    def test_runtime_passes_neither(self, monkeypatch):
+        monkeypatch.setattr(config, "AGENT_ANSWER_TEMPERATURE", None)
+        monkeypatch.setattr(config, "LLM_SEED", None)
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert "temperature" not in FakeChatOllama.calls[0]
+        assert "seed" not in FakeChatOllama.calls[0]
+        # 决策调用本来传 temperature=0，没配 seed 时也不传
+        FakeChatOllama.payload = json.dumps({"action": "final", "reason": "r"})
+        ask_json("提示词", kind="step")
+        assert FakeChatOllama.calls[1]["temperature"] == 0
+        assert "seed" not in FakeChatOllama.calls[1]
+
+    def test_pinned_seed_reaches_answer_and_decisions(self, monkeypatch):
+        monkeypatch.setattr(config, "LLM_SEED", 7)
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert FakeChatOllama.calls[0]["seed"] == 7
+        # 流式路径与思考开关一样共用同一套参数
+        assert list(stream_final_answer("问题", "[1] 证据")) == ["答案 [1]"]
+        assert FakeChatOllama.calls[1]["seed"] == 7
+        FakeChatOllama.payload = json.dumps({"action": "final", "reason": "r"})
+        ask_json("提示词", kind="step")
+        assert FakeChatOllama.calls[2]["seed"] == 7
+
+    def test_pinned_answer_temperature_only_affects_answer(self, monkeypatch):
+        monkeypatch.setattr(config, "AGENT_ANSWER_TEMPERATURE", 0.0)
+        monkeypatch.setattr(config, "LLM_SEED", None)
+        FakeChatOllama.payload = "答案 [1]"
+        generate_final_answer("问题", "[1] 证据")
+        assert FakeChatOllama.calls[0]["temperature"] == 0.0
+        assert "seed" not in FakeChatOllama.calls[0]
+
+    def test_optional_env_parsing(self, monkeypatch):
+        from private_rag.config import _env_optional_float, _env_optional_int
+
+        monkeypatch.delenv("RAG_X", raising=False)
+        assert _env_optional_float("RAG_X") is None
+        assert _env_optional_int("RAG_X") is None
+        monkeypatch.setenv("RAG_X", "0")
+        assert _env_optional_float("RAG_X") == 0.0
+        assert _env_optional_int("RAG_X") == 0
+        monkeypatch.setenv("RAG_X", "0.7")
+        assert _env_optional_float("RAG_X") == 0.7
+        # 非法值按「没设置」处理，不会把运行时行为改成某个猜出来的数
+        assert _env_optional_int("RAG_X") is None
+
+    def test_eval_env_pins_both(self, monkeypatch):
+        import os
+
+        from private_rag.eval_env import configure_eval_env
+
+        # 两条链路的生成温度都要钉住：固定链路跑 full / none 时走的是 generation.py 的生成
+        for name in (
+            "RAG_AGENT_ANSWER_TEMPERATURE",
+            "RAG_GENERATION_TEMPERATURE",
+            "RAG_LLM_SEED",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        configure_eval_env()
+        assert os.environ["RAG_AGENT_ANSWER_TEMPERATURE"] == "0"
+        assert os.environ["RAG_GENERATION_TEMPERATURE"] == "0"
+        assert os.environ["RAG_LLM_SEED"] == "7"
+
+    def test_eval_env_keeps_exported_override(self, monkeypatch):
+        import os
+
+        from private_rag.eval_env import configure_eval_env
+
+        # 想跑采样版可以把变量 export 掉，评估隔离不强行覆盖
+        monkeypatch.setenv("RAG_AGENT_ANSWER_TEMPERATURE", "0.8")
+        configure_eval_env()
+        assert os.environ["RAG_AGENT_ANSWER_TEMPERATURE"] == "0.8"
 
 
 class TestRouterPromptDataAvailability:

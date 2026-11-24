@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
+from private_rag import config
 from private_rag.agent import prompts as prompts_module
 from private_rag.agent.planner import LlmPlanner
 from private_rag.agent.prompts import (
@@ -47,7 +48,48 @@ class TestAskToolJson:
         # 工具 schema 靠 bind_tools 声明，不再设 format="json"
         assert "format" not in ctor.call_args.kwargs
         assert ctor.call_args.kwargs["temperature"] == 0
+        # 路由环节默认保留思考（判错意图的代价最大），两条输出通道按同一套环节判断
+        assert ctor.call_args.kwargs["reasoning"] is True
         assert fake.bind_tools.call_args.args[0] == [ROUTE_TOOL_SCHEMA]
+
+    def test_switch_can_turn_off_route(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_PLANNER_THINKING_STAGES", frozenset())
+        msg = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "route_decision",
+                    "args": {"intent": "knowledge", "reason": "r", "action": {"tool": "kb_search", "args": {}}},
+                    "id": "1",
+                }
+            ],
+        )
+        fake = _fake_llm(msg)
+        with patch.object(prompts_module, "ChatOllama", return_value=fake) as ctor:
+            ask_tool_json("提示词", kind="route")
+        assert ctor.call_args.kwargs["reasoning"] is False
+
+    def test_seed_only_passed_when_pinned(self, monkeypatch):
+        # 两条决策输出通道共用同一套采样参数，否则 function 模式的评估照样不可复现
+        msg = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "route_decision",
+                    "args": {"intent": "knowledge", "reason": "r", "action": {"tool": "kb_search", "args": {}}},
+                    "id": "1",
+                }
+            ],
+        )
+        monkeypatch.setattr(config, "LLM_SEED", None)
+        with patch.object(prompts_module, "ChatOllama", return_value=_fake_llm(msg)) as ctor:
+            ask_tool_json("提示词", kind="route")
+        assert "seed" not in ctor.call_args.kwargs
+
+        monkeypatch.setattr(config, "LLM_SEED", 7)
+        with patch.object(prompts_module, "ChatOllama", return_value=_fake_llm(msg)) as ctor:
+            ask_tool_json("提示词", kind="route")
+        assert ctor.call_args.kwargs["seed"] == 7
 
     def test_step_schema(self):
         msg = AIMessage(
@@ -61,9 +103,11 @@ class TestAskToolJson:
             ],
         )
         fake = _fake_llm(msg)
-        with patch.object(prompts_module, "ChatOllama", return_value=fake):
+        with patch.object(prompts_module, "ChatOllama", return_value=fake) as ctor:
             data = ask_tool_json("提示词", kind="step")
         assert data["action"] == "tool"
+        # 步进决策默认关掉思考：这一步的输出同样只是一小段决策 JSON
+        assert ctor.call_args.kwargs["reasoning"] is False
         assert fake.bind_tools.call_args.args[0] == [STEP_TOOL_SCHEMA]
 
     def test_no_tool_calls_raises(self):

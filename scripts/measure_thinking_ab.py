@@ -1,0 +1,138 @@
+"""在同一进程里交替跑 agentic 评估的不同思考设置，量耗时并逐条比对行为。
+
+耗时对比不能各跑一轮：模型冷热与取证内容的差异能把方向测反（docs/ROADMAP.md 的 v8.3
+就是这么翻过一次），所以前后设置要在同一个进程里交替跑，形如 A/B/A，第一轮作废。
+质量指标与逐条行为（拒答、意图、停止原因、工具次数）在同一进程里顺带读出来，
+省掉再跑一遍的时间。
+
+用法（要打到本机 Ollama，串行跑；一条大约 40 秒，29 条三轮约一小时）：
+    python3 scripts/measure_thinking_ab.py --setting thinking_brief \
+        --values off,on,off --prefix /tmp/ab_brief
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any, Callable
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
+
+# 环境变量必须先于 private_rag.config 导入
+from private_rag.eval_env import EVAL_AGENT_SOURCES_CONFIG, configure_eval_env  # noqa: E402
+
+configure_eval_env()
+
+import private_rag.agent.prompts as prompts  # noqa: E402
+
+# scripts/evaluate.py 就是评估 CLI，这里按轮调用它的 main，报告的指标口径与平时跑评估完全一致
+import evaluate  # noqa: E402
+
+# 可以交替的设置项。思考开关在 prompts 里是导入时抓的快照，必须改模块属性才生效
+# （只改 config 不会被读到，见 scripts/check_generation_determinism.py 的同一处理）。
+SETTINGS: dict[str, Callable[[str], None]] = {
+    "thinking_brief": lambda value: setattr(
+        prompts, "AGENT_THINKING_BRIEF", value not in {"off", "0", "no"}
+    ),
+    "planner_stages": lambda value: setattr(
+        prompts, "AGENT_PLANNER_THINKING_STAGES",
+        frozenset() if value == "off" else frozenset(value.split(",")),
+    ),
+    "answer_thinking": lambda value: setattr(prompts, "AGENT_ANSWER_THINKING", value),
+}
+
+# 对照时看的整轮指标：前四项是「不能变差」的门禁，其余是取证与引用的质量
+GUARDRAILS = ("answer_rate", "source_hit", "refusal_accuracy", "both_sides_hit")
+QUALITY = ("citation_rate", "citation_validity", "evidence_hit@3", "mrr@3",
+           "context_precision@3", "n_errors")
+
+
+def round_stats(json_path: Path) -> dict[str, Any]:
+    """读一轮报告：整轮指标、单条均耗时，以及逐条行为指纹。"""
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    config = next(iter(data["configs"].values()))
+    per_sample_ms = [s["retrieval_ms"] + s["generation_ms"] for s in data["samples"]]
+    behavior = {
+        s["id"]: ("拒答" if s["refusal"] else "作答", s.get("intent") or "",
+                  s.get("stop_reason") or "", s.get("tool_calls") or 0)
+        for s in data["samples"]
+    }
+    return {
+        "metrics": config["metrics"],
+        "avg_ms": sum(per_sample_ms) / max(len(per_sample_ms), 1),
+        "behavior": behavior,
+    }
+
+
+def report_deltas(reference: dict[str, Any], current: dict[str, Any], label: str) -> None:
+    """打印某一轮与参照轮的指标差与逐条行为翻动。"""
+    print(f"\n--- {label} 对参照轮 ---")
+    for name in GUARDRAILS + QUALITY:
+        base, now = reference["metrics"].get(name), current["metrics"].get(name)
+        mark = "＝" if base == now else "≠"
+        print(f"  {name:20s} {base} → {now}  {mark}")
+    flips = [(sid, base, now) for sid, base in reference["behavior"].items()
+             if (now := current["behavior"].get(sid)) != base]
+    if not flips:
+        print("  逐条行为（拒答/意图/停止原因/工具次数）没有翻动")
+    for sid, base, now in flips:
+        print(f"  {sid} {base} → {now}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="同一进程交替跑多档思考设置的耗时对照")
+    parser.add_argument("--setting", choices=sorted(SETTINGS), default="thinking_brief")
+    parser.add_argument("--values", default="off,on,off",
+                        help="按顺序跑的设置值，逗号分隔；建议 A/B/A")
+    parser.add_argument("--dataset", default="eval/v7_agent_qa.jsonl")
+    parser.add_argument("--agent-sources", default=str(EVAL_AGENT_SOURCES_CONFIG))
+    parser.add_argument("--prefix", default="/tmp/ab_thinking", help="报告文件名前缀")
+    parser.add_argument("--keep-reports", action="store_true",
+                        help="把报告写到 eval/reports 而不是临时目录")
+    args = parser.parse_args(argv)
+
+    values = [part.strip() for part in args.values.split(",") if part.strip()]
+    out_dir = ROOT / "eval/reports" if args.keep_reports else Path("/tmp")
+    rounds: list[dict[str, Any]] = []
+
+    for index, value in enumerate(values, start=1):
+        SETTINGS[args.setting](value)
+        name = f"{args.prefix}_{index}_{value}"
+        print(f"\n===== 第 {index} 轮：{args.setting}={value} =====", flush=True)
+        evaluate.main([
+            "--dataset", args.dataset,
+            "--configs", "agent",
+            "--agent-sources", args.agent_sources,
+            "--skip-ragas",
+            "--max-workers", "1",
+            "--output", str(out_dir / f"{name}.md"),
+            "--json-output", str(out_dir / f"{name}.json"),
+            "--run-note", f"同一进程交替对照 第{index}轮 {args.setting}={value}",
+        ])
+        rounds.append(round_stats(out_dir / f"{name}.json"))
+
+    print("\n=== 单条均耗时（第一轮作废：冷启动要把生成与精排模型加载进来）===")
+    for index, (value, stats) in enumerate(zip(values, rounds), start=1):
+        note = "（第一轮，作废）" if index == 1 else ""
+        print(f"  第 {index} 轮 {args.setting}={value:8s} {stats['avg_ms'] / 1000:6.1f}s{note}")
+
+    reference = rounds[0]
+    for index, (value, stats) in enumerate(zip(values, rounds), start=1):
+        if index == 1:
+            continue
+        report_deltas(reference, stats, f"第 {index} 轮 {args.setting}={value}")
+        if index > 2:
+            # 只比暖轮：第 2 轮的上一轮是冷启动，差 40% 是冷热不是设置差别
+            previous = rounds[index - 2]
+            print(f"  耗时对上一轮（{values[index - 2]}）：{stats['avg_ms'] / 1000:.1f}s"
+                  f" vs {previous['avg_ms'] / 1000:.1f}s"
+                  f"（{(stats['avg_ms'] - previous['avg_ms']) / max(previous['avg_ms'], 1) * 100:+.1f}%）")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
