@@ -1,13 +1,16 @@
-"""在同一进程里交替跑 agentic 评估的不同思考设置，量耗时并逐条比对行为。
+"""在同一进程里交替跑 agentic 评估的不同设置，量耗时并逐条比对行为。
 
 耗时对比不能各跑一轮：模型冷热与取证内容的差异能把方向测反（docs/ROADMAP.md 的 v8.3
 就是这么翻过一次），所以前后设置要在同一个进程里交替跑，形如 A/B/A，第一轮作废。
 质量指标与逐条行为（拒答、意图、停止原因、工具次数）在同一进程里顺带读出来，
 省掉再跑一遍的时间。
 
-用法（要打到本机 Ollama，串行跑；一条大约 40 秒，29 条三轮约一小时）：
+用法（要打到本机 Ollama，串行跑；思考设置一轮 29 条约二十分钟，全量 40 条三轮约一小时）：
     python3 scripts/measure_thinking_ab.py --setting thinking_brief \
         --values off,on,off --prefix /tmp/ab_brief
+    python3 scripts/measure_thinking_ab.py --setting catalog_enum \
+        --dataset eval/v8_agentic_expanded.jsonl --values off,on,off --prefix /tmp/ab_catalog
+只跑一部分样本时加 `--ids xd01,xd02`（与整轮对照时不要加，样本数变了指标均值就不可比）。
 """
 
 from __future__ import annotations
@@ -28,9 +31,21 @@ from private_rag.eval_env import EVAL_AGENT_SOURCES_CONFIG, configure_eval_env  
 configure_eval_env()
 
 import private_rag.agent.prompts as prompts  # noqa: E402
+import private_rag.agent.runtime as runtime_module  # noqa: E402
 
 # scripts/evaluate.py 就是评估 CLI，这里按轮调用它的 main，报告的指标口径与平时跑评估完全一致
 import evaluate  # noqa: E402
+
+def _set_data_side_routing(value: str) -> None:
+    """数据侧路由的两半一起开关：目录把库内实体列全（runtime 侧）+ 提示词第 10 条（prompts 侧）。
+
+    两处是同一处改动，分开开关就不是在量这次要 ship 的行为。`off` 逐字回到改动前：
+    目录退回每列只取前 4 个值（连字符预算一起回），提示词退回没有第 10 条。
+    """
+    on = value not in {"off", "0", "no"}
+    setattr(runtime_module, "AGENT_CATALOG_ENUM", on)
+    setattr(prompts, "AGENT_ROUTE_DATA_SIDE", on)
+
 
 # 可以交替的设置项。思考开关在 prompts 里是导入时抓的快照，必须改模块属性才生效
 # （只改 config 不会被读到，见 scripts/check_generation_determinism.py 的同一处理）。
@@ -43,6 +58,7 @@ SETTINGS: dict[str, Callable[[str], None]] = {
         frozenset() if value == "off" else frozenset(value.split(",")),
     ),
     "answer_thinking": lambda value: setattr(prompts, "AGENT_ANSWER_THINKING", value),
+    "data_side_routing": _set_data_side_routing,
 }
 
 # 对照时看的整轮指标：前四项是「不能变差」的门禁，其余是取证与引用的质量
@@ -89,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--values", default="off,on,off",
                         help="按顺序跑的设置值，逗号分隔；建议 A/B/A")
     parser.add_argument("--dataset", default="eval/v7_agent_qa.jsonl")
+    parser.add_argument("--ids", help="只跑指定样本 ID（逗号分隔）；整轮对照时别用，样本数变了均值不可比")
     parser.add_argument("--agent-sources", default=str(EVAL_AGENT_SOURCES_CONFIG))
     parser.add_argument("--prefix", default="/tmp/ab_thinking", help="报告文件名前缀")
     parser.add_argument("--keep-reports", action="store_true",
@@ -103,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
         SETTINGS[args.setting](value)
         name = f"{args.prefix}_{index}_{value}"
         print(f"\n===== 第 {index} 轮：{args.setting}={value} =====", flush=True)
-        evaluate.main([
+        cli = [
             "--dataset", args.dataset,
             "--configs", "agent",
             "--agent-sources", args.agent_sources,
@@ -112,7 +129,10 @@ def main(argv: list[str] | None = None) -> int:
             "--output", str(out_dir / f"{name}.md"),
             "--json-output", str(out_dir / f"{name}.json"),
             "--run-note", f"同一进程交替对照 第{index}轮 {args.setting}={value}",
-        ])
+        ]
+        if args.ids:
+            cli += ["--ids", args.ids]
+        evaluate.main(cli)
         rounds.append(round_stats(out_dir / f"{name}.json"))
 
     print("\n=== 单条均耗时（第一轮作废：冷启动要把生成与精排模型加载进来）===")

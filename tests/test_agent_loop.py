@@ -16,6 +16,7 @@ from private_rag.agent.planner import Planner, RouteDecision, StepDecision
 from private_rag.agent.runtime import (
     AgentOptions,
     AgentRuntime,
+    _data_catalog,
     build_agent_runtime,
     build_tool_registry,
 )
@@ -767,6 +768,84 @@ class TestEvidenceSufficiency:
         assert done["data"]["meta"]["stop_reason"] == "insufficient_evidence"
         # 拒答不伪装成流式生成：没有 token 事件
         assert [event for event in events if event["event"] == "token"] == []
+
+
+CATALOG_ROWS = [
+    (1, "橙子", "水果", "橙子富含维生素 C，适合日常补充维 C；表皮较厚，常温可存放一周左右。", "常温阴凉", 12.5, "2026-01-10"),
+    (2, "苹果", "水果", "苹果适合冷藏保存，可以延长保鲜时间；切开后容易氧化，建议尽快食用。", "冷藏 0-4℃", 8.0, "2026-01-12"),
+    (3, "香蕉", "水果", "香蕉不适合放冰箱，低温会让表皮变黑、口感变差；建议常温阴凉处保存。", "常温阴凉", 6.5, "2026-01-15"),
+    (4, "猕猴桃", "水果", "猕猴桃维生素 C 含量高，成熟后应尽快食用，也可以冷藏延缓软化。", "冷藏 0-4℃", 15.0, "2026-01-18"),
+    (5, "蓝莓", "浆果", "蓝莓娇嫩易压，收到后应尽快食用，未洗的可以冷藏存放三四天。", "冷藏 0-4℃", 28.0, "2026-02-02"),
+    (6, "牛油果", "热带果品", "牛油果硬的时候常温放两三天催熟，捏着发软就要当天吃。", "常温催熟后冷藏", 18.0, "2026-02-05"),
+    (7, "核桃", "坚果", "核桃带壳干燥常温能放半年，剥壳后必须密封冷藏，受潮会变苦。", "密封干燥常温", 32.0, "2026-02-11"),
+    (8, "腰果", "坚果", "腰果开封后务必密封并冷藏，敞放两周就会返软失去脆度。", "密封冷藏", 45.0, "2026-02-14"),
+    (9, "桂圆干", "干货", "桂圆干未开封阴凉干燥处可放一年，开袋后尽快吃完，返潮容易发霉。", "阴凉干燥", 26.0, "2026-02-17"),
+]
+
+
+def make_catalog_db(tmp_path):
+    """一张 9 行的商品表：实体名排在第 5~9 行，另有一列长说明、一列日期、一列数字。
+
+    行序就是老目录看不到的那种情形：每列只取前 4 个值时，「腰果」永远进不了工具描述。
+    """
+    db = tmp_path / "catalog.db"
+    connection = sqlite3.connect(db)
+    try:
+        connection.execute(
+            "CREATE TABLE products (id INTEGER, name TEXT, category TEXT, description TEXT, "
+            "storage TEXT, price REAL, updated_at TEXT)"
+        )
+        connection.executemany(
+            "INSERT INTO products VALUES (?, ?, ?, ?, ?, ?, ?)", CATALOG_ROWS
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    return f"sqlite:///{db}"
+
+
+class TestCatalogEnumeration:
+    """路由器只从工具描述里知道库里存着什么：实体名在后面行里时，老目录看不到它。"""
+
+    def test_entities_beyond_the_first_rows_are_visible(self, tmp_path):
+        catalog, terms = _data_catalog(make_catalog_db(tmp_path), ["products"])
+
+        assert "腰果" in catalog
+        assert "腰果" in terms
+
+    def test_long_text_column_keeps_a_single_example(self, tmp_path):
+        catalog, _ = _data_catalog(make_catalog_db(tmp_path), ["products"])
+
+        assert catalog.count("存长文本") == 1
+        assert "蓝莓娇嫩易压" not in catalog
+
+    def test_number_and_date_columns_are_left_out(self, tmp_path):
+        catalog, terms = _data_catalog(make_catalog_db(tmp_path), ["products"])
+
+        assert "updated_at" not in catalog
+        assert "2026-01-10" not in terms
+
+    def test_entity_list_survives_a_tight_char_budget(self, tmp_path):
+        """预算不够时先丢长文本例子，实体名单要保住。"""
+        catalog, _ = _data_catalog(make_catalog_db(tmp_path), ["products"], max_chars=90)
+
+        assert "腰果" in catalog
+        assert "存长文本" not in catalog
+
+    def test_disable_flag_restores_the_old_builder(self, tmp_path):
+        """退回旧行为要连「每列只看前 4 个值」一起退，那才是当时误判的成因。"""
+        catalog, terms = _data_catalog(make_catalog_db(tmp_path), ["products"], enumerate_values=False)
+
+        assert "products 列(" in catalog
+        assert "腰果" not in catalog
+        assert "取值：橙子 / 苹果 / 香蕉 / 猕猴桃" in catalog
+        assert "2026-01-10" in terms
+
+    def test_samples_zero_still_skips_sampling(self, tmp_path):
+        catalog, terms = _data_catalog(make_catalog_db(tmp_path), ["products"], max_samples=0)
+
+        assert catalog == ""
+        assert "name" in terms
 
 
 class TestDataDrivenFallbackRoute:
