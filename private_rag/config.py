@@ -85,6 +85,8 @@ STORAGE_DIR = _env_path("RAG_STORAGE_DIR", ROOT / "storage" / "qdrant_storage")
 LEXICAL_INDEX_PATH = _env_path(
     "RAG_LEXICAL_INDEX_PATH", ROOT / "storage" / "lexical" / "bm25.pkl"
 )
+# 树索引与 BM25 同一套做法：独立落盘文件，不进 Qdrant，也不改块的写入格式
+TREE_INDEX_PATH = _env_path("RAG_TREE_INDEX_PATH", ROOT / "storage" / "tree" / "tree.pkl")
 COLLECTION_NAME = os.getenv("RAG_COLLECTION_NAME", "").strip() or "rag_knowledge_base"
 DEFAULT_SOURCES_CONFIG = ROOT / "config" / "sources.yaml"
 # Google Drive 语料：下载目录（真实语料，已 gitignore，正文不进公开仓库）与默认 remote
@@ -106,6 +108,17 @@ RRF_K = 60
 TOP_K_RERANK = 3
 # 送入 LLM 的上下文总字符预算；父块超预算时回退到命中的子块。
 CONTEXT_MAX_CHARS = _env_int("RAG_CONTEXT_MAX_CHARS", 6000)
+
+# 树索引（v8 第 4 项）：默认关闭，打开后命中块的上下文换成「章节路径 + 章节正文」。
+# 用 ENABLE 而不是 DISABLE，是为了默认值保持现有行为不变。
+TREE_INDEX_ENABLED = _env_flag("RAG_ENABLE_TREE_INDEX")
+# 单个章节上下文的字符上限；默认与父块大小相同，这样 A/B 只差在边界语义
+# （标题边界 vs 固定窗口），块数与总预算都对得上。
+TREE_SECTION_CHARS = _env_int("RAG_TREE_SECTION_CHARS", PARENT_CHUNK_SIZE)
+# 打开这一路以后只在路由判成「纯知识」的问题上启用（默认开）。实测打开它会让混合问题
+# 提前收手、少查一次数据库（docs/ROADMAP.md 的 v8.5 的 c03），所以按意图收窄；
+# RAG_DISABLE_TREE_KNOWLEDGE_ONLY=1 退回「任何意图都启用」。
+TREE_KNOWLEDGE_ONLY = not _env_flag("RAG_DISABLE_TREE_KNOWLEDGE_ONLY")
 
 # 模型
 EMB_MODEL = "bge-m3"

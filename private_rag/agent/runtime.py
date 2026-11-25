@@ -373,6 +373,17 @@ class AgentRuntime:
                 return True
         return False
 
+    def _sync_tool_intent(self, registry: ToolRegistry, intent: str) -> None:
+        """把路由判出的意图写进知识库检索工具——树索引只在纯知识意图上启用，靠这个才知道意图。
+
+        工具注册表在路由之前装配，所以只能在路由之后补。判 `none` 的那次验证检索也走这里，
+        此刻意图仍是 `none`，那一侧检索不换上下文口径（拒答路径上没必要换）。
+        """
+        tool = registry.get(KnowledgeSearchTool.name)
+        setter = getattr(tool, "set_intent", None)
+        if callable(setter):
+            setter(intent)
+
     def _none_probe(
         self, registry: ToolRegistry, question: str, intent: str
     ) -> Optional[RouteDecision]:
@@ -473,6 +484,7 @@ class AgentRuntime:
             intent, action, reason = heuristic_route(question, registry.names(), extra_hints=route_hints)
             route = RouteDecision(intent=intent, action=action, reason=reason, fallback=True)
             add_step(kind="stop", reason=reason, observation=f"改用 {route.tool or '无'}")
+        self._sync_tool_intent(registry, intent)
         unverified = intent == "none" or not route.tool
         probe = self._none_probe(registry, question, intent) if unverified else None
         if probe is not None:
@@ -758,6 +770,7 @@ class AgentRuntime:
             intent, action, reason = heuristic_route(question, registry.names(), extra_hints=route_hints)
             route = RouteDecision(intent=intent, action=action, reason=reason, fallback=True)
             add_step(kind="stop", reason=reason, observation=f"改用 {route.tool or '无'}")
+        self._sync_tool_intent(registry, intent)
         unverified = intent == "none" or not route.tool
         probe = self._none_probe(registry, question, intent) if unverified else None
         if probe is not None:
