@@ -39,6 +39,7 @@ from private_rag.config import (
     AGENT_CATALOG_SAMPLES,
     AGENT_CATALOG_SCAN_ROWS,
     AGENT_CONTEXT_CHARS,
+    AGENT_GATE_SIDE_TRACKING,
     AGENT_LLM_MODEL,
     AGENT_MAX_STEPS,
     AGENT_MIXED_GATE,
@@ -329,6 +330,7 @@ class AgentRuntime:
         none_probe: bool = AGENT_NONE_PROBE,
         intent: str = "",
         mixed_gate: bool = AGENT_MIXED_GATE,
+        gate_side_tracking: Optional[bool] = None,
     ):
         self.registry = registry
         self.planner = planner
@@ -341,6 +343,10 @@ class AgentRuntime:
         # 修法 C：双侧查询门控——mixed 意图下代码级禁止一侧零证据就选 final
         self.intent = str(intent or "")
         self.mixed_gate = bool(mixed_gate)
+        # mixed 门控认侧别的依据，同上：在装配时才读模块设置，同一进程里换设置才生效
+        self.gate_side_tracking = (
+            AGENT_GATE_SIDE_TRACKING if gate_side_tracking is None else bool(gate_side_tracking)
+        )
 
     def _available(self, allow_sql: bool) -> ToolRegistry:
         """按选项过滤工具；关掉 SQL 时模型根本看不到这个工具。"""
@@ -361,11 +367,12 @@ class AgentRuntime:
         return hints
 
     def _has_evidence_for(self, blocks: list[ToolBlock], tool_name: str) -> bool:
-        """检查证据块中是否有来自指定工具的记录。
+        """按证据块的标签文字认「这一侧查过没有」——只在门控退回老行为时走这条。
 
-        修法 C 门控用：当 intent=mixed 时，检查两侧是否都有证据。
-        `ToolBlock.label` 通常包含工具名（如 "kb_search 来源" / "sql_query 来源"），
-        做子串匹配即可。
+        真实链路里这块认不出来：`sql_query` 的块标签是「SQL 查询（表 demo.products）」，
+        `kb_search` 的块标签是引用标题（文档名或页码），两处都不含工具名，子串匹配恒为 False。
+        也就是说老行为等于「两侧永远零证据」，每条 mixed 都被反复逼到步数用尽。
+        默认路径改看工具执行记录（`AGENT_GATE_SIDE_TRACKING`），这里留着是为了做前后对照。
         """
         label = str(tool_name)
         for block in blocks:
@@ -467,6 +474,11 @@ class AgentRuntime:
         intent = route.intent
         self.intent = intent  # 修法 C：门控需要
         gate_intercepts = 0
+        # 两侧各查过没有——两道门控都看这两个标记，而不是 `_has_evidence_for`：
+        # 真实证据块的标签是「SQL 查询（表 …）」与文档标题，里面没有工具名，
+        # 按标签认等于「两侧永远零证据」，那个判断只对测试替身成立
+        kb_ran = False
+        sql_ran = False
 
         # 模型给了意图却没给出可用动作时，用启发式补一个，避免空跑一轮
         if intent != "none" and registry.get(route.tool) is None:
@@ -519,27 +531,36 @@ class AgentRuntime:
                     )
                     break
                 if decision.action == "final":
-                    # 修法 C：双侧查询门控——mixed 意图下任一侧零证据不许进 final
+                    # 修法 C：双侧查询门控——mixed 意图下有一侧没查过就不许进 final
                     if self.mixed_gate and self.intent == "mixed":
-                        kb_has = self._has_evidence_for(blocks, "kb_search")
-                        sql_has = self._has_evidence_for(blocks, "sql_query")
+                        if self.gate_side_tracking:
+                            kb_has, sql_has = kb_ran, sql_ran
+                        else:
+                            # 老行为：拿证据块的标签文字找工具名，真实链路里恒为 False
+                            kb_has = self._has_evidence_for(blocks, KnowledgeSearchTool.name)
+                            sql_has = self._has_evidence_for(blocks, SqlQueryTool.name)
+                        missing_tool = ""
                         if not kb_has or not sql_has:
-                            missing_tool = "kb_search" if not kb_has else "sql_query"
+                            missing_tool = KnowledgeSearchTool.name if not kb_has else SqlQueryTool.name
+                            if self.gate_side_tracking and registry.get(missing_tool) is None:
+                                # 这一侧压根没挂工具（例如关掉了 SQL），逼它只会白烧一步
+                                missing_tool = ""
+                        if missing_tool:
                             observations.append(
                                 f"步骤{step_index + 1}：门控拦截 final——intent=mixed，"
-                                f"{missing_tool} 侧尚无证据，强制继续取证"
+                                f"{missing_tool} 侧还没查过，强制继续取证"
                             )
                             gate_intercepts += 1
                             add_step(
                                 kind="gate",
-                                reason=f"门控拦截：{missing_tool} 侧零证据",
-                                observation=f"intent=mixed，{missing_tool} 侧尚无证据",
+                                reason=f"门控拦截：{missing_tool} 侧没查过",
+                                observation=f"intent=mixed，{missing_tool} 侧还没查过",
                             )
-                            # 强制下一次循环调用缺失的工具
+                            # 强制下一次循环调用缺失的工具；那一侧跑完以后就算查过了
                             pending = RouteDecision(
                                 intent=self.intent,
                                 action={"tool": missing_tool, "args": {}},
-                                reason=f"修法 C 门控：{missing_tool} 侧零证据，强制取证",
+                                reason=f"修法 C 门控：{missing_tool} 侧没查过，强制取证",
                             )
                             continue
 
@@ -567,6 +588,12 @@ class AgentRuntime:
 
             tool_calls += 1
             blocks.extend(result.blocks)
+            # 「这一侧查过了」看的是工具跑过没有，而不是有没有返回内容：查过但为空也算查过，
+            # 再逼一次只会把步数烧光，而「库里确实没有这项事实」本身就是可以作答或拒答的依据
+            if tool.name == SqlQueryTool.name:
+                sql_ran = True
+            elif tool.name == KnowledgeSearchTool.name:
+                kb_ran = True
             executed_sql = str(result.data.get("sql") or "")
             # 回放时要能看到护栏改写后真正跑出去的 SQL，而不是模型原本想跑的那条
             sql_hint = f"（实际执行 {executed_sql[:MAX_SQL_HINT_CHARS]}）" if executed_sql else ""
@@ -753,6 +780,11 @@ class AgentRuntime:
         intent = route.intent
         self.intent = intent  # 修法 C：门控需要
         gate_intercepts = 0
+        # 两侧各查过没有——两道门控都看这两个标记，而不是 `_has_evidence_for`：
+        # 真实证据块的标签是「SQL 查询（表 …）」与文档标题，里面没有工具名，
+        # 按标签认等于「两侧永远零证据」，那个判断只对测试替身成立
+        kb_ran = False
+        sql_ran = False
 
         if intent != "none" and registry.get(route.tool) is None:
             intent, action, reason = heuristic_route(question, registry.names(), extra_hints=route_hints)
@@ -808,27 +840,36 @@ class AgentRuntime:
                     })
                     break
                 if decision.action == "final":
-                    # 修法 C：双侧查询门控——mixed 意图下任一侧零证据不许进 final
+                    # 修法 C：双侧查询门控——mixed 意图下有一侧没查过就不许进 final
                     if self.mixed_gate and self.intent == "mixed":
-                        kb_has = self._has_evidence_for(blocks, "kb_search")
-                        sql_has = self._has_evidence_for(blocks, "sql_query")
+                        if self.gate_side_tracking:
+                            kb_has, sql_has = kb_ran, sql_ran
+                        else:
+                            # 老行为：拿证据块的标签文字找工具名，真实链路里恒为 False
+                            kb_has = self._has_evidence_for(blocks, KnowledgeSearchTool.name)
+                            sql_has = self._has_evidence_for(blocks, SqlQueryTool.name)
+                        missing_tool = ""
                         if not kb_has or not sql_has:
-                            missing_tool = "kb_search" if not kb_has else "sql_query"
+                            missing_tool = KnowledgeSearchTool.name if not kb_has else SqlQueryTool.name
+                            if self.gate_side_tracking and registry.get(missing_tool) is None:
+                                # 这一侧压根没挂工具（例如关掉了 SQL），逼它只会白烧一步
+                                missing_tool = ""
+                        if missing_tool:
                             observations.append(
                                 f"步骤{step_index + 1}：门控拦截 final——intent=mixed，"
-                                f"{missing_tool} 侧尚无证据，强制继续取证"
+                                f"{missing_tool} 侧还没查过，强制继续取证"
                             )
                             gate_intercepts += 1
                             add_step(
                                 kind="gate",
-                                reason=f"门控拦截：{missing_tool} 侧零证据",
-                                observation=f"intent=mixed，{missing_tool} 侧尚无证据",
+                                reason=f"门控拦截：{missing_tool} 侧没查过",
+                                observation=f"intent=mixed，{missing_tool} 侧还没查过",
                             )
-                            # 强制下一次循环调用缺失的工具
+                            # 强制下一次循环调用缺失的工具；那一侧跑完以后就算查过了
                             pending = RouteDecision(
                                 intent=self.intent,
                                 action={"tool": missing_tool, "args": {}},
-                                reason=f"修法 C 门控：{missing_tool} 侧零证据，强制取证",
+                                reason=f"修法 C 门控：{missing_tool} 侧没查过，强制取证",
                             )
                             continue
 
@@ -856,6 +897,12 @@ class AgentRuntime:
 
             tool_calls += 1
             blocks.extend(result.blocks)
+            # 「这一侧查过了」看的是工具跑过没有，而不是有没有返回内容：查过但为空也算查过，
+            # 再逼一次只会把步数烧光，而「库里确实没有这项事实」本身就是可以作答或拒答的依据
+            if tool.name == SqlQueryTool.name:
+                sql_ran = True
+            elif tool.name == KnowledgeSearchTool.name:
+                kb_ran = True
             executed_sql = str(result.data.get("sql") or "")
             sql_hint = f"（实际执行 {executed_sql[:MAX_SQL_HINT_CHARS]}）" if executed_sql else ""
             observation = f"{tool.name}：{result.observation or '无返回'}{sql_hint}"

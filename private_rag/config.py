@@ -220,6 +220,12 @@ AGENT_TRACE_ENABLED = not _env_flag("RAG_DISABLE_AGENT_TRACE")
 # 双侧查询门控：intent=mixed 时，代码级禁止在任一侧零证据的情况下选 final
 # 置 1 关掉门控（回退到仅靠提示词约束的修法 A）
 AGENT_MIXED_GATE = not _env_flag("RAG_DISABLE_AGENT_MIXED_GATE")
+# mixed 门控认「这一侧查过没有」的依据：默认看工具到底跑过没有（代码里记的执行标记）。
+# 改动前它是拿证据块的标签文字找工具名，而真实证据块的标签是「SQL 查询（表 …）」与文档标题，
+# 里面根本没有工具名，于是永远判「一侧零证据」，把每条 mixed 反复逼到步数用尽
+# （旧报告里 mixed 样本 tools=4 / gate=2、停止原因是 max_steps 就是这个）。
+# 置 1 退回按标签文字认的老行为，用来在同一进程里做前后对照。
+AGENT_GATE_SIDE_TRACKING = not _env_flag("RAG_DISABLE_AGENT_GATE_SIDE_TRACKING")
 AGENT_TRACE_PATH = _env_path("RAG_AGENT_TRACE_PATH", ROOT / "storage" / "traces" / "agent.jsonl")
 # 单条观察/理由写入轨迹的字符上限
 AGENT_TRACE_FIELD_CHARS = _env_int("RAG_AGENT_TRACE_FIELD_CHARS", 1200)

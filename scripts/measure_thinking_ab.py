@@ -47,6 +47,14 @@ def _set_data_side_routing(value: str) -> None:
     setattr(prompts, "AGENT_ROUTE_DATA_SIDE", on)
 
 
+def _set_gate_side_tracking(value: str) -> None:
+    """mixed 门控认「这一侧查过没有」的依据：开=看工具执行记录，
+    关=退回改动前（拿证据块的标签文字找工具名，真实链路里恒为 False）。
+    只改模块属性，同一进程里交替才生效。
+    """
+    setattr(runtime_module, "AGENT_GATE_SIDE_TRACKING", value not in {"off", "0", "no"})
+
+
 # 可以交替的设置项。思考开关在 prompts 里是导入时抓的快照，必须改模块属性才生效
 # （只改 config 不会被读到，见 scripts/check_generation_determinism.py 的同一处理）。
 SETTINGS: dict[str, Callable[[str], None]] = {
@@ -59,6 +67,7 @@ SETTINGS: dict[str, Callable[[str], None]] = {
     ),
     "answer_thinking": lambda value: setattr(prompts, "AGENT_ANSWER_THINKING", value),
     "data_side_routing": _set_data_side_routing,
+    "gate_side_tracking": _set_gate_side_tracking,
 }
 
 # 对照时看的整轮指标：前四项是「不能变差」的门禁，其余是取证与引用的质量
