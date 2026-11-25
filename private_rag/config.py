@@ -89,6 +89,9 @@ LEXICAL_INDEX_PATH = _env_path(
 TREE_INDEX_PATH = _env_path("RAG_TREE_INDEX_PATH", ROOT / "storage" / "tree" / "tree.pkl")
 COLLECTION_NAME = os.getenv("RAG_COLLECTION_NAME", "").strip() or "rag_knowledge_base"
 DEFAULT_SOURCES_CONFIG = ROOT / "config" / "sources.yaml"
+# Google Drive 语料：下载目录（真实语料，已 gitignore，正文不进公开仓库）与默认 remote
+GDRIVE_SYNC_DIR = _env_path("RAG_GDRIVE_SYNC_DIR", ROOT / "data" / "gdrive")
+GDRIVE_REMOTE = os.getenv("RAG_GDRIVE_REMOTE", "").strip()
 
 # 文本切分
 # 子块用于向量/BM25 召回，父块保留完整上下文；父块默认不重叠，避免重复内容。

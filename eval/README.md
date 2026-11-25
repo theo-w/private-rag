@@ -1063,3 +1063,123 @@ evidence 写成**整行连续短语**（如 `恒达 键盘 50 15天`），不写
 - **PaddleOCR-VL 未测**：要 CUDA 上的 vLLM/SGLang 服务，本机 Apple Silicon 跑不了，不要写成「三侧齐了」。
 - **换机器要重装**：`.venv-parse/` 不入库，模型权重首次解析才下载（MinerU 的 standard 档要 `mineru-kit models
   download --tier standard`，basic 档实测 863 MB）；第三方与本机 3.9 完全隔离。
+
+## v8.7 扩充集（`v8_agentic_expanded.jsonl`）与合并运行
+
+v8.1 / v8.2 / v8.4 三处读数都写着「29 条样本只支撑方向，不支撑百分比——±1 条就是 ±4 个百分点」。
+这一项不动链路，只把 n 做大：新集 40 条，并让 `--dataset` 能吃逗号分隔的多份集合并成一次跑，
+v7 的 29 条 + 新集 40 条 = 69 条，单条样本对均值的影响降到 ±1.4pt（按 69 条算；`evidence_hit@3` 这类指标的分母
+是可答样本，合并跑里是 60，所以是 ±1.7pt）。
+
+### 评估专用 SQLite
+
+`scripts/init_eval_db.py` 生成 `data/sql/demo_eval.db`：单表 `products` 12 行，比演示库多
+`storage / supplier / stock` 三列。它是演示库的**超集**——前 4 行与 `scripts/init_demo_db.py` 逐字段相等
+（单测钉住这条），新增 8 行的 `category` 用 `浆果 / 热带果品 / 坚果 / 干货 / 海鲜 / 乳制品`，一律不含「水果」二字。
+演示库 `data/sql/demo.db` 与 `scripts/init_demo_db.py` 一字未改，v7 那几轮仍然可以原样复现。
+
+agentic 组挂这份库用 `config/sources.eval.agent.v8.yaml`，它与 `config/sources.eval.agent.yaml` 的差别只有 DSN。
+引用标签仍写 `demo.products`，不给新库单独起标签：`ToolRegistry` 按工具名登记工具，一份 sources 配置里两个
+sql 源会互相覆盖（`private_rag/agent/tools.py:283`），实际只有一个 `sql_query` 工具——两个标签只能活一个，
+另一半样本的 `source_hit` 会恒为 0。取舍见 [docs/adr/0008](../docs/adr/0008-eval-db-superset-shared-label.md)。
+
+### 分布（40 条 = 35 可回答 + 5 应拒答）
+
+| 类别 | 条数 | 证据权威文件 | 关键字段 |
+|---|---|---|---|
+| `knowledge` | 9 | `README.md`、`docs/beginner-guide.md`、`docs/v7.4-history-as-evidence.md` | `expected_source` 空 |
+| `database` | 8 | `scripts/init_eval_db.py`（`description` 列） | `expected_source: demo.products` |
+| `mixed` | 7 | SQL 侧取 `supplier`，文档侧另给一句 | `expected_sources: [demo.products, 文档路径]` |
+| `multi_step` | 6 | `scripts/init_eval_db.py` | `expected_source: demo.products`，不声明双侧 |
+| `coreference` | 5 | 文档 2 条 + SQL 2 条 + 双侧 1 条 | 全部带 `history`（2 条为两轮以上） |
+| `refusal` | 5 | 全空 | `answerable: false` |
+
+id 一律 `x` 前缀（`xk/xd/xm/xs/xc/xr`），与 v7 集的 `k/d/m/s/c/r` 不撞车，合并跑才合法。
+
+### 两条标注口径
+
+- **evidence 必须是权威文件里的一段连续文本。** `normalize_text` 只做 NFKC + 小写并丢掉标点空白，相邻字段会被粘在一起：
+  `12.5, "2026-01-10"` 规范化成 `12520260110`，所以「12.5 元」这类跨字段拼法永远校验不过。SQL 侧证据只能取
+  `description` / `storage` / `supplier` 里的连续句子。
+- **证据句两两不得互为子串**（单测断言）。否则一次检索命中能同时满足两条样本的判定，命中率会虚高。
+- `history` 里不得出现本条样本 evidence 规范化后的原文，指代样本的前置轮次要换措辞。
+- 拒答样本的挑选规则：事实既不落在评估库语料（`README.md` + `docs/*.md`）里，也不落在 `products` 的任何列里。
+  `supplier` 的取值会进工具目录的样例，所以「绿源鲜达的付款账期是多少天」正是要量的「证据不足」，不会误命中。
+
+### 复现命令
+
+```bash
+# 10. v8.7 扩充集：先建评估专用库，再重建评估知识库（语料是 README + docs/*.md，文档改过就必须重建）
+python3 scripts/init_eval_db.py
+python3 scripts/prepare_eval_kb.py --recreate
+
+# 只校验（不碰模型也不碰数据库，CI 里跑的就是这两条）
+python3 scripts/evaluate.py --dataset eval/v8_agentic_expanded.jsonl --validate-only
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl --validate-only
+
+# 新集基线：agentic 用新库，同时跑固定链路做对照
+python3 scripts/evaluate.py --dataset eval/v8_agentic_expanded.jsonl \
+  --agent-sources config/sources.eval.agent.v8.yaml --configs agent,full --skip-ragas \
+  --run-note "v8.7 新集基线；HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1" \
+  --output eval/reports/v8_agentic_expanded_baseline.md \
+  --json-output eval/reports/v8_agentic_expanded_baseline.json
+
+# 合并 69 条跑一轮 agentic：用来量「大 n 能测多大的差异」
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl \
+  --agent-sources config/sources.eval.agent.v8.yaml --configs agent --skip-ragas \
+  --run-note "v8.7 合并跑（69 条）；HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1" \
+  --output eval/reports/v8_agentic_merged_v7_baseline.md \
+  --json-output eval/reports/v8_agentic_merged_v7_baseline.json
+```
+
+合并以后 `--limit` / `--ids` 仍按合并顺序生效；报告头的 `dataset` 是逗号连接的多份路径，另给 `datasets` 与
+`datasets_sha256` 两个字段逐份留痕。只有一份时 `dataset_sha256` 与改动前逐字节相同，历史报告的指纹不受影响。
+
+### 基线读数（2026-11-25，本机单并发 MLX，主模型 `qwen3.8:27b-mlx`）
+
+出处：`git_commit = 7eeb0c5`。新集轮 `git_dirty = False`；合并轮 `git_dirty = True`，多的只是跑批过程中正在落盘的
+本轮报告文件，两轮代码是同一个 commit。两轮都 `reranker=有`、`--skip-ragas`、`HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`。
+评估知识库按 `7eeb0c5` 的 `README.md` + `docs/*.md` 重建（330 个向量）；把下面这些读数写进 `docs/ROADMAP.md` 以后
+语料又变长，**复现这两轮要先 `git checkout 7eeb0c5` 再 `prepare_eval_kb.py --recreate`**，或者接受新一轮的语料与这轮不同。
+
+跑批前先修了一次本机依赖：`huggingface-hub` 被升到 1.8.0，而项目用的 `transformers` 只认 `<1.0`，精排模型（把检索
+结果按相关度重排的那一步）加载失败，每条样本只花 50 毫秒——等于没调模型。降回 0.36.2 之后才有下面这些数，
+第一次那轮整轮作废。
+
+| 跑法 | n（可答） | evidence_hit@3 | context_precision@3 | mrr@3 | source_hit | both_sides_hit | answer_rate | refusal_accuracy | citation / validity | 上下文字符 | 查询数 | 工具调用 / 轨迹步数 | 单条均耗时 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 新集 40 · agentic | 40（35） | 0.571（20/35） | 0.305 | 0.505 | 0.714（25/35） | 0.875（7/8） | 0.743（26/35） | 1.000（5/5） | 0.771 / 0.771 | 1961 | 1.5 | 1.78 / 4.18 | 26.2s（检索 0.8 + 生成 25.4） |
+| 新集 40 · 固定 `full` | 40（35） | 0.229（8/35） | 0.076 | 0.157 | 0.286（10/35） | 0.000（0/8） | 0.286（10/35） | 1.000（5/5） | 0.600 / 0.600 | 1173 | 1.0 | — | 14.2s（检索 1.0 + 生成 13.2） |
+| 合并 69 · agentic | 69（60） | 0.600（36/60） | 0.325 | 0.533 | 0.833（50/60） | 0.929（13/14） | 0.817（49/60） | 1.000（9/9） | 0.833 / 0.833 | 1886 | 1.54 | 1.84 / 4.26 | 24.4s（检索 0.8 + 生成 23.5） |
+
+门禁与双工具率：`gate_intercept_rate` 新集轮 0.225、合并轮 0.246；`dual_tool_rate` 两轮都是 0.275。
+
+这四件事是读数说清楚的：
+
+1. **新集第一次量出「数据侧问题被路由判成文档侧」**：`xd01`–`xd08` 有 7 条 `intent=knowledge`，只调 `kb_search`、
+   拿不到文档证据就按规则拒答，于是 `database` 类别的 `evidence_hit@3` 与 `source_hit` 都是 0/8（唯一走了 SQL 的
+   `xd03` 也没拿到证据）。同一轮同一份库里 `multi_step` 6 条意图全判对（`xs01` 判 `database` 但证据不足）。
+   根因在本轮之后定位，**不是问法不像数据题**：路由器判断「这事实在不在表里」唯一的依据是 SQL 工具描述里那段
+   「库内数据」目录，而它每个文本列只扫前 4 行——评估库故意把新实体放在第 5–12 行（前 4 行与演示库逐字相同，
+   为的是保住 v7 的历史读数），所以这些实体永远进不了目录。修法与同进程交替的对照读数见后续工作。
+2. **固定链路在这份集上有结构性天花板**：35 条可答样本里 21 条必须查 SQL，而 `full` 没有 SQL 工具，`answer_rate`
+   最高只能 14/35 = 40%，实测 10/35 = 28.6%。这一列的低分是口径决定的，不能读成「固定链路质量差」。
+3. **合并本身不扰动判定**：同一个 commit、同一份评估库，新集 40 条在单跑与合并跑之间逐条指标与意图完全一致
+   （0/40 翻转），所以合并轮的 0.600 可以直接当 69 条的基线用。
+4. **v7 那 29 条在合并跑里比 v7.5 单跑低 4 条**：`evidence_hit@3` 0.800 → 0.640（25 条可答样本，−16pt），翻转的
+   正是当初预判会受影响的 `d03` 与 `s01`（`s01`、`s04` 还变成拒答），另有 `s03` / `c02` 掉证据、`m04` 反而 +1。
+   这是**跨轮**比较（不同日期、不同库、没有同进程交替），只能当方向：最可能的解释是 12 行的库改变了工具目录与
+   候选行，要坐实需要同一进程里演示库 vs 评估库交替重跑。
+
+### 限制（引用这轮数字时一并带上）
+
+- **只有一份 `sql_query` 工具**：合并跑里 v7 那 29 条与新集那 40 条查的是同一份超集库，引用标签共用
+  `demo.products`。想给新库独立标签就得先让 `ToolRegistry` 按来源分名，代价是合并跑的 agentic 组失效。
+- **新库让工具目录变长**（12 行样例进 `_data_catalog`，长度有上限会被截断），所以新集基线与 v7 各轮
+  **不做跨轮均值比较**；要比较就在新集上做同进程交替的 A/B。
+- **v7 的 `d03` / `s01` 依赖「这四种水果」，实测确实翻转**：新增 8 行虽然类别不含「水果」，但 `SELECT *` 这类
+  写法会把 12 行都带回来（见上面第 4 条）。引用合并跑里 v7 子集的读数时必须带上这条。
+- **首轮耗时不作对比依据**：第一轮含精排模型冷启动（v8.3 实测慢 41~43%），耗时只在同进程交替轮之间比。
+- **n 变大以后哪些结论可以说百分比**：单条样本对均值的影响在 40 条跑里是 ±2.9pt（分母 35 条可答）、合并 69 条跑里
+  是 ±1.7pt（分母 60），所以「`database` 类别 0/8 命中」这种离噪声底很远的判定可以说；但**跨配置的前后对比**
+  仍按 v8.3 的噪声底口径（同设置交替跑、指标变化 ≥1 条才当真、措辞变化不算证据）另测，本轮只是基线。

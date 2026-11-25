@@ -36,6 +36,7 @@ ollama pull qwen3.8:27b-mlx
 
 - 首次运行会自动从 HuggingFace 下载 `BAAI/bge-reranker-v2-m3` 重排模型。
 - SQLite 开箱即用；MySQL/PostgreSQL 需要额外安装驱动（见下文“数据库接入”）。
+- Google Drive 语料接入需要本机 CLI（`rclone` 或 `gdrive`），Python 侧不需要额外依赖（见下文“Google Drive 语料接入”）。
 
 ## 安装
 
@@ -594,6 +595,44 @@ SQL 证据却没有更容易编。子集不是全量，样本量不足以当结�
 任务被 `RemoteProtocolError` 断连打断，对应 `m03`/`full` 的 `faithfulness`+`answer_relevancy` 与
 `d01`/`agent` 的 `answer_relevancy` 记为 NaN，平均分只基于有效样本。
 
+### v8.7 评估集扩充与多集合并（把 n 从 29 做到 69）
+
+前面几轮读数反复带着同一句话：「29 条样本只支撑方向，不支撑百分比——±1 条就是 ±4 个百分点」。
+这一项不动链路，只做两件事：
+
+- **新评估集 `eval/v8_agentic_expanded.jsonl`（40 条 = 35 可回答 + 5 应拒答）**，补的正是现有集最薄的几类
+  （`knowledge 9 / database 8 / mixed 7 / multi_step 6 / coreference 5 / refusal 5`，其中 5 条指代样本全部带
+  `history`）。id 一律 `x` 前缀，与 v7 集的 `k/d/m/s/c/r` 不撞车。
+- **`--dataset` 可以逗号分隔多份**，合并成一次跑：v7 的 29 条 + 新集的 40 条 = 69 条，单条样本对均值的影响
+  从 ±3.4pt 降到 ±1.4pt（`evidence_hit@3` 这类指标的分母是可答样本，69 条跑里是 60，所以是 ±1.7pt）。
+  每份文件内部的校验口径完全不变，合并后再检查 id 与问题跨文件唯一；只有一份时
+  报告里的 `dataset_sha256` 与改动前逐字节相同，历史报告的指纹不受影响。
+
+SQL 侧用一份**评估专用** SQLite（`scripts/init_eval_db.py` → `data/sql/demo_eval.db`，演示库的超集：前 4 行逐字段
+相同，另加 8 行）；`data/sql/demo.db` 与 `scripts/init_demo_db.py` 一字未改，v7 那几轮仍可原样复现。引用标签沿用
+`demo.products`——一份 sources 配置里两个 sql 源会互相覆盖，只能有一个 `sql_query` 工具，取舍见
+`docs/adr/0008`。
+
+```bash
+python3 scripts/init_eval_db.py                    # 生成 data/sql/demo_eval.db（先于 prepare_eval_kb）
+python3 scripts/prepare_eval_kb.py --recreate      # 文档定稿后再重建：评估语料就是 README + docs/*.md
+python3 scripts/evaluate.py --dataset eval/v8_agentic_expanded.jsonl --validate-only
+# 合并两份集一次跑（只验结构与跨文件唯一，不碰模型也不碰数据库）
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl --validate-only
+python3 scripts/evaluate.py --dataset eval/v8_agentic_expanded.jsonl \
+  --agent-sources config/sources.eval.agent.v8.yaml --configs agent,full --skip-ragas \
+  --output eval/reports/v8_agentic_expanded_baseline.md \
+  --json-output eval/reports/v8_agentic_expanded_baseline.json
+```
+
+`--limit` / `--ids` 在合并以后仍按合并顺序生效。分布、标注口径与限制逐条写在 `eval/README.md` 的
+「v8.7 扩充集」小节；这一项只补齐测量能力，既有结论仍按 v8.3 的噪声底口径读。
+
+2026-11-25 的两轮基线读数：新集 40 条 agentic 的 `evidence_hit@3` 0.571、`source_hit` 0.714、`both_sides_hit` 0.875、
+单条平均 26.2 秒；合并 69 条 agentic 分别是 0.600 / 0.833 / 0.929、单条 24.4 秒。单条样本对均值的影响降到
+±1.7 个百分点（`evidence_hit@3` 的分母是 60 条可答样本），所以「新集 8 条数据侧样本只有 1 条被路由判成数据侧」
+这种判定已经可以说成数字，而跨配置的前后对比仍要按噪声底口径同进程交替另测。
+
 ## MCP 暴露（v8）
 
 把本机知识库当工具给外部客户端用：`scripts/serve_mcp.py` 是一个 stdio 的 MCP server，
@@ -952,6 +991,70 @@ sources:
 - 使用 `requests` 抓取，`trafilatura` 抽取正文、标题与发布日期；单条 URL 失败只记录错误，不阻塞其他来源。
 - 需要可访问的 URL；内网页面请确保运行环境有相应网络权限。
 
+### Google Drive 语料接入（预下载）
+
+Drive 里的真实文档先下载到本地目录，再按普通 `file` 源入库：联网只发生在下载这一步，入库与检索链路照旧完全本地离线，仓库不引入 Google SDK，Python 侧也没有新增依赖。为什么这么切，见 [docs/adr/0003](docs/adr/0003-google-drive-corpus-cli-prefetch.md)。
+
+1）装本机 CLI：
+
+```bash
+brew install rclone
+```
+
+想用另一个 CLI 也可以：`brew install gdrive`（用法见下面的 `--tool gdrive`）。
+
+2）授权。凭据只留在本机——rclone 的 remote 配置在 `~/.config/rclone/rclone.conf`，不进仓库、不出现在命令行与日志里：
+
+```bash
+rclone config       # n 新建 remote → 取个名字（如 gdrive）→ storage 选 drive → client id/secret 留空
+                    # 「Use auto config?」选 Yes 会开浏览器；没有浏览器的机器选 No，
+                    # 在有浏览器的机器上跑 rclone authorize "drive"，把返回的 token 粘回来
+rclone listremotes  # 确认 remote 建好了，也可以用 python3 scripts/sync_gdrive.py --list-remotes
+```
+
+`gdrive` 走自己的 OAuth，首次 `gdrive about` 会要求浏览器授权，凭据落在 `~/.gdrive/`。
+
+3）下载到本地目录（默认 `data/gdrive`，已 gitignore）：
+
+```bash
+python3 scripts/sync_gdrive.py --remote gdrive:某个文件夹            # 只下载
+python3 scripts/sync_gdrive.py --remote gdrive:某个文件夹 --dry-run  # 预演，不写文件
+```
+
+4）入库，复用现有链路（分块与嵌入一处没动）：
+
+```bash
+python3 scripts/sync_gdrive.py --skip-sync --ingest                  # 只用已下载的内容
+python3 scripts/sync_gdrive.py --remote gdrive:某个文件夹 --ingest   # 下载完接着入库
+python3 scripts/sync_gdrive.py --skip-sync --ingest --config config/sources.gdrive.example.yaml
+```
+
+`--skip-sync` 表示不再联网，只用目录里已有的内容。下载完先清点目录（多少文件可入库、哪些后缀不支持），再走与 `scripts/ingest.py` 完全相同的 `run_ingest`。入库默认写进演示库那个 collection，用 `--tag gdrive` 过滤 Drive 内容。
+
+常用开关：
+
+- `--mode sync`：让本地目录与 Drive 一致，会删除 Drive 里已删掉的本地文件；默认 `copy` 只增量添加。要让知识库也跟着 Drive 的删除收缩，得 `--mode sync --ingest --prune` 一起用。
+- `--export-formats`：Google 原生文档（Docs/Sheets/Slides）没有文件实体，下载时必须导出；默认钉成 `pdf`，因为入库链路只认 txt/md/pdf，rclone 自己的默认导出格式（docx/xlsx 那类）反而入不了库。传空值可关掉这个参数。
+- `--include "*.md"`：只下载匹配的文件名，可重复。
+- `--tags`：入库时打的标签，默认 `gdrive`。
+- `--dest`（或 `RAG_GDRIVE_SYNC_DIR`）：下载目录；`RAG_GDRIVE_REMOTE`：默认下载目标。相对路径按项目根解析。
+- `-- --drive-skip-gdocs`：`--` 之后的参数原样传给下载工具。
+- `--tool gdrive --target <文件夹或文件 ID>`：改用 gdrive CLI。它没有 dry-run（要预演请用 `--tool rclone --dry-run`），各发行版的输出目录参数也不一致，所以脚本把执行目录切成下载目录来落文件；目标是单个文件时加 `--single-file`。
+
+与演示库、评估库的关系：
+
+- 默认入库目标就是演示库那个 collection，Drive 内容靠 `tags: [gdrive]` 区分，与 `data/docs` 的演示内容互不覆盖（幂等按 `doc_id + content_hash`）。
+- 想把真实语料单独放一个库，用与评估库同一套隔离开关指向独立路径：`RAG_COLLECTION_NAME` / `RAG_STORAGE_DIR` / `RAG_LEXICAL_INDEX_PATH`。
+- 评估库不受影响：`config/sources.eval.yaml` 里没有 Drive 源，评估语料仍只有项目文档。
+- 真实语料正文不进公开仓库（[docs/adr/0002](docs/adr/0002-real-corpus-reports-out-of-public-repo.md)）：下载目录已 gitignore，脚本还会用 `git check-ignore` 确认仓库内的目录确实被忽略，没被忽略就拒绝下载。生成公网只读快照时 `scripts/build_demo_snapshot.py` 只允许 `data/docs`，`data/gdrive` 会被判越界拒绝。
+- Qdrant 本地磁盘模式只允许一个进程，入库前先停掉 `scripts/serve.py`。
+
+失败与降级：
+
+- 本机没装 CLI 会直接给出安装命令；下载失败会带上退出码与 CLI 的报错。授权过期就重跑 `rclone config` 或 `rclone authorize "drive"`。
+- 目录里只有 docx/xlsx 这类不支持的后缀时，`--ingest` 明确失败并提示用 `--export-formats pdf` 重新下载，不会静默入库 0 条。
+- 下载目录安全边界可以显式跳过（`--allow-tracked-dest`），但不推荐：那样真实语料正文会进公开仓库。
+
 ## 增量与更新语义
 
 - **幂等**：`doc_id + content_hash` 未变化时跳过，不重复调用 embedding。
@@ -981,7 +1084,7 @@ python3 scripts/ingest.py --recreate                               # 清空集�
 
 ## 测试
 
-单元测试不依赖 Ollama 与真实数据库：
+单元测试不依赖 Ollama、真实数据库与真实 Google 账号（Drive 同步只断言下载命令拼装，下载执行层打桩，入库走临时 Qdrant 与确定性假向量）：
 
 ```bash
 python3 -m pytest tests -q
@@ -1027,6 +1130,7 @@ private_rag/
 │   ├── ocr.py            图片 OCR（rapidocr）与表格提取
 │   ├── web.py            URL 抓取 + 正文抽取
 │   ├── sql.py            SQLAlchemy 查询 -> 行级文档
+│   ├── gdrive.py         Drive 预下载：拼下载命令、下载目录安全边界、目录清点
 │   ├── chunking.py       父块(2000/0)内切子块(700/100)，生成稳定父块 ID
 │   └── pipeline.py       父子块切分、幂等写入、更新替换、prune、BM25 重建
 ├── retrieval/
@@ -1059,6 +1163,8 @@ private_rag/
 └── eval_env.py           评估库路径隔离（导入配置前生效）
 config/settings.py        兼容入口（re-export private_rag.config）
 config/sources.example.yaml / sources.demo.yaml / sources.eval.yaml / sources.eval.agent.yaml（agentic 运行时只读 SQL，不入库）
+config/sources.gdrive.example.yaml Drive 下载目录的 file 源示例
+scripts/sync_gdrive.py    Drive 语料预下载 CLI（下载到本地目录，可选接着走入库链路）
 scripts/ingest.py         多源入库 CLI
 scripts/chat_cli.py       混合检索问答 CLI
 scripts/chat_agent.py     agentic 问答 CLI（意图路由 + 工具调用 + 决策轨迹）
@@ -1066,15 +1172,19 @@ scripts/replay_trace.py   决策轨迹回放 CLI
 scripts/serve.py          HTTP 服务入口（单 worker）
 scripts/serve_mcp.py      MCP server 入口（stdio，供 Claude Desktop / Claude Code 调用；`--allow-sql` 才暴露业务库查询）
 scripts/init_demo_db.py   生成演示 SQLite 库
+scripts/init_eval_db.py   生成评估专用 SQLite 库（演示库的超集，只给评估用）
 scripts/prepare_eval_kb.py 构建评估专用知识库
 scripts/evaluate.py       策略评估与报告 CLI
 eval/project_rag_qa.jsonl 40 条固定标注问答（v4）
 eval/v5_paraphrase_qa.jsonl 18 条口语化/复杂问题（v5）
 eval/v7_agent_qa.jsonl    29 条按工具分类的 agentic 问答（v7，含 3 条带对话历史的指代样本）
+eval/v8_agentic_expanded.jsonl 40 条扩充集（v8.7，补 database / mixed / multi_step / coreference，id 全 x 前缀）
+config/sources.eval.agent.v8.yaml 评估专用 SQL 库的 agentic 运行时配置（引用标签沿用 demo.products）
 eval/reports/             v4/v5/v7 Markdown / JSON 报告
 tests/                    pytest 单测 + smoke_test.py
 docs/ROADMAP.md           v1–v8 路线与验收标准
 data/docs/                本地文档
+data/gdrive/              Drive 预下载目录（已 gitignore，真实语料正文不进仓库）
 storage/                  向量库与 BM25 索引（已 gitignore，可由 ingest 重建）
 storage/traces/           agentic 决策轨迹 agent.jsonl（已 gitignore，每请求追加一行）
 requirements-eval.txt     可选评估依赖（Ragas）
