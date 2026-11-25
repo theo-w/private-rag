@@ -1068,7 +1068,7 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_exp
    `xd03` 也没拿到证据）。同一轮同一份库里 `multi_step` 6 条意图全判对（`xs01` 判 `database` 但证据不足）。
    根因在本轮之后定位，**不是问法不像数据题**：路由器判断「这事实在不在表里」唯一的依据是 SQL 工具描述里那段
    「库内数据」目录，而它每个文本列只扫前 4 行——评估库故意把新实体放在第 5–12 行（前 4 行与演示库逐字相同，
-   为的是保住 v7 的历史读数），所以这些实体永远进不了目录。修法与同进程交替的对照读数见后续工作。
+   为的是保住 v7 的历史读数），所以这些实体永远进不了目录。修法与同进程交替的对照读数见下面「v8.8 数据侧路由的前后对比」。
 2. **固定链路在这份集上有结构性天花板**：35 条可答样本里 21 条必须查 SQL，而 `full` 没有 SQL 工具，`answer_rate`
    最高只能 14/35 = 40%，实测 10/35 = 28.6%。这一列的低分是口径决定的，不能读成「固定链路质量差」。
 3. **合并本身不扰动判定**：同一个 commit、同一份评估库，新集 40 条在单跑与合并跑之间逐条指标与意图完全一致
@@ -1090,3 +1090,122 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_exp
 - **n 变大以后哪些结论可以说百分比**：单条样本对均值的影响在 40 条跑里是 ±2.9pt（分母 35 条可答）、合并 69 条跑里
   是 ±1.7pt（分母 60），所以「`database` 类别 0/8 命中」这种离噪声底很远的判定可以说；但**跨配置的前后对比**
   仍按 v8.3 的噪声底口径（同设置交替跑、指标变化 ≥1 条才当真、措辞变化不算证据）另测，本轮只是基线。
+
+## v8.8 数据侧路由的前后对比（`data_side_routing`）
+
+改动与根因见 [docs/ROADMAP.md](../docs/ROADMAP.md) 的 v8.8。一句话：路由器唯一的「表里有什么」信息来源是 SQL 工具
+描述里那段「库内数据」目录，而旧实现每个文本列只扫前 4 行——评估库把 8 条数据侧样本的实体放在第 5–12 行，
+目录看不见它们。这一轮量的是「把取值列全 + 路由提示词补一条『记录自身字段』规则」的前后差别。
+
+### 口径
+
+- **同一进程交替 `off → on → off`**（`scripts/measure_thinking_ab.py --setting data_side_routing`），不跨轮比：
+  跨轮比会把模型冷热算成改动收益，v8.3 就是这么把方向测反过一次。
+- `off` 逐字回到改动前（目录每列只看前 4 行、长文本照抄、数字日期进目录、列名头一行也在；提示词没有第 10 条），
+  两半一起开关——分开量就不是在量这次要 ship 的行为。
+- 指标变化 **≥1 条才算真**（40 条跑里 ±1 条 = ±2.9pt）；耗时只比暖轮，第一轮含精排冷启动作废；
+  **措辞变化不算证据**，只认逐条的意图、拒答、停止原因与命中。
+- 只用新集 40 条（不合并 v7 那 29 条）：改动动的是工具目录，而 v7 子集在同一份超集库上本来就有跨轮翻转
+  （见上面 v8.7 限制第 3 条），混在一起会把两件事搅成一团。
+
+### 复现命令
+
+```bash
+# 11. v8.8 数据侧路由交替对照（要打到本机 Ollama，单并发，一轮 40 条约 14~24 分钟，三轮约一小时）
+python3 scripts/init_eval_db.py
+python3 scripts/prepare_eval_kb.py --recreate
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting data_side_routing \
+  --dataset eval/v8_agentic_expanded.jsonl \
+  --agent-sources config/sources.eval.agent.v8.yaml \
+  --values off,on,off --prefix /tmp/ab_catalog
+```
+
+`--agent-sources` 必须显式给：脚本默认那份指向演示库 `data/sql/demo.db`，而新集的样本要查评估专用库，
+不显式给会在第一轮就报「数据库不存在」。报告写 `/tmp`，不动 `eval/reports/` 里已跟踪的历史报告。
+跑前确认日志里有 `reranker=有`、单条耗时是秒级——精排静默失效时每条只花 50 毫秒，报告照样出数
+（见上面 v8.7 的 `huggingface-hub` 教训）。
+
+只想退回某一半、不走评估：
+
+```bash
+RAG_DISABLE_AGENT_CATALOG_ENUM=1 python3 scripts/chat_agent.py --sources config/sources.eval.agent.v8.yaml "问题"
+```
+
+### 读数（2026-11-25，本机单并发 MLX，新集 40 条 × `agent`）
+
+| 轮 | 设置 | evidence_hit@3 | source_hit | answer_rate | refusal_accuracy | both_sides_hit | citation / validity | mrr@3 | context_precision@3 | 上下文字符 | 工具调用 / 步数 | 单条均耗时 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 第 1 轮 | `off` | 0.600（21/35） | 0.743（26/35） | 0.714（25/35） | 1.000（5/5） | 0.875（7/8） | 0.800 / 0.800 | 0.500 | 0.314 | 2021 | 1.83 / 4.25 | 43.3s（冷启动，作废） |
+| 第 2 轮 | `on` | **0.743（26/35）** | **0.943（33/35）** | **0.943（33/35）** | 1.000（5/5） | 0.875（7/8） | 0.971 / 0.971 | 0.690 | 0.495 | 1529 | 1.55 / 3.80 | 36.6s |
+| 第 3 轮 | `off` | 0.543（19/35） | 0.657（23/35） | 0.743（26/35） | 1.000（5/5） | 0.875（7/8） | 0.743 / 0.743 | 0.457 | 0.276 | 2097 | 1.73 / 3.98 | 56.5s |
+
+`database` 类别那 8 条单独看（这才是这次要修的东西）：
+
+| 轮 | 设置 | `intent=knowledge` | evidence_hit@3 | source_hit | 拒答 |
+|---|---|---|---|---|---|
+| 第 1 轮 | `off` | 8/8 | 0/8 | 0/8 | 7/8 |
+| 第 2 轮 | `on` | 1/8 | **7/8** | **7/8** | 1/8 |
+| 第 3 轮 | `off` | 8/8 | 0/8 | 0/8 | 7/8 |
+
+**两条暖轮之间（第 2 轮 `on` 对第 3 轮 `off`）**：`evidence_hit@3` +7 条（+20pt）、`source_hit` +10 条（+28.6pt）、
+`answer_rate` +7 条（+20pt）、`citation_rate` +8 条（+22.9pt）、`mrr@3` +0.233、`context_precision@3` +0.219。
+门禁三项不变：`refusal_accuracy` 5/5、`both_sides_hit` 7/8、`gate_intercept_rate` 0.15（与第 3 轮同值，第 1 轮 0.25）。
+
+逐条翻动全落在该修的那一类：`xd01`–`xd07` 七条从「拒答 / `knowledge` / 1–4 次工具调用」变成「作答 / `database` /
+1 次 SQL」；顺带 `xs01` 与 `xs03` 从拒答变作答、`xc02` 的意图从 `mixed` 变 `database`（仍命中）；
+`xd08` 两轮都还是 `knowledge` + 拒答；应拒答的 `xr04` 两轮都拒答（只是停止原因从 `insufficient_evidence`
+变成 `max_steps`）。
+
+**噪声底参照**（同设置的第 1 轮与第 3 轮之间自己漂移了多少）：`answer_rate` 1 条、`evidence_hit@3` 2 条、
+`source_hit` 3 条、`citation_rate` 2 条，意图翻转 2 条（`xs03`、`xc02` 在 `mixed` 与 `knowledge` 之间），拒答翻转 1 条
+（`xm03`）。上面 `on` 相对 `off` 的差（+7 到 +10 条，且 7 条翻动全在 `database` 类别）远大于这个漂移，
+所以可以说百分比。
+
+**没被带偏的部分**：`knowledge` 9 条的 `evidence_hit@3` 三轮都是 6/9、`source_hit` 8/9 → 9/9 → 8/9；应拒答 5 条
+三轮全部拒答；`mixed` 7 条 `evidence_hit@3` 7/7 → 6/7 → 6/7（`on` 与暖 `off` 相同）；`coreference` 5 条
+4/5 → 3/5 → 3/5（第 3 轮本来就比第 1 轮少，属噪声量级）。
+
+出处：第 1、2 轮记 `git_commit = 638a5de`、`git_dirty = True`（改动还在工作区，没提交）；第 3 轮记
+`git_commit = a008e2b`、`git_dirty = False`（改动已提交，但脚本是在运行时把两半都关掉，行为仍然是改动前）。
+三轮同一进程、同一份评估知识库（按 `638a5de` 的 `README.md` + `docs/*.md` 建，334 个向量）、`reranker=有`、
+`--skip-ragas`、`HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`。三份原始报告已放进
+`eval/reports/v8_route_data_side_ab_{1_off,2_on,3_off}.{md,json}`，护栏复查放
+`eval/reports/v8_route_data_side_guardrail_recheck.{md,json}`。**复现交替那轮要先 `git checkout 638a5de` 再
+`prepare_eval_kb.py --recreate`**——把读数写进本文与 `docs/ROADMAP.md` 以后语料变长，知识库就不是这一份了。
+
+### 文档定稿后的护栏复查（改动默认开启）
+
+上面那轮的护栏数字来自按 `638a5de` 文档建的库，而把读数写进本文会让语料变长。所以文档改完先重建库
+（`prepare_eval_kb.py --recreate` → 339 个向量 / 339 个词法 chunk），再用**默认开启**的改动重跑护栏三类 21 条
+（`xk01`–`xk09`、`xr01`–`xr05`、`xm01`–`xm07`），报告写 `/tmp/guard_final.*`：
+
+```bash
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/evaluate.py \
+  --dataset eval/v8_agentic_expanded.jsonl \
+  --ids xk01,xk02,xk03,xk04,xk05,xk06,xk07,xk08,xk09,xr01,xr02,xr03,xr04,xr05,xm01,xm02,xm03,xm04,xm05,xm06,xm07 \
+  --configs agent --agent-sources config/sources.eval.agent.v8.yaml --skip-ragas --max-workers 1 \
+  --output /tmp/guard_final.md --json-output /tmp/guard_final.json
+```
+
+结果：文档侧 9 条意图仍是 **9/9 `knowledge`**（没有一条被这次改动推到 `database`）、`evidence_hit@3` 6/9、
+`source_hit` 8/9；应拒答 5 条**全部拒答**（`refusal_accuracy` 1.000）；两侧都要的 7 条 `evidence_hit@3` 7/7、
+`source_hit` 7/7、`both_sides_hit` 5/7。整轮 `evidence_hit@3` 0.8125、`source_hit` 0.9375、`latency` 37.7s、
+`reranker=有`。同那 21 条在三轮交替里的同子集对照（**语料不同，只能看有没有回归，不能当改动证据**）：
+`evidence_hit@3` 0.619（对暖 `off` 0.571、冷 `off` 0.619）、`source_hit` 0.714（对 0.667 / 0.714）、
+`citation_rate` 0.762（四处相同）；唯一低于交替轮的是 `both_sides_hit` 5/7 对 6/7，1 条正好在噪声底量级
+（同设置的两个 `off` 轮之间本来就翻过一条 `xm03`）。
+
+### 限制（引用这轮数字时一并带上）
+
+- **交替那轮的护栏测于改动前的语料**：`knowledge` 与 `refusal` 类别的数字来自按 `638a5de` 文档建的库。新增的文档
+  文字只讲路由与目录，不含任何样本的实体、字段内容或应拒答样本的原问题，不会给样本造证据，方向上是保守的；
+  文档定稿后重建库的复查见上面那节，结论是文档侧与应拒答侧没有回归。
+- **耗时不作收益依据**：同设置的第 1 轮与第 3 轮差 30%（43.3s vs 56.5s），比 `on` / `off` 之间的差还大。
+  只能说方向：`on` 的工具调用 1.55 次 vs 1.73 次、上下文字符 1529 vs 2097（−27%）、检索片段 2.73 vs 3.50，
+  机制是数据侧样本从 3–4 次调用变成一次 SQL。
+- **仍有 1 条数据侧样本判 `knowledge`**：模型把它当成食品安全判断而不是某条记录的字段内容。没有为了让数字好看
+  去改标注，也没把那条问法写进提示词或文档。
+- **目录扫描有界**：每列只扫前 `RAG_AGENT_CATALOG_SCAN_ROWS` 行（默认 40），更大的库里排在后面的实体仍然看不见。
+- **只测了新集 40 条**：对 v7 那 29 条的影响要单独跑合并交替才能量，本轮不声称「v7 也没变差」。
+
