@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import math
 import os
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -25,9 +27,12 @@ from private_rag.evaluation import (
     collect_agent_results,
     collect_results,
     dataset_fingerprint,
+    datasets_fingerprint,
     extract_ragas_scores,
     is_refusal,
     load_dataset,
+    load_multi_dataset,
+    parse_dataset_arg,
     normalize_text,
     render_markdown,
     score_deterministic,
@@ -740,6 +745,221 @@ def test_v7_agent_dataset_is_valid():
     # 其余样本不得声明双侧，否则 both_sides_hit 的分母会悄悄漂移
     assert sum(1 for s in samples if 0 < len(s.expected_sources) < 2) == 0
     assert all(not s.expected_sources for s in samples if s.category == "refusal")
+
+
+def _load_script(name: str):
+    """按文件路径加载 scripts 下的脚本模块（scripts 目录不是包）。"""
+    spec = importlib.util.spec_from_file_location(
+        name, Path(config.ROOT) / "scripts" / f"{name}.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _category_count(samples: list, category: str) -> int:
+    return sum(1 for sample in samples if sample.category == category)
+
+
+def test_v8_expanded_dataset_is_valid():
+    path = Path(config.ROOT) / "eval" / "v8_agentic_expanded.jsonl"
+    samples = load_dataset(path)
+    assert len(samples) == 40
+    assert sum(sample.answerable for sample in samples) == 35
+    assert sum(not sample.answerable for sample in samples) == 5
+    assert len({sample.id for sample in samples}) == 40
+    assert len({sample.question for sample in samples}) == 40
+    # id 一律 x 前缀：与 v7 的 k/d/m/s/c/r 不撞车，合并跑才合法
+    assert all(sample.id.startswith("x") for sample in samples)
+    assert {sample.category for sample in samples} == {
+        "knowledge",
+        "database",
+        "mixed",
+        "multi_step",
+        "coreference",
+        "refusal",
+    }
+    # 这一项要补的正是 v7 集最薄的几类，分布钉死在计划里的那张表
+    assert {
+        category: _category_count(samples, category)
+        for category in ("knowledge", "database", "mixed", "multi_step", "coreference", "refusal")
+    } == {"knowledge": 9, "database": 8, "mixed": 7, "multi_step": 6, "coreference": 5, "refusal": 5}
+    assert validate_distribution(samples)
+
+    db_samples = [s for s in samples if s.category in ("database", "mixed", "multi_step")]
+    assert len(db_samples) == 21
+    assert all(s.expected_source == "demo.products" for s in db_samples)
+    # SQL 侧证据的权威文件是建库脚本本身，不是演示库
+    assert all(s.source == "scripts/init_eval_db.py" for s in db_samples)
+
+    knowledge = [s for s in samples if s.category == "knowledge"]
+    assert all(s.expected_source == "" for s in knowledge)
+    assert all(
+        s.source in ("README.md", "docs/beginner-guide.md", "docs/v7.4-history-as-evidence.md")
+        for s in knowledge
+    )
+
+    coreference = [s for s in samples if s.category == "coreference"]
+    assert all(len(s.history) >= 2 for s in coreference)
+    assert all(
+        s.history[0][0] == "user" and s.history[1][0] == "assistant" for s in coreference
+    )
+    # 五条里三条的得分侧依赖运行时 SQL，两条是两轮以上历史
+    assert sum(1 for s in coreference if s.expected_source == "demo.products") == 3
+    assert sum(1 for s in coreference if len(s.history) >= 4) == 2
+
+    two_sided = [s for s in samples if len(s.expected_sources) >= 2]
+    assert sorted(s.id for s in two_sided) == [
+        "xc03",
+        "xm01",
+        "xm02",
+        "xm03",
+        "xm04",
+        "xm05",
+        "xm06",
+        "xm07",
+    ]
+    for sample in two_sided:
+        assert "demo.products" in sample.expected_sources
+        docs = [x for x in sample.expected_sources if x != "demo.products"]
+        assert len(docs) == 1, (sample.id, sample.expected_sources)
+        assert docs[0] == "README.md" or docs[0].startswith("docs/")
+        assert (Path(config.ROOT) / docs[0]).exists(), (sample.id, docs[0])
+    assert sum(1 for s in samples if 0 < len(s.expected_sources) < 2) == 0
+    assert all(not s.expected_sources for s in samples if s.category == "refusal")
+
+
+def test_v8_expanded_evidence_strings_do_not_overlap():
+    """证据句两两不能互为子串，否则一条检索命中能同时糊掉两条样本的判定。"""
+    samples = load_dataset(Path(config.ROOT) / "eval" / "v8_agentic_expanded.jsonl")
+    needles = [normalize_text(item) for sample in samples for item in sample.evidence]
+    assert len(needles) == len(set(needles))
+    for needle in needles:
+        for other in needles:
+            if needle != other:
+                assert needle not in other, (needle, other)
+
+
+def test_init_eval_db_is_superset_of_demo_db(tmp_path: Path, monkeypatch):
+    demo = _load_script("init_demo_db")
+    eval_db = _load_script("init_eval_db")
+    db_path = tmp_path / "demo_eval.db"
+    monkeypatch.setattr(eval_db, "DB_PATH", db_path)
+    assert eval_db.main() == 0
+    with sqlite3.connect(db_path) as connection:
+        columns = [row[1] for row in connection.execute("PRAGMA table_info(products)")]
+        rows = connection.execute(
+            "SELECT id, name, category, description, storage, supplier, stock, price, updated_at "
+            "FROM products ORDER BY id"
+        ).fetchall()
+    assert columns == [
+        "id",
+        "name",
+        "category",
+        "description",
+        "storage",
+        "supplier",
+        "stock",
+        "price",
+        "updated_at",
+    ]
+    assert len(rows) == 12
+    # 前 4 行与演示库逐字段相等：合并跑里 v7 那 29 条查的是同一份数据
+    assert [(row[0], row[1], row[2], row[3], row[7], row[8]) for row in rows[:4]] == list(demo.ROWS)
+    # 新增行的类别不得含「水果」，否则 v7 的「这四种水果」样本会被 category 过滤带偏
+    assert all("水果" not in row[2] for row in rows[4:])
+    assert len({row[2] for row in rows[4:]}) == 6
+
+
+def test_v8_expanded_sql_evidence_exists_in_eval_db(tmp_path: Path, monkeypatch):
+    eval_db = _load_script("init_eval_db")
+    db_path = tmp_path / "demo_eval.db"
+    monkeypatch.setattr(eval_db, "DB_PATH", db_path)
+    eval_db.main()
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute("SELECT description, storage, supplier FROM products").fetchall()
+    haystack = normalize_text("|".join(" ".join(row) for row in rows))
+    samples = load_dataset(Path(config.ROOT) / "eval" / "v8_agentic_expanded.jsonl")
+    sql_samples = [s for s in samples if s.expected_source == "demo.products"]
+    assert len(sql_samples) == 24
+    for sample in sql_samples:
+        for item in sample.evidence:
+            assert normalize_text(item) in haystack, (sample.id, item)
+
+
+def test_v8_expanded_agent_sources_config_points_at_eval_db():
+    text = (Path(config.ROOT) / "config" / "sources.eval.agent.v8.yaml").read_text(encoding="utf-8")
+    assert "sqlite:///data/sql/demo_eval.db" in text
+    # 引用标签必须与 v7 集共用，两个标签在一份配置里只能活一个
+    assert "label: demo.products" in text
+
+
+def test_parse_dataset_arg_splits_and_dedupes():
+    assert parse_dataset_arg("eval/a.jsonl") == [Path("eval/a.jsonl")]
+    assert parse_dataset_arg(" eval/a.jsonl , eval/b.jsonl ,eval/a.jsonl ") == [
+        Path("eval/a.jsonl"),
+        Path("eval/b.jsonl"),
+    ]
+    with pytest.raises(DatasetError):
+        parse_dataset_arg("eval/a.jsonl,,eval/b.jsonl")
+    with pytest.raises(DatasetError):
+        parse_dataset_arg("   ")
+
+
+def _write_minimal_dataset(path: Path, sample_id: str, question: str) -> Path:
+    path.write_text(
+        json.dumps(
+            {
+                "id": sample_id,
+                "question": question,
+                "reference": "参考答案",
+                # README 里真实存在的一句，保证单份校验能过
+                "evidence": ["完全本地离线的中文 RAG"],
+                "source": "README.md",
+                "category": "knowledge",
+                "answerable": True,
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_load_multi_dataset_merges_in_order(tmp_path: Path):
+    first = _write_minimal_dataset(tmp_path / "a.jsonl", "a01", "第一份的问题")
+    second = _write_minimal_dataset(tmp_path / "b.jsonl", "b01", "第二份的问题")
+    samples = load_multi_dataset([first, second])
+    assert [sample.id for sample in samples] == ["a01", "b01"]
+    assert load_multi_dataset([first]) == load_dataset(first)
+
+
+def test_load_multi_dataset_rejects_cross_file_duplicates(tmp_path: Path):
+    first = _write_minimal_dataset(tmp_path / "a.jsonl", "dup01", "同一个问题")
+    same_id = _write_minimal_dataset(tmp_path / "b.jsonl", "dup01", "另一份的问题")
+    with pytest.raises(DatasetError) as exc:
+        load_multi_dataset([first, same_id])
+    assert "id 跨文件重复" in str(exc.value)
+    assert "b.jsonl" in str(exc.value)
+
+    same_question = _write_minimal_dataset(tmp_path / "c.jsonl", "c01", "同一个问题")
+    with pytest.raises(DatasetError) as exc:
+        load_multi_dataset([first, same_question])
+    assert "问题跨文件重复" in str(exc.value)
+
+
+def test_datasets_fingerprint_is_backward_compatible_and_order_sensitive(tmp_path: Path):
+    single = _write_minimal_dataset(tmp_path / "a.jsonl", "a01", "第一份的问题")
+    other = _write_minimal_dataset(tmp_path / "b.jsonl", "b01", "第二份的问题")
+    combined, per_file = datasets_fingerprint([single])
+    assert combined == dataset_fingerprint(single) == per_file[0]
+
+    forward, forward_files = datasets_fingerprint([single, other])
+    reversed_, reversed_files = datasets_fingerprint([other, single])
+    assert forward != combined
+    assert forward_files == [per_file[0], dataset_fingerprint(other)]
+    assert forward != reversed_
 
 
 def test_both_sides_hit_requires_every_declared_side():

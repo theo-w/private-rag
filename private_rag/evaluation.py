@@ -468,6 +468,70 @@ def dataset_fingerprint(path: Path | str = DEFAULT_DATASET) -> str:
     return digest.hexdigest()
 
 
+def parse_dataset_arg(raw: Path | str) -> list[Path]:
+    """把 `--dataset` 的取值切成评估集路径列表：逗号分隔、去空白、去掉重复路径。"""
+    text = str(raw).strip()
+    if not text:
+        raise DatasetError("--dataset 不能为空")
+    paths: list[Path] = []
+    for part in text.split(","):
+        item = part.strip()
+        if not item:
+            raise DatasetError(f"--dataset 里有空的路径：{raw}")
+        path = Path(item)
+        if path not in paths:
+            paths.append(path)
+    return paths
+
+
+def load_multi_dataset(paths: Sequence[Path | str]) -> list[EvalSample]:
+    """逐份 load_dataset 以后合并成一次跑的样本列表，顺序按传入顺序。
+
+    每份文件内部的结构与证据校验完全不变；这里只补跨文件检查：合并以后 id 与 question
+    必须仍然唯一，否则同一条问题在两份集里各跑一次，逐条读数和均值都会算重。
+    """
+    merged: list[EvalSample] = []
+    seen_ids: dict[str, Path] = {}
+    seen_questions: dict[str, Path] = {}
+    for raw_path in paths:
+        dataset_path = Path(raw_path)
+        for sample in load_dataset(dataset_path):
+            if sample.id in seen_ids:
+                raise DatasetError(
+                    f"样本 id 跨文件重复：{sample.id}（{seen_ids[sample.id]} 与 {dataset_path}）"
+                )
+            if sample.question in seen_questions:
+                raise DatasetError(
+                    f"问题跨文件重复：{sample.question}"
+                    f"（{seen_questions[sample.question]} 与 {dataset_path}）"
+                )
+            seen_ids[sample.id] = dataset_path
+            seen_questions[sample.question] = dataset_path
+            merged.append(sample)
+    if not merged:
+        raise DatasetError("评估集为空")
+    return merged
+
+
+def datasets_fingerprint(paths: Sequence[Path | str]) -> tuple[str, list[str]]:
+    """多份评估集的指纹，返回（合并指纹，逐份 SHA256）。
+
+    只有一份时合并指纹与 `dataset_fingerprint` 逐字节相同，历史报告里的
+    `dataset_sha256` 不受影响；多份时把「路径 + 该份 SHA」按顺序喂进同一个摘要，
+    所以换顺序会换一个指纹。
+    """
+    per_file = [dataset_fingerprint(path) for path in paths]
+    if len(per_file) == 1:
+        return per_file[0], per_file
+    digest = hashlib.sha256()
+    for path, sha in zip(paths, per_file):
+        digest.update(str(Path(path)).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(sha.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest(), per_file
+
+
 # --------------------------------------------------------------------------- #
 # 确定性指标
 # --------------------------------------------------------------------------- #

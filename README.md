@@ -593,6 +593,44 @@ SQL 证据却没有更容易编。子集不是全量，样本量不足以当结�
 任务被 `RemoteProtocolError` 断连打断，对应 `m03`/`full` 的 `faithfulness`+`answer_relevancy` 与
 `d01`/`agent` 的 `answer_relevancy` 记为 NaN，平均分只基于有效样本。
 
+### v8.7 评估集扩充与多集合并（把 n 从 29 做到 69）
+
+前面几轮读数反复带着同一句话：「29 条样本只支撑方向，不支撑百分比——±1 条就是 ±4 个百分点」。
+这一项不动链路，只做两件事：
+
+- **新评估集 `eval/v8_agentic_expanded.jsonl`（40 条 = 35 可回答 + 5 应拒答）**，补的正是现有集最薄的几类
+  （`knowledge 9 / database 8 / mixed 7 / multi_step 6 / coreference 5 / refusal 5`，其中 5 条指代样本全部带
+  `history`）。id 一律 `x` 前缀，与 v7 集的 `k/d/m/s/c/r` 不撞车。
+- **`--dataset` 可以逗号分隔多份**，合并成一次跑：v7 的 29 条 + 新集的 40 条 = 69 条，单条样本对均值的影响
+  从 ±3.4pt 降到 ±1.4pt（`evidence_hit@3` 这类指标的分母是可答样本，69 条跑里是 60，所以是 ±1.7pt）。
+  每份文件内部的校验口径完全不变，合并后再检查 id 与问题跨文件唯一；只有一份时
+  报告里的 `dataset_sha256` 与改动前逐字节相同，历史报告的指纹不受影响。
+
+SQL 侧用一份**评估专用** SQLite（`scripts/init_eval_db.py` → `data/sql/demo_eval.db`，演示库的超集：前 4 行逐字段
+相同，另加 8 行）；`data/sql/demo.db` 与 `scripts/init_demo_db.py` 一字未改，v7 那几轮仍可原样复现。引用标签沿用
+`demo.products`——一份 sources 配置里两个 sql 源会互相覆盖，只能有一个 `sql_query` 工具，取舍见
+`docs/adr/0008`。
+
+```bash
+python3 scripts/init_eval_db.py                    # 生成 data/sql/demo_eval.db（先于 prepare_eval_kb）
+python3 scripts/prepare_eval_kb.py --recreate      # 文档定稿后再重建：评估语料就是 README + docs/*.md
+python3 scripts/evaluate.py --dataset eval/v8_agentic_expanded.jsonl --validate-only
+# 合并两份集一次跑（只验结构与跨文件唯一，不碰模型也不碰数据库）
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl --validate-only
+python3 scripts/evaluate.py --dataset eval/v8_agentic_expanded.jsonl \
+  --agent-sources config/sources.eval.agent.v8.yaml --configs agent,full --skip-ragas \
+  --output eval/reports/v8_agentic_expanded_baseline.md \
+  --json-output eval/reports/v8_agentic_expanded_baseline.json
+```
+
+`--limit` / `--ids` 在合并以后仍按合并顺序生效。分布、标注口径与限制逐条写在 `eval/README.md` 的
+「v8.7 扩充集」小节；这一项只补齐测量能力，既有结论仍按 v8.3 的噪声底口径读。
+
+2026-11-25 的两轮基线读数：新集 40 条 agentic 的 `evidence_hit@3` 0.571、`source_hit` 0.714、`both_sides_hit` 0.875、
+单条平均 26.2 秒；合并 69 条 agentic 分别是 0.600 / 0.833 / 0.929、单条 24.4 秒。单条样本对均值的影响降到
+±1.7 个百分点（`evidence_hit@3` 的分母是 60 条可答样本），所以「新集 8 条数据侧样本只有 1 条被路由判成数据侧」
+这种判定已经可以说成数字，而跨配置的前后对比仍要按噪声底口径同进程交替另测。
+
 ## MCP 暴露（v8）
 
 把本机知识库当工具给外部客户端用：`scripts/serve_mcp.py` 是一个 stdio 的 MCP server，
@@ -1066,11 +1104,14 @@ scripts/replay_trace.py   决策轨迹回放 CLI
 scripts/serve.py          HTTP 服务入口（单 worker）
 scripts/serve_mcp.py      MCP server 入口（stdio，供 Claude Desktop / Claude Code 调用；`--allow-sql` 才暴露业务库查询）
 scripts/init_demo_db.py   生成演示 SQLite 库
+scripts/init_eval_db.py   生成评估专用 SQLite 库（演示库的超集，只给评估用）
 scripts/prepare_eval_kb.py 构建评估专用知识库
 scripts/evaluate.py       策略评估与报告 CLI
 eval/project_rag_qa.jsonl 40 条固定标注问答（v4）
 eval/v5_paraphrase_qa.jsonl 18 条口语化/复杂问题（v5）
 eval/v7_agent_qa.jsonl    29 条按工具分类的 agentic 问答（v7，含 3 条带对话历史的指代样本）
+eval/v8_agentic_expanded.jsonl 40 条扩充集（v8.7，补 database / mixed / multi_step / coreference，id 全 x 前缀）
+config/sources.eval.agent.v8.yaml 评估专用 SQL 库的 agentic 运行时配置（引用标签沿用 demo.products）
 eval/reports/             v4/v5/v7 Markdown / JSON 报告
 tests/                    pytest 单测 + smoke_test.py
 docs/ROADMAP.md           v1–v8 路线与验收标准

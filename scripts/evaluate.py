@@ -49,8 +49,9 @@ from private_rag.evaluation import (  # noqa: E402
     build_report,
     collect_agent_results,
     collect_results,
-    dataset_fingerprint,
-    load_dataset,
+    datasets_fingerprint,
+    load_multi_dataset,
+    parse_dataset_arg,
     render_markdown,
     run_ragas_for_config,
     validate_distribution,
@@ -69,7 +70,11 @@ def report_path(value: Path | str) -> str:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="运行 private-rag 检索策略评估")
-    parser.add_argument("--dataset", default=str(DEFAULT_DATASET), help="JSONL 评估集")
+    parser.add_argument(
+        "--dataset",
+        default=str(DEFAULT_DATASET),
+        help="JSONL 评估集；逗号分隔可以一次合并多份，合并以后按传入顺序跑",
+    )
     parser.add_argument(
         "--configs",
         default="dense,hybrid,full",
@@ -220,7 +225,8 @@ def build_agent_for_eval(args: argparse.Namespace, engine):
         raise SystemExit(
             "❌ agentic 组需要的数据库不存在："
             + "；".join(missing)
-            + "\n   请先运行：python3 scripts/init_demo_db.py"
+            + "\n   演示库：python3 scripts/init_demo_db.py"
+            + "\n   评估专用库（config/sources.eval.agent.v8.yaml 指向）：python3 scripts/init_eval_db.py"
         )
 
     return build_agent_runtime(
@@ -267,12 +273,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     try:
-        all_samples = load_dataset(args.dataset)
+        dataset_paths = parse_dataset_arg(args.dataset)
+        all_samples = load_multi_dataset(dataset_paths)
     except DatasetError as exc:
         print(f"❌ 评估集校验失败：{exc}")
         return 1
 
-    is_default_dataset = Path(args.dataset).resolve() == Path(DEFAULT_DATASET).resolve()
+    merged_sha256, per_file_sha256 = datasets_fingerprint(dataset_paths)
+    # 只有「恰好一份且就是 v4 固定集」才套用 40 条/类别分布校验；合并跑必然不是固定集
+    is_default_dataset = len(dataset_paths) == 1 and dataset_paths[0].resolve() == Path(
+        DEFAULT_DATASET
+    ).resolve()
     if is_default_dataset and not args.skip_distribution:
         distribution_errors = validate_distribution(all_samples)
         if distribution_errors:
@@ -291,7 +302,12 @@ def main(argv: list[str] | None = None) -> int:
             f"（{answerable} 可回答 + {len(all_samples) - answerable} 应拒答）"
         )
         print(f"   类别：{dict(categories)}")
-        print(f"   SHA256：{dataset_fingerprint(args.dataset)}")
+        if len(dataset_paths) == 1:
+            print(f"   SHA256：{merged_sha256}")
+        else:
+            for path, sha in zip(dataset_paths, per_file_sha256):
+                print(f"   {report_path(path)}：{sha}")
+            print(f"   合并 SHA256：{merged_sha256}")
         return 0
 
     config_names = split_names(args.configs)
@@ -406,14 +422,17 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         engine.close()
 
-    dataset_stem = Path(args.dataset).stem
+    dataset_stem = "+".join(path.stem for path in dataset_paths)
     meta = {
         "report_title": (
             None if is_default_dataset else f"# private-rag 检索策略评估报告：{dataset_stem}"
         ),
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "dataset": report_path(args.dataset),
-        "dataset_sha256": dataset_fingerprint(args.dataset),
+        "dataset": ",".join(report_path(path) for path in dataset_paths),
+        "dataset_sha256": merged_sha256,
+        # 合并跑时逐份留痕：单份时这两个字段与上面两个一一对应，不多出信息
+        "datasets": [report_path(path) for path in dataset_paths],
+        "datasets_sha256": per_file_sha256,
         "dataset_total": len(all_samples),
         "samples_total": len(samples),
         "samples_answerable": sum(1 for sample in samples if sample.answerable),
