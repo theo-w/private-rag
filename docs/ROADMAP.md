@@ -21,7 +21,7 @@
 | v8 | `v8-mcp-kb-search-ask` | MCP 暴露：手写最小 stdio JSON-RPC server（零新增依赖），对外只读工具 `kb_search` / `ask`，`--allow-sql` 才加 `sql_query` | ✅ 本分支完成 | 529 测试通过（既有 430 + 新增 99，不打模型、不打开真实 Qdrant）；`--list-tools` 与 `tools/list` 能看到工具与 input/output schema 并声明只读；本机实跑 `tools/call kb_search` 返回带 `[n]` 编号的证据与含 `page` 的引用载荷、`ask` 返回带 `[1][2]` 的回答与 `meta`，`--allow-sql` 用演示库授权跑通 `sql_query`（3 行结果 + `source_type=sql` 引用）且 `UPDATE` 被护栏拒；同一 `storage/` 被别的进程占用时退出码 3 并给出可操作提示；不暴露入库/写库，运行时 SQL 要过 `--allow-sql` + `allow_runtime_query` + `sql_guard` 三重门（与 agentic 共用 `build_tool_registry`）；选型与代价见 `docs/adr/0004`，边界见 `docs/adr/0005` 与取代其 SQL 一条的 `docs/adr/0006` |
 | v8.5 | `v8-parse-baseline-ab` | 解析基准 A/B：扫描件解析后端可换（`RAG_SCAN_PARSER=selfbuilt\|docling\|mineru`），第三方走独立虚拟环境 + subprocess；四页新 fixture（带边框 / 合并单元格 / 无框线 / 六列）与 8 条评估集；解析层 golden 指标 | ✅ 本分支完成（读数已出，结论「不切换默认后端」） | 577 测试通过（既有 529 + 新增 48，全部打桩，CI 不装第三方解析器）；解析层三侧：docling 4/4 张表、`table_recall` 1.00 / `cell_accuracy` 1.00，selfbuilt 3/4、0.75 / 0.64，mineru（standard 档）3/4、0.75 / 0.75，自建与 MinerU 的缺口都在无框线那一页；端到端三侧同模型：新集 8 条 `evidence_hit@3` selfbuilt 0.571（未命中三条与解析层三个缺陷一一对应）vs docling 1.000 / mineru 1.000，v6 那 6 条三侧同分 1.000 / 0.500 / 0.900 与 v6.2 ON 侧逐字一致；结论与代价见下面的 v8.5 详细验收与 `eval/reports/v8_parse_*` |
 | 语料接入 | `corpus-gdrive-sync` | Google Drive 语料预下载：本机 CLI（rclone / gdrive）把 Drive 文件落到 gitignore 的本地目录，再复用 `type: file` 源入库；联网只在下载这一步，不引入 Google SDK，`source_type` 不扩张 | ✅ 本分支完成（未接真实 Google 账号，见下方详细验收的未完成项） | 456 测试通过（+26 mock 单测，不联网、不打模型）；下载命令拼装与失败信息可测（rclone 导出格式钉 `pdf`、`--mode sync`/`--include`/`--dry-run`、缺 CLI 给安装提示、gdrive 在下载目录里执行且拒绝 dry-run）；仓库内下载目录未被 gitignore 时拒绝同步（ADR 0002 边界，默认目录另有真实 `git check-ignore` 探测）；假下载产物走现有 `run_ingest` 得 `added=2`、BM25 建成、二次运行整批跳过，引用 `source_type=file` + `tags=["gdrive"]`；README 有可操作的授权与「下载 → 入库」步骤，决策见 `docs/adr/0003-google-drive-corpus-cli-prefetch.md` |
-| v8.7 | `v8-agentic-expanded` | 合成测试集扩展：评估专用 SQLite（`data/sql/demo_eval.db`，演示库的超集、沿用 `demo.products` 引用标签）+ agentic 评估集 29→40 条 + `--dataset` 逗号分隔可以把多份集合并成一次跑 | ✅ 本分支完成（基线读数待补） | 647 测试通过（既有 638 + 新增 9，不打模型、不碰数据库）；新集 40 条 = 35 可回答 + 5 应拒答，分布 `knowledge 9 / database 8 / mixed 7 / multi_step 6 / coreference 5 / refusal 5`，id 全 `x` 前缀；`--dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl` 合并 69 条且跨文件 id 与问题唯一，只有一份时 `dataset_sha256` 逐字节不变；评估库前 4 行与 `scripts/init_demo_db.py` 逐字段相等、新增 8 行的类别不含「水果」；CI 由「校验四份评估集」改为「校验五份评估集」并加合并校验；决策见 `docs/adr/0008`，限制见 `eval/README.md` |
+| v8.7 | `v8-agentic-expanded` | 合成测试集扩展：评估专用 SQLite（`data/sql/demo_eval.db`，演示库的超集、沿用 `demo.products` 引用标签）+ agentic 评估集 29→40 条 + `--dataset` 逗号分隔可以把多份集合并成一次跑 | ✅ 本分支完成（基线读数已出） | 647 测试通过（既有 638 + 新增 9，不打模型、不碰数据库）；新集 40 条 = 35 可回答 + 5 应拒答，分布 `knowledge 9 / database 8 / mixed 7 / multi_step 6 / coreference 5 / refusal 5`，id 全 `x` 前缀；`--dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl` 合并 69 条且跨文件 id 与问题唯一，只有一份时 `dataset_sha256` 逐字节不变；评估库前 4 行与 `scripts/init_demo_db.py` 逐字段相等、新增 8 行的类别不含「水果」；CI 由「校验四份评估集」改为「校验五份评估集」并加合并校验；基线读数：新集 agentic `evidence_hit@3` 0.571 / `source_hit` 0.714 / `both_sides_hit` 0.875、单条 26.2s，合并 69 条 agentic 0.600 / 0.833 / 0.929、单条 24.4s，单条样本对均值的影响从 ±3.4pt 降到 ±1.7pt；决策见 `docs/adr/0008`，限制见 `eval/README.md` |
 
 ## v2 详细验收（已完成）
 
@@ -747,12 +747,31 @@ CUDA 上的 vLLM/SGLang 服务，本机 Apple Silicon 跑不了，如实记为�
       不碰模型也不碰数据库）
 - [x] 文档：`eval/README.md` 新小节（分布、证据权威、复现命令、限制）、README 的 `--dataset` 多份用法与目录结构、
       `CONTEXT.md` 新增「评估专用 SQLite」「合并评估运行」两个术语、`docs/adr/0008`
-- [ ] 基线读数：新集 40 条 × `agent,full`（`eval/reports/v8_agentic_expanded_baseline.md`）与合并 69 条的
-      agentic 一轮（`eval/reports/v8_agentic_merged_v7_baseline.md`）——<待填：两条链路的逐条指标与单条耗时>
-- [ ] **读数支持百分比结论**仍然不勾：这一项只把 n 从 29 做到 69，前后对比还要按 v8.3 的噪声底口径
-      （同进程交替跑、指标变化 ≥1 条才当真、耗时作废第一轮）另测；新集基线的首轮耗时含冷启动，不能当对比依据
-- [ ] 新库让工具目录变长（12 行样例进 `_data_catalog`），所以新集基线与 v7 各轮**不做跨轮均值比较**；
-      合并跑里要逐条盯 v7 的 `d03` / `s01`（依赖「这四种水果」语义）有没有翻转
+- [x] 基线读数（2026-11-25，本机单并发，`git_commit = 7eeb0c5`；新集轮 `git_dirty=False`，合并轮 `True` 只是多了
+      正在落盘的报告文件；两轮都 `reranker=有`）。逐条指标与限制见 `eval/README.md` 的「基线读数」小节，
+      报告 `eval/reports/v8_agentic_expanded_baseline.md`（新集 40 条 × `agent,full`）与
+      `eval/reports/v8_agentic_merged_v7_baseline.md`（合并 69 条 × agentic）：
+
+      | 跑法 | n（可答） | evidence_hit@3 | context_precision@3 | mrr@3 | source_hit | both_sides_hit | answer_rate | refusal_accuracy | 上下文字符 | 工具调用 / 步数 | 单条均耗时 |
+      |---|---|---|---|---|---|---|---|---|---|---|---|
+      | 新集 40 · agentic | 40（35） | 0.571（20/35） | 0.305 | 0.505 | 0.714（25/35） | 0.875（7/8） | 0.743（26/35） | 1.000（5/5） | 1961 | 1.78 / 4.18 | 26.2s（检索 0.8 + 生成 25.4） |
+      | 新集 40 · 固定 `full` | 40（35） | 0.229（8/35） | 0.076 | 0.157 | 0.286（10/35） | 0.000（0/8） | 0.286（10/35） | 1.000（5/5） | 1173 | — | 14.2s |
+      | 合并 69 · agentic | 69（60） | 0.600（36/60） | 0.325 | 0.533 | 0.833（50/60） | 0.929（13/14） | 0.817（49/60） | 1.000（9/9） | 1886 | 1.84 / 4.26 | 24.4s |
+
+      第一轮读数作废过一次：本机 `huggingface-hub` 被升到 1.8.0 而 `transformers` 只认 `<1.0`，精排加载失败、
+      每条只花 50 毫秒（等于没调模型），降回 0.36.2 后才重跑。固定链路的低分有结构性原因：35 条可答里 21 条
+      必须查 SQL，而 `full` 没有 SQL 工具，`answer_rate` 天花板是 14/35 = 40%，不能读成链路质量差
+- [x] **单条样本的影响已经小到可以说百分比**：40 条跑里 ±1 条 = ±2.9pt（分母 35 条可答样本），合并 69 条跑里
+      ±1 条 = ±1.7pt（分母 60）。所以「新集 `database` 类别 0/8 命中」这类离噪声底很远的判定可以说百分比——
+      这正是新集第一次量出来的缺口：`xd01`–`xd08` 有 7 条被路由判成 `knowledge`，只调 `kb_search` 就按证据不足
+      拒答，而同一轮里 `multi_step` 6 条意图全判对。两种解释（问法故意不带「库 / 表 / 字段」字样 vs 路由缺关键词
+      就判错）都成立，要区分得同进程交替 A/B
+- [ ] **跨配置的前后对比仍然不勾**：本轮只是基线，没有可比的「改动前后」；而且新库让工具目录变长
+      （12 行样例进 `_data_catalog`），新集基线与 v7 各轮不做跨轮均值比较。合并跑里逐条盯了当初预判会翻转的
+      v7 `d03` / `s01`——**确实翻转**：v7 子集 `evidence_hit@3` 从 v7.5 单跑的 0.800 降到 0.640（25 条可答，−4 条 =
+      −16pt，超出 ±1 条的噪声底），`s01` 与 `s04` 还变成拒答，另有 `s03` / `c02` 掉证据、`m04` 反而 +1。
+      同 commit 同库下新集 40 条在单跑与合并跑之间逐条一致（0/40 翻转），说明翻转来自那 8 行新数据而不是合并
+      本身；但这是跨轮比较（不同日期、不同库、没同进程交替），只能当方向，坐实要演示库 vs 评估库交替重跑
 
 ## 分支与提交约定
 
