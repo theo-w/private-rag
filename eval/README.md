@@ -1483,3 +1483,186 @@ v8.10 `kb_miss_sql_gate`（同 29 条、同三轮）：
   所以旧单测全绿而真实链路一直误拦。新加的 `TestMixedGateSideTracking` 用生产链路的标签样子
   （「SQL 查询（表 demo.products）」与文档标题），并留了一条断言说明关掉新依据时仍然误拦。
 
+## v8.11 边界题 11 条，与「全集 / 可比子集」两套口径（`eval/v8_agentic_edge.jsonl`）
+
+v8.7 把 agentic 集扩到「v7 29 + 新集 40 = 69 条」以后，单条样本对均值的影响从 ±3.4pt 降到 ±1.7pt，
+**读数分辨率够了，但类型还不够**：v7 与 v8 那 69 条里没有「历史里有一句错值」这类题（`coreference` 只考
+「这个项目指谁」，没考「历史里的事实是错的」），也没有「问两件事但其中一侧根本没有这个东西」、
+「SQL 查出来是空集」和「要的是字段原文、不是描述里的说法」。这一轮补这几种边界，同时把「加样本」
+本身变成可复用的动作：一个能一次跑完就看清数据集形状的工具，和一个能从旧报告里按 id 重算子集的工具。
+
+旧 69 条的 id、问题、参考答案、证据句**一字未改**（单测钉住「合并后前 29 个 id 与 v7 逐字相同」，
+以及新 8 条可回答样本的证据与新旧全部证据两两不互为子串）。语料与评估库都没动，所以 v8.7/v8.8 的
+默认档基线不需要因为这一轮重测。
+
+### 补的边界类型（11 条，id 前缀 `xe`）
+
+| id | 类别 | 考什么 |
+| --- | --- | --- |
+| `xe01`/`xe02`/`xe03` | `coreference` | 历史里有一句**错值**，必须回查证据而不是照抄（参考答案明写「是错的」） |
+| `xe04`/`xe05`/`xe06` | `refusal` | 字面词能在检索里撞上（`bge-m3`、「内存」、「渤海渔港」都在语料或库里），但没有任何可答内容 |
+| `xe07`/`xe08` | `mixed` | 问两件事，**其中一侧查无此物或查无此内容**（库里没荔枝、语料没有导入音频），只有单侧可引用 |
+| `xe09` | `multi_step` | SQL 查出来是**空集**（库存低于 20 一条都没有），那一半应回答「没有」而不是编出条目 |
+| `xe10` | `database` | 必须选对列：问 `storage` 字段原文，答成 `description` 里的说法不算命中 |
+| `xe11` | `knowledge` | near-miss 干扰：语料里另有「改写失败就退回原问题」，与「放不下就退回命中的子块」都含「退回」 |
+
+新集的两条 `mixed` 刻意**不**声明 `expected_sources`：它们只有一侧有可逐字引用的原文，声明双侧会让
+`both_sides_hit` 的分母里出现一条永远不可能命中的样本，把那个门禁指标读歪。合并 80 条的分布：
+`knowledge 17 / database 15 / mixed 14 / multi_step 11 / coreference 11 / refusal 12`，
+可回答 68 / 应拒答 12，声明双侧仍是 14 条。
+
+### 两个新工具（都离线，不打模型、不联网、不开真实 Qdrant）
+
+- `scripts/check_eval_dataset.py` — 一次跑完就报告：每条 `evidence` 能否在其 `source` 文件里逐字找到、
+  类别分布、可回答/应拒答配比、声明双侧的条数与清单、带历史的清单、跨文件的 id/问题重复、
+  证据句两两互为子串的清单，以及 SQL 侧样本的证据是否真能在评估专用 SQLite 里查到（验这条时把库建到
+  临时文件，不碰 `data/sql/demo_eval.db`）。结构性问题退出码非 0，`--strict` 把警告也升级为失败。
+  「互为子串」只当警告：v7 那 29 条里有既有重叠（例如 `d05` 的证据句是 `d02` 的一部分、
+  `c02`/`d04`/`s01` 三句完全相同），历史读数钉住了它们，不能因为这个卡住 CI，但清单必须打印出来，
+  加新题时先看清会不会撞上。
+- `scripts/eval_subset_metrics.py` — 从一份报告 JSON 里按 id 子集用同一套 `aggregate_results` 重算指标，
+  于是「一次跑」就能同时给出全集与可比子集两套读数，并把比率差换算成「几条样本」，直接套用
+  「变化不足 1 条不当真」。它反向重建 `SampleResult`，所以口径与当初聚合时一致（单测用
+  `eval/reports/v8_agentic_merged_v7_baseline.json` 钉住 0.600 / 0.833 / 0.929 三个已记录数字）。
+
+### 口径
+
+- 三份合并成一次跑（`--dataset` 逗号分隔），仅 `agent`、`--skip-ragas`、`--max-workers 1`。
+- **同时报三个口径**：全集 80 条（含新 11 条，**不能**与旧报告横向比，均值分母变了）、
+  可比子集 69 条（v7 + v8 那两份的 id，与 v8.7 合并报告同一份 id 清单，可以直接对）、
+  边界 11 条（新样本自己的表现）。三套数字来自**同一份**报告 JSON，用上面的子集工具重算，不是跑三次。
+- 噪声底三条照旧：指标变化 ≥1 条才算真、耗时不作收益依据、**措辞变化不算证据**
+  （但 `citation_rate` / `citation_validity` 会被措辞推动，本轮就撞上一个这样的例子，见限制第 3 条）。
+- 出处：`git_commit = e0f2065`、`git_dirty = False`、语料 346 个向量（README 130 + docs 216）、
+  评估库 12 条记录。跑完核对过精排真的生效：`used_rerank` 80/80、检索均值 1439ms
+  ——精排静默失效时每条只花 50ms 而报告照样出数（见上面 v8.7 的 `huggingface-hub` 教训）。
+
+### 复现命令
+
+```bash
+# 12. v8.11 合并跑 80 条（要打到本机 Ollama，单并发，一轮约 60 分钟；
+#     报告文件名与 run-note 里仍写 v8.9 —— 那是跑批当时的编号，见下面限制）
+python3 scripts/init_eval_db.py
+python3 scripts/prepare_eval_kb.py --recreate
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/evaluate.py \
+  --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl,eval/v8_agentic_edge.jsonl \
+  --configs agent --skip-ragas --max-workers 1 \
+  --agent-sources config/sources.eval.agent.v8.yaml \
+  --output eval/reports/v8_9_edge_merged_baseline.md \
+  --json-output eval/reports/v8_9_edge_merged_baseline.json \
+  --run-note "v8.9 合并跑 80 条（v7 29 + v8 扩充 40 + 边界 11），仅 agentic"
+
+# 三个口径 + 与 v8.7 合并报告同子集对比（离线，只读报告）
+python3 scripts/eval_subset_metrics.py eval/reports/v8_9_edge_merged_baseline.json \
+  --ids-file eval/v7_agent_qa.jsonl --ids-file eval/v8_agentic_expanded.jsonl \
+  --baseline eval/reports/v8_agentic_merged_v7_baseline.json
+python3 scripts/eval_subset_metrics.py eval/reports/v8_9_edge_merged_baseline.json \
+  --ids-file eval/v8_agentic_edge.jsonl
+
+# 数据集自查（离线）
+python3 scripts/check_eval_dataset.py
+```
+
+本轮读数测于 `e0f2065`（只加数据集与工具、没改文档）。把下面的章节写进 `docs/ROADMAP.md` 以后
+评估语料会变长（`docs/*.md` 就是语料），**复现这轮数字要 `git checkout e0f2065` 再 `--recreate`**。
+
+### 读数（2026-11-26，本机单并发 MLX，仅 `agent`，一轮 80 条）
+
+| 指标 | 全集 80 条 | 可比子集 69 条 | 边界 11 条 |
+| --- | --- | --- | --- |
+| `evidence_hit@3` | 0.676（46/68） | 0.683（41/60） | 0.625（5/8） |
+| `evidence_recall@3` | 0.676 | 0.683 | 0.625 |
+| `context_precision@3` | 0.404 | 0.406 | 0.396 |
+| `mrr@3` | 0.613 | 0.622 | 0.542 |
+| `source_hit` | 0.956（65/68） | 0.983（59/60） | 0.750（6/8） |
+| `both_sides_hit` | 0.857（12/14） | 0.857（12/14） | —（不声明双侧） |
+| `answer_rate` | 0.926（63/68） | 0.950（57/60） | 0.750（6/8） |
+| `refusal_accuracy` | 1.000（12/12） | 1.000（9/9） | 1.000（3/3） |
+| `citation_rate` / `citation_validity` | 0.971 / 0.971 | 0.983 / 0.983 | 0.875 / 0.875 |
+| 上下文字符 | 1703 | 1544 | 2702 |
+| 检索片段数 | 2.96 | 2.78 | 4.09 |
+| 平均工具调用 | 1.74（知识 1.18 / 数据 1.11 / 双侧 3.63） | 1.71 | 1.91 |
+| 双工具率 / 门控拦截率 | 0.250 / 0.212（17 条） | 0.261 / 0.232 | 0.182 / 0.091 |
+| 单条均耗时 | 47.8s | 38.8s | 104.1s |
+| `n_errors` | 0 | 0 | 0 |
+
+意图分布 `knowledge 33 / database 28 / mixed 19`；停止原因 `final 54 / max_steps 13 /
+insufficient_evidence 11 / context_budget 2`。68 条可回答样本里被拒答 5 条：`xd08`、`xm03`、`xs02`（旧集）
+与 `xe02`、`xe07`（新集）；12 条应拒答样本全部哨兵拒答。
+
+### 可比子集与 v8.7 合并报告逐项对比（同一份 69 条 id）
+
+| 指标 | v8.7 轮 | 本轮 | 换算成样本条数 |
+| --- | --- | --- | --- |
+| `source_hit` | 0.833（50/60） | 0.983（59/60） | +10.4 条 |
+| `citation_rate` / `citation_validity` | 0.833 | 0.983 | +10.4 条 |
+| `answer_rate` | 0.817（49/60） | 0.950（57/60） | +9.2 条 |
+| `evidence_hit@3` | 0.600（36/60） | 0.683（41/60） | +5.8 条 |
+| `mrr@3` | 0.533 | 0.622 | +6.1 条 |
+| `both_sides_hit` | 0.929（13/14） | 0.857（12/14） | −4.9 条（=1 条，噪声底量级） |
+| `refusal_accuracy` | 1.000 | 1.000 | 持平 |
+| 单条均耗时 | 24.4s | 38.8s | 不作依据 |
+
+**这些涨幅不是我这 11 条带来的**（新样本不在子集里），也不是新一轮测出来的「改动收益」——它是跨轮比较，
+按项目口径只能看方向。差异的来源可以从逐条里读出来：`v8.8` 的数据侧路由修复已在 `main` 里，
+7 条 `database` 类别样本（`xd01`–`xd07`）的意图从 `knowledge` 变 `database`、从 `insufficient_evidence`
+拒答变 `final` 作答，整轮意图 `database` 从 17 条涨到 28 条、`insufficient_evidence` 从 17 条降到 11 条、
+`final` 从 39 条涨到 54 条。上一轮的出处也更软：那份报告记 `git_commit=7eeb0c5`、`git_dirty=True`。
+`both_sides_hit` 少的那 1 条是 `xm02`（本轮 `xm02` 与 `xm05` 各缺一侧，上一轮只有 `xm05`）——
+14 条分母里 ±1 条 = ±7.1pt，正好等于漂移量级，判不可判定。
+
+### 边界 11 条逐条（2026-11-26）
+
+| id | 类别 | 意图 | 工具/步数 | 停止原因 | 拒答 | `evidence@3` | `source_hit` | 耗时 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `xe01` | coreference | `database` | 1 / 3 | `final` | 否 | 1 | 1 | 49.6s |
+| `xe02` | coreference | `knowledge` | 1 / 3 | `insufficient_evidence` | **是（应答未答）** | 0 | 0 | 81.6s |
+| `xe03` | coreference | `knowledge` | 1 / 3 | `final` | 否 | 0 | 1 | 52.3s |
+| `xe04` | refusal | `knowledge` | 3 / 6 | `context_budget` | 是（正确） | — | — | 130.1s |
+| `xe05` | refusal | `knowledge` | 1 / 3 | `insufficient_evidence` | 是（正确） | — | — | 65.4s |
+| `xe06` | refusal | `knowledge` | 3 / 5 | `insufficient_evidence` | 是（正确） | — | — | 108.5s |
+| `xe07` | mixed | `mixed` | 3 / 6 | `context_budget` | **是（见限制第 3 条）** | 0 | 0 | 270.1s |
+| `xe08` | mixed | `mixed` | 4 / 8 | `max_steps` | 否 | 1 | 1 | 154.1s |
+| `xe09` | multi_step | `database` | 2 / 4 | `final` | 否 | 1 | 1 | 100.6s |
+| `xe10` | database | `database` | 1 / 3 | `final` | 否 | 1 | 1 | 40.1s |
+| `xe11` | knowledge | `knowledge` | 1 / 3 | `final` | 否 | 1 | 1 | 93.0s |
+
+三条「历史里有错值」的题里两条答对（`xe01` 回到库里的说法、`xe03` 说明默认关闭并退回原问题，
+都没照抄历史里的错值）。`xe02` 的失败机制是清楚的：问题被指代省掉了商品名（「那过期一天到底还能不能喝」），
+路由器看不到「酸奶」这个词，判了 `knowledge` 就没去查 SQL，而那句说法只存在于评估库那一行里，
+文档侧查不到 → 按证据不足拒答。这是链路的真实缺陷，不是标注写错，本轮没有为了让数字好看去改题。
+`xe03` 答案与引用都对，只是证据句没进 top-3 上下文——`evidence_hit@3` 是窗口口径，这类「答对但不进窗口」
+在旧集里也有（见上面 v7.3 的 `k06`/`m04`）。
+
+耗时是这一轮最需要解释的一项：边界 11 条单条 104.1s，是可比子集 38.8s 的 2.7 倍，全集均值因此被抬到 47.8s。
+最慢的 8 条里有 4 条来自新集（`xe07` 270.1s、`xe08` 154.1s、`xe04` 130.1s、`xe06` 108.5s），
+本轮仅有的 2 条 `context_budget` 收口（上一轮 1 条）也都是新样本。机制与新样本的形态一致：
+一条问题里有两个子问题、又有一侧查不到，循环就会反复补取证，上下文字符 2702 vs 子集 1544。
+所以扩集以后**跨配置比耗时更不可靠**，耗时只在同一次跑里当参考。
+
+### 限制（引用这轮数字时一并带上）
+
+- **全集 80 条的数字不能与 v8.7/v8.8 的记录横向比**：均值分母从 60 条可回答变成 68 条，且新样本改变了
+  类别配比。要与旧报告对，只能用上面的「可比子集 69 条」那一列。
+- **同子集那组涨幅是跨轮比较**，只支撑方向。逐条已经指出主因是 `v8.8` 的路由修复，不是本轮加的题目；
+  上一轮报告还带着 `git_dirty=True`，出处不够硬。要坐实得在同一进程里交替跑。
+- **`xe07` 暴露的是判定式的脆弱，不是模型行为差异**：它是「一侧查无此物」的 `mixed` 题，按参考答案答对
+  就必须写出「查不到」，而 `is_refusal` 的判式是「答案里出现拒答标记字符串就算拒答」，于是这条答对的样本
+  被记成拒答、`answer_rate` 扣 1。同样只答对一半的 `xe08` 因为措辞里没出现那个标记，被记成已回答。
+  两条的差别只在措辞，按「措辞不算证据」这条不算行为差异。本轮**没有**改判定口径（改了会让历史读数
+  不可比），只把这个坑记下来：这类「一侧查无」的样本进集以后，`answer_rate` 与 `refusal_accuracy`
+  的解读都要加一句「单侧缺证据的样本可能被记成拒答」。
+- **本轮测于文档改动之前的语料**：写进 `docs/ROADMAP.md` 与本文的章节会让 `docs/*.md` 变长，
+  旧题的命中可能跟着变。复现这轮数字必须 `git checkout e0f2065` 再 `prepare_eval_kb.py --recreate`。
+- **自查工具报的 12 条警告全是 v7 既有重叠**（涉及 `xe` 的 0 条），所以「结构性问题 0 条」的含义是
+  新题没撞任何既有证据，不代表整个数据集没有证据句互相包含。
+- **这一轮测于 PR #29（章节树索引）与 PR #34（两道门控）合入之前**：当时树索引默认关闭、两道门控还没合入，
+  这两件事都不改变这 11 条边界题的口径，但会让旧题的命中与步数变，所以与这两个改动之后的任何轮次比较
+  只能看方向。
+- **报告文件名与 run-note 里的 `v8_9` / 「v8.9 合并跑」是跑批当时的编号**（那时 PR #34 还没合进 `main`，
+  `v8.9` 还没被 mixed 门控占用）。本节编号已按「合进 `main` 的先后」改为 v8.11，文件名与 run-note 没改，
+  是为了与报告 JSON 里记录的 `run_note`、`git_commit` 保持一致。
+- **两种边界没做**，因为必须动语料或评估库才能成立：「两个事实分属两侧但其中一个在 SQL 里是 NULL」
+  （评估库 12 行没有 NULL）、以及「文档侧与 SQL 侧说法冲突时以哪侧为准」（语料里没有互相矛盾的陈述，
+  加一句会改变所有旧题的检索行为）。本轮用「查空集不许编造」（`xe09`）与「一侧查无此物」（`xe07`）
+  当它们的近邻替身：能说明「查不到时会不会编」，说明不了「字段是 NULL 时会不会编」。

@@ -1586,3 +1586,190 @@ def test_prompt_fingerprint_stable_hex():
     assert first == _prompt_fingerprint()
     assert len(first) == 16
     int(first, 16)
+
+
+# --------------------------------------------------------------------------- #
+# v8.9 边界题集（eval/v8_agentic_edge.jsonl）与两个离线工具
+# --------------------------------------------------------------------------- #
+
+EDGE_DATASET = Path(config.ROOT) / "eval" / "v8_agentic_edge.jsonl"
+EDGE_SQL_IDS = ["xe01", "xe02", "xe08", "xe09", "xe10"]
+
+
+def test_v8_edge_dataset_is_valid():
+    samples = load_dataset(EDGE_DATASET)
+    assert len(samples) == 11
+    assert sum(1 for sample in samples if sample.answerable) == 8
+    assert sum(1 for sample in samples if not sample.answerable) == 3
+    for category, expected in {
+        "knowledge": 1,
+        "database": 1,
+        "mixed": 2,
+        "multi_step": 1,
+        "coreference": 3,
+        "refusal": 3,
+    }.items():
+        assert _category_count(samples, category) == expected, category
+
+    sql_samples = [sample for sample in samples if sample.source == "scripts/init_eval_db.py"]
+    assert [sample.id for sample in sql_samples] == EDGE_SQL_IDS
+    assert all(sample.expected_source == "demo.products" for sample in sql_samples)
+
+    # 这一集刻意不声明双侧：两条 mixed 都只有一侧有可逐字引用的原文
+    assert sum(1 for sample in samples if len(sample.expected_sources) >= 2) == 0
+
+    # 带历史的三条都是「历史里有错值、必须回查证据」型
+    with_history = [sample for sample in samples if sample.history]
+    assert [sample.id for sample in with_history] == ["xe01", "xe02", "xe03"]
+    for sample in with_history:
+        assert len(sample.history) == 2
+        assert "是错的" in sample.reference, sample.id
+
+    # mixed 的两条各缺一侧：xe07 缺 SQL 侧（库里没荔枝），xe08 缺文档侧（没有音频入库说明）
+    mixed = [sample for sample in samples if sample.category == "mixed"]
+    assert [sample.id for sample in mixed] == ["xe07", "xe08"]
+    assert mixed[0].expected_source == "" and mixed[0].source.startswith("docs/")
+    assert mixed[1].expected_source == "demo.products"
+
+
+def test_v8_edge_evidence_does_not_collide_with_existing_sets():
+    """新题的证据句不得与任何既有证据互为子串：一次检索命中不该同时满足两条样本。
+
+    v7 那 29 条内部已有既有重叠（历史读数钉住了它们，不能改），所以只约束新题这一侧。
+    """
+    old = load_dataset(Path(config.ROOT) / "eval" / "v7_agent_qa.jsonl") + load_dataset(
+        Path(config.ROOT) / "eval" / "v8_agentic_expanded.jsonl"
+    )
+    old_needles = [normalize_text(item) for sample in old for item in sample.evidence]
+    new_needles = [normalize_text(item) for sample in load_dataset(EDGE_DATASET) for item in sample.evidence]
+    assert len(new_needles) == len(set(new_needles)) == 8
+    for needle in new_needles:
+        for other in new_needles + old_needles:
+            if other != needle:
+                assert needle not in other, (needle, other)
+                assert other not in needle, (needle, other)
+
+
+def test_v8_edge_sql_evidence_lands_on_one_row(tmp_path: Path, monkeypatch):
+    """SQL 侧证据必须能在评估库能被引用的三列里查到，而且只落在一条记录上。
+
+    落在两条记录上时，检索到错的那一条也算命中，evidence_hit 就失去意义。
+    """
+    eval_db = _load_script("init_eval_db")
+    db_path = tmp_path / "demo_eval.db"
+    monkeypatch.setattr(eval_db, "DB_PATH", db_path)
+    assert eval_db.main() == 0
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute("SELECT description, storage, supplier FROM products").fetchall()
+    samples = load_dataset(EDGE_DATASET)
+    for sample in samples:
+        if sample.source != "scripts/init_eval_db.py":
+            continue
+        for item in sample.evidence:
+            needle = normalize_text(item)
+            hits = [row for row in rows if needle in normalize_text(" ".join(row))]
+            assert len(hits) == 1, (sample.id, item, len(hits))
+
+
+def test_v8_edge_refusal_questions_are_literal_collisions_without_answer():
+    """三条拒答题的设计前提：字面词能在检索里撞上，但语料/库里都没有能答的内容。"""
+    corpus = "\n".join(
+        [Path(config.ROOT / "README.md").read_text(encoding="utf-8")]
+        + [path.read_text(encoding="utf-8") for path in Path(config.ROOT / "docs").glob("*.md")]
+    )
+    assert "bge-m3" in corpus
+    assert "内存" in corpus
+    assert "渤海渔港" in Path(config.ROOT / "scripts" / "init_eval_db.py").read_text(encoding="utf-8")
+    # 缺的那块信息一个字都不能在语料里，否则拒答判定就变成碰运气
+    for absent in ("维度", "显存", "供货周期", "多少维"):
+        assert absent not in corpus, absent
+    samples = load_dataset(EDGE_DATASET)
+    for sample in samples:
+        if sample.id in {"xe04", "xe05", "xe06"}:
+            assert not sample.answerable and sample.category == "refusal"
+
+
+def test_merged_agentic_sets_are_80_samples_with_unique_ids():
+    """三份 agentic 集合并起来是 80 条，且旧 69 条的 id 一个不变（可比性前提）。"""
+    paths = [
+        Path(config.ROOT) / "eval" / "v7_agent_qa.jsonl",
+        Path(config.ROOT) / "eval" / "v8_agentic_expanded.jsonl",
+        EDGE_DATASET,
+    ]
+    samples = load_multi_dataset(paths)
+    assert len(samples) == 80
+    ids = [sample.id for sample in samples]
+    assert len(set(ids)) == 80
+    v7_ids = [sample.id for sample in load_dataset(paths[0])]
+    assert [sample.id for sample in samples][: len(v7_ids)] == v7_ids
+    assert sum(1 for sample in samples if sample.answerable) == 68
+    assert sum(1 for sample in samples if not sample.answerable) == 12
+    for category, expected in {
+        "knowledge": 17,
+        "database": 15,
+        "mixed": 14,
+        "multi_step": 11,
+        "coreference": 11,
+        "refusal": 12,
+    }.items():
+        assert _category_count(samples, category) == expected, category
+    assert sum(1 for sample in samples if len(sample.expected_sources) >= 2) == 14
+
+
+def test_check_eval_dataset_passes_on_all_agentic_sets(capsys):
+    checker = _load_script("check_eval_dataset")
+    assert checker.main([]) == 0
+    out = capsys.readouterr().out
+    assert "合计 80 条" in out
+    assert "结构性问题：0 条" in out
+
+
+def test_check_eval_dataset_strict_flags_legacy_overlaps(capsys):
+    """既有重叠是真实现象（v7 内部有多组同句证据），--strict 必须把它们报出来。"""
+    checker = _load_script("check_eval_dataset")
+    assert checker.main(["--strict"]) == 1
+    assert "互为子串" in capsys.readouterr().out
+
+
+def test_check_eval_dataset_reports_evidence_that_is_not_in_source(tmp_path: Path, capsys):
+    checker = _load_script("check_eval_dataset")
+    bad = tmp_path / "bad.jsonl"
+    bad.write_text(
+        json.dumps(
+            {
+                "id": "z01",
+                "question": "问什么？",
+                "reference": "答什么。",
+                "evidence": ["这段文字不在任何文件里"],
+                "source": "README.md",
+                "category": "knowledge",
+                "answerable": True,
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert checker.main([str(bad)]) == 1
+    assert "找不到" in capsys.readouterr().out
+
+
+def test_eval_subset_metrics_rebuilds_recorded_numbers():
+    """子集口径脚本必须逐字还原报告里已记录的读数，否则「可比子集」这个数字不可信。"""
+    script = _load_script("eval_subset_metrics")
+    report, results = script.load_report(
+        Path(config.ROOT) / "eval" / "reports" / "v8_agentic_merged_v7_baseline.json"
+    )
+    agent = [item for item in results if item.config == "agent"]
+    assert len(agent) == 69
+    assert report["meta"]["git_commit"].startswith("7eeb0c5")
+    merged = aggregate_results(agent)
+    assert merged["evidence_hit@3"] == pytest.approx(0.6)
+    assert merged["source_hit"] == pytest.approx(0.833333, abs=1e-4)
+    assert merged["both_sides_hit"] == pytest.approx(0.928571, abs=1e-4)
+    v7_ids = set(script.ids_from_dataset(Path(config.ROOT) / "eval" / "v7_agent_qa.jsonl"))
+    assert len(v7_ids) == 29
+    subset = aggregate_results([item for item in agent if item.sample_id in v7_ids])
+    assert subset["n_answerable"] == 25
+    assert subset["n_refusal"] == 4
+    assert subset["both_sides_hit"] == pytest.approx(1.0)
