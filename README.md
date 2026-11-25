@@ -222,6 +222,8 @@ event: error      data: {"code":"generation_failed","message":"...","request_id"
 | `RAG_MAX_HISTORY_MESSAGE_CHARS` | 800 | 历史中单条消息截断长度 |
 | `RAG_DISABLE_RERANK` | 未设置 | 设为 `1/true/yes/on` 时跳过 reranker |
 | `RAG_DISABLE_AGENT_NONE_PROBE` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：路由判 `none` 就跳过检索直接拒答（默认先用原问题做一次验证检索） |
+| `RAG_DISABLE_AGENT_GATE_SIDE_TRACKING` | 未设置 | 设为 `1/true/yes/on` 时 mixed 门控退回旧行为：拿证据块的标签文字找工具名来认「这一侧查过没有」（真实证据块的标签里没有工具名，等于永远判一侧没查过，每条 mixed 都被反复逼到步数用尽） |
+| `RAG_DISABLE_AGENT_KB_MISS_SQL_GATE` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：意图判 `knowledge` 而文档侧查不到那项事实就直接按证据不足拒答（默认在拒答之前，若问题指名的实体出现在「库内数据」的取值里，先按该实体查一次业务表） |
 | `RAG_AGENT_PLANNER_MODE` | `json` | 设为 `function` 时路由/步进决策改走原生 function calling（同一提示词与预算，见 `ask_tool_json`）；非法值归一为 `json`。两条通道的对比读数见 `eval/reports/fc_comparison_report.md` |
 
 ## v4 自动评估（Ragas）
@@ -456,6 +458,13 @@ RAG_AGENT_SOURCES_CONFIG=config/sources.demo.yaml python3 scripts/serve.py --por
 
 `none` 不再是一张免检通行证：路由器判 `none` 只说明它「猜两侧都查不到」，而拒答的正当理由只有「查过了，证据里没有」。所以判成 `none` 时不再直接拒答，而是先用原问题做一次知识库验证检索——查到东西就照常作答，并把意图按实际作答依据报成 `knowledge`；查不到才返回拒答哨兵，`stop_reason` 记 `no_evidence`。代价是一条真正无关的问题多花一次 `kb_search`（仍受 `RAG_AGENT_MAX_STEPS` 约束）；`RAG_DISABLE_AGENT_NONE_PROBE=1` 退回「判 none 就直接拒答」的旧行为，知识库工具不可用时同样走旧行为。路由提示词同步收紧准入：`none` 只留给实时信息、天气、新闻、外部网站内容、主观偏好这类明确在本系统之外的事实，问到某条业务记录、某个字段或本系统自身的文档时一律先取证——字段里到底有没有，要查过才知道。v7 评估集 26 条复跑（`eval/reports/v7_2_nonegate_report.md`）：路由判 `none` 的样本从 1 条变成 0 条、`no_retrieval` 也从 1 条降到 0 条，4 条应拒答样本仍全部拒答（`refusal_accuracy` 1.000 持平），`citation_rate` 0.955→1.000，平均工具调用 1.31→1.42。
 
+拒答之前的最后一道兜底：意图被判成 `knowledge`、模型声明「证据不足」，而问题指名的实体出现在 `sql_query`
+描述那段「库内数据」的取值样例里时，不再直接拒答，先按那个实体查一次业务表再判——「字段里到底有没有」
+要查过才知道，而路由器只看得到工具描述、同一条提示词在温度 0 下也会翻动（读数见 `eval/README.md`）。
+实体认的是同一份目录，顺带拿到它所在的表与列，所以强制的那次查询按实体过滤而不是整表 `SELECT`，
+不会被行数与字符预算截掉靠后的记录。一条问题只兜一次，`sql_query` 已经跑过就不再兜；
+`RAG_DISABLE_AGENT_KB_MISS_SQL_GATE=1` 退回「文档侧缺那项事实就拒答」的原行为。
+
 决策走 JSON 模式，路由与步进两次调用共用 `RAG_AGENT_PLANNER_TOKENS`（默认 2000）输出预算。本机默认模型是推理型，会先输出一段不可见的思考内容：预算给小了（实跑时用的 400）模型只吐思考、正文为空，路由就会整段回退到关键词判断。轨迹里会写明回退原因，看到「模型输出中没有 JSON 对象」就先怀疑这个预算。
 同一份提示词也量过原生 function calling（2026-11-22，`scripts/compare_fc_decisions.py`，读数 `eval/reports/fc_comparison_report.md`）：默认模型 qwen3.8:27b-mlx 路由 12/12、步进 3/3 都返回了可用的 `tool_calls`，路由单条均耗时 18.8 秒（快于 JSON 模式的 27.0 秒），两通道意图一致率 0.75；对照组 qwen2.5:7b-instruct 只有 4/12 成功——提示词仍写着「只输出 JSON」，该模型多数情况直接吐 JSON 文本而不调工具，失败数含这个混淆，不能读成模型不支持工具调用。JSON 模式仍是默认：任何模型可用，切默认前需先跑 29 条评估确认无回归；`RAG_AGENT_PLANNER_MODE=function` 仅作实验开关。
 
@@ -533,7 +542,12 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent,ful
 python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --no-agent-sql --skip-ragas
 ```
 
-`agent` 组的口径与固定链路不同义，报告的限制小节逐条写明：耗时是整条循环的墙钟时间（`avg_retrieval_ms` 只记工具执行耗时，其余归 `avg_generation_ms`）；`avg_tool_calls` / `avg_tool_steps` 只有 agentic 组有值；`evidence_hit` 取决于模型 SELECT 了哪些列（只取 `name`/`price` 时答案可以全对但证据判 0）；默认单轮，但带 `history` 字段的样本（v7.3 起 3 条指代消解样本）会把对话历史原样传给 agentic 链路，报告用 `history_turns` 标出哪几条走了多轮；v7.4 起混合样本可用 `expected_sources` 声明「文档侧 + SQL 侧」，新读数 `both_sides_hit` 要求声明的每一侧都被引用到（扫全量引用、不套 `@3` 窗口），旧指标定义未动。v7.4 首轮 29 条实跑里 6 条双侧样本两侧取证全中（`both_sides_hit` 1.000，含上一轮只查文档侧、没回查 SQL 的 c03，那轮的既有数据按新口径回算是 0.833），`source_hit` 0.960 与上轮同为 m04 一条未命中，`mrr@3` 的 -0.020 全部来自 k05 一条排位后移，单条平均 82.6 秒，报告 `eval/reports/v7_4_two_sided_report.md`。修法 A（提示词硬规则）已做：STEP_PROMPT 规则 1 限定 sufficient 只看「已收集的证据」（不含历史），新增规则 10 禁止 mixed 查询在任一侧无证据时选 final；FINAL_PROMPT 新增规则 7 要求历史里的事实必须先查证据，历史段渲染加上「不能作为事实依据」标注。A/B 重复采样 5×修法 A vs 5×无修法 A：修法 A 将 c03 的 SQL 回查率从 20%（1/5）提升到 100%（5/5），修法 A 有效。修法 C（运行时硬门禁）仍为未勾项，作为修法 A 不奏效时的兜底。读数出处复核（2026-11-21）：上面「6 条双侧样本两侧取证全中」测于 `2e912379f`，早于修法 A，不能当修法 A 的依据；A/B 两组记录的提交号同为 `d43b314`，区分不了两组提示词，而被验证的三条硬规则又曾在 `978a63f` 里被删掉、本分支已恢复并复采到 5/5，经过见 `docs/ROADMAP.md` 的「修法 A 的读数出处与一次提示词回退」。评估运行会设 `RAG_DISABLE_AGENT_TRACE=1`，不把评估样本写进演示轨迹。
+`agent` 组的口径与固定链路不同义，报告的限制小节逐条写明：耗时是整条循环的墙钟时间（`avg_retrieval_ms` 只记工具执行耗时，其余归 `avg_generation_ms`）；`avg_tool_calls` / `avg_tool_steps` 只有 agentic 组有值；`evidence_hit` 取决于模型 SELECT 了哪些列（只取 `name`/`price` 时答案可以全对但证据判 0）；默认单轮，但带 `history` 字段的样本（v7.3 起 3 条指代消解样本）会把对话历史原样传给 agentic 链路，报告用 `history_turns` 标出哪几条走了多轮；v7.4 起混合样本可用 `expected_sources` 声明「文档侧 + SQL 侧」，新读数 `both_sides_hit` 要求声明的每一侧都被引用到（扫全量引用、不套 `@3` 窗口），旧指标定义未动。v7.4 首轮 29 条实跑里 6 条双侧样本两侧取证全中（`both_sides_hit` 1.000，含上一轮只查文档侧、没回查 SQL 的 c03，那轮的既有数据按新口径回算是 0.833），`source_hit` 0.960 与上轮同为 m04 一条未命中，`mrr@3` 的 -0.020 全部来自 k05 一条排位后移，单条平均 82.6 秒，报告 `eval/reports/v7_4_two_sided_report.md`。修法 A（提示词硬规则）已做：STEP_PROMPT 规则 1 限定 sufficient 只看「已收集的证据」（不含历史），新增规则 10 禁止 mixed 查询在任一侧无证据时选 final；FINAL_PROMPT 新增规则 7 要求历史里的事实必须先查证据，历史段渲染加上「不能作为事实依据」标注。A/B 重复采样 5×修法 A vs 5×无修法 A：修法 A 将 c03 的 SQL 回查率从 20%（1/5）提升到 100%（5/5），修法 A 有效。修法 C（运行时硬门禁）已实现：`intent=mixed` 时代码级禁止在某一侧没查过的情况下选 `final`，
+`RAG_DISABLE_AGENT_MIXED_GATE=1` 可以关掉。它原来拿证据块的**标签文字**找工具名来认侧别，
+而真实证据块的标签是「SQL 查询（表 …）」与文档标题、里面没有工具名，等于永远判「一侧没查过」，
+每条 mixed 都被反复逼到步数用尽（旧报告里 mixed 样本 `tools=4`、`stop_reason=max_steps` 就是这个）；
+现在改看工具到底跑过没有，并规定每一侧最多逼一次、那一侧没挂工具就不逼。
+前后读数与噪声底见 `eval/README.md` 的「v8.9 / v8.10 两道门控的前后对比」。读数出处复核（2026-11-21）：上面「6 条双侧样本两侧取证全中」测于 `2e912379f`，早于修法 A，不能当修法 A 的依据；A/B 两组记录的提交号同为 `d43b314`，区分不了两组提示词，而被验证的三条硬规则又曾在 `978a63f` 里被删掉、本分支已恢复并复采到 5/5，经过见 `docs/ROADMAP.md` 的「修法 A 的读数出处与一次提示词回退」。评估运行会设 `RAG_DISABLE_AGENT_TRACE=1`，不把评估样本写进演示轨迹。
 
 **v7.3 指代消解实跑**（2026-11-20，29 条 = 25 可回答 + 4 应拒答，只跑确定性指标）：3 条带 `history` 的指代样本全部还原成功——c01 按上一轮的「精排」答对、c02 把「它」还原成橙子并走 `sql_query`、c03 判 `mixed`；同 26 条子集与上一轮比 `answer_rate`/`source_hit`/`refusal_accuracy` 持平，`evidence_hit@3` -0.045 与 `citation_rate` -0.045 各自都能落到单条样本上（`@3` 窗口与生成截断），逐条机制见 `eval/README.md`，报告 `eval/reports/v7_3_coreference_report.md`。
 

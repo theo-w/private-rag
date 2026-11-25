@@ -16,6 +16,7 @@ from private_rag.agent.planner import Planner, RouteDecision, StepDecision
 from private_rag.agent.runtime import (
     AgentOptions,
     AgentRuntime,
+    _catalog_entities,
     _data_catalog,
     build_agent_runtime,
     build_tool_registry,
@@ -1026,6 +1027,302 @@ class TestMixedGate:
         assert len(step_events) == 2  # sql_query + kb_search
         assert len(sql.calls) == 1
         assert len(kb.calls) == 1
+
+
+class TestMixedGateSideTracking:
+    """mixed 门控认「这一侧查过没有」的依据：真实证据块的标签里没有工具名，
+    按标签文字认等于两侧永远零证据，每条 mixed 都会被反复逼到步数用尽。
+    """
+
+    # 生产链路里两个工具的块标签长这样：SQL 侧写表名，文档侧写引用标题
+    SQL_BLOCKS = [
+        ToolBlock(
+            "SQL 查询（表 demo.products）",
+            "name | price\n香蕉 | 3.5",
+            Citation(2, "SQL 查询（表 demo.products）", "sql", "sqlite://", "demo.products"),
+        )
+    ]
+    KB_BLOCKS = [
+        ToolBlock("保存规范.md", "香蕉常温催熟后冷藏", Citation(1, "保存规范.md", "file", "u", "s"))
+    ]
+
+    def both_sides_ran(self, tmp_path, *, extra_final=False, tracking=None):
+        """两侧都真的查过（块标签取生产链路的样子），模型随后选 final。"""
+        kb = RecordingTool("kb_search", blocks=self.KB_BLOCKS)
+        sql = RecordingTool("sql_query", blocks=self.SQL_BLOCKS)
+        decisions = [
+            StepDecision(action="tool", tool="sql_query", args={"sql": "SELECT name FROM products"}, reason="查数值"),
+            StepDecision(action="final", reason="齐了", answer="香蕉 3.5 元，常温催熟后冷藏[1][2]"),
+        ]
+        if extra_final:
+            decisions.append(StepDecision(action="final", reason="齐了", answer="香蕉 3.5 元[1][2]"))
+        kwargs = {} if tracking is None else {"gate_side_tracking": tracking}
+        runtime = make_runtime(
+            tmp_path,
+            [kb, sql],
+            ScriptedPlanner(
+                route=RouteDecision(
+                    intent="mixed",
+                    action={"tool": "kb_search", "args": {"query": "香蕉 保存"}},
+                    reason="双侧取证",
+                ),
+                decisions=decisions,
+            ),
+            **kwargs,
+        )
+        return runtime.run("香蕉多少钱，怎么保存"), kb, sql
+
+    def test_both_sides_ran_with_production_labels_passes(self, tmp_path):
+        """两侧都查过，门控不该再逼第三次调用——改动前这里会连拦两次直到步数用尽。"""
+        result, kb, sql = self.both_sides_ran(tmp_path)
+
+        assert result.stop_reason == "final"
+        assert result.tool_calls == 2
+        assert len(kb.calls) == 1 and len(sql.calls) == 1
+        assert result.gate_intercepts == 0
+        assert [s.kind for s in result.steps].count("gate") == 0
+
+    def test_label_matching_still_misfires_when_tracking_off(self, tmp_path):
+        """退回老行为：同样两侧都查过，按标签文字认仍然判「一侧零证据」，
+        每次 final 都被拦，一直逼到步数用尽——这就是旧报告里 mixed 样本 tools=4/gate=2 的来路。"""
+        result, kb, sql = self.both_sides_ran(tmp_path, extra_final=True, tracking=False)
+
+        assert result.gate_intercepts == 2
+        assert len(kb.calls) == 3  # 每次都要 final 都被拦，一直逼到步数用尽
+        assert result.stop_reason == "max_steps"
+
+    def test_gate_forces_the_side_that_never_ran(self, tmp_path):
+        """只查了文档侧时，门控逼一次 SQL 侧；那一侧跑完以后就放行 final。"""
+        kb = RecordingTool("kb_search", blocks=self.KB_BLOCKS)
+        sql = RecordingTool("sql_query", blocks=self.SQL_BLOCKS)
+        runtime = make_runtime(
+            tmp_path,
+            [kb, sql],
+            ScriptedPlanner(
+                route=RouteDecision(
+                    intent="mixed",
+                    action={"tool": "kb_search", "args": {"query": "香蕉 保存"}},
+                    reason="双侧取证",
+                ),
+                decisions=[
+                    StepDecision(action="final", reason="够了", answer="常温催熟后冷藏[1]"),
+                    StepDecision(action="final", reason="齐了", answer="香蕉 3.5 元，常温催熟后冷藏[1][2]"),
+                ],
+            ),
+        )
+        result = runtime.run("香蕉多少钱，怎么保存")
+
+        assert len(sql.calls) == 1 and len(kb.calls) == 1
+        assert result.gate_intercepts == 1
+        assert result.stop_reason == "final"
+
+    def test_gate_forces_a_side_at_most_once(self, tmp_path):
+        """SQL 侧每次都失败也只逼一次：问过了没问过了要分得开，反复逼只会把步数烧光。"""
+        kb = RecordingTool("kb_search", blocks=self.KB_BLOCKS)
+        sql = RecordingTool("sql_query", error="表不存在")
+        runtime = make_runtime(
+            tmp_path,
+            [kb, sql],
+            ScriptedPlanner(
+                route=RouteDecision(
+                    intent="mixed",
+                    action={"tool": "kb_search", "args": {"query": "香蕉 保存"}},
+                    reason="双侧取证",
+                ),
+                decisions=[
+                    StepDecision(action="final", reason="够了", answer="常温催熟后冷藏[1]"),
+                    StepDecision(action="final", reason="就这样", answer="常温催熟后冷藏[1]"),
+                    StepDecision(action="final", reason="就这样", answer="常温催熟后冷藏[1]"),
+                ],
+            ),
+        )
+        result = runtime.run("香蕉多少钱，怎么保存")
+
+        assert result.gate_intercepts == 1
+        assert len(sql.calls) == 1
+        assert result.stop_reason == "final"
+
+    def test_gate_does_not_force_a_missing_tool(self, tmp_path):
+        """没挂 sql_query 时不逼一个不存在的工具：白烧一步，且永远补不上。"""
+        kb = RecordingTool("kb_search", blocks=self.KB_BLOCKS)
+        runtime = make_runtime(
+            tmp_path,
+            [kb],
+            ScriptedPlanner(
+                route=RouteDecision(
+                    intent="mixed",
+                    action={"tool": "kb_search", "args": {"query": "香蕉 保存"}},
+                    reason="双侧取证",
+                ),
+                decisions=[
+                    StepDecision(action="final", reason="够了", answer="常温催熟后冷藏[1]"),
+                ],
+            ),
+        )
+        result = runtime.run("香蕉怎么保存")
+
+        assert result.gate_intercepts == 0
+        assert result.stop_reason == "final"
+        assert result.tool_calls == 1
+
+    def test_tracking_in_stream(self, tmp_path):
+        """run_stream 里同样按执行记录认侧别。"""
+        kb = RecordingTool("kb_search", blocks=self.KB_BLOCKS)
+        sql = RecordingTool("sql_query", blocks=self.SQL_BLOCKS)
+        runtime = make_runtime(
+            tmp_path,
+            [kb, sql],
+            ScriptedPlanner(
+                route=RouteDecision(
+                    intent="mixed",
+                    action={"tool": "kb_search", "args": {"query": "香蕉 保存"}},
+                    reason="双侧取证",
+                ),
+                decisions=[
+                    StepDecision(action="tool", tool="sql_query", args={"sql": "SELECT 1"}, reason="查数值"),
+                    StepDecision(action="final", reason="齐了", answer="香蕉 3.5 元[1][2]"),
+                ],
+            ),
+        )
+        events = list(runtime.run_stream("香蕉多少钱，怎么保存"))
+
+        # 事件形如 {"event": ..., "data": ...}；门控拦截只写进轨迹，不发 step 事件
+        step_events = [e for e in events if e["event"] == "step"]
+        assert [e["data"]["tool"] for e in step_events] == ["kb_search", "sql_query"]
+        meta = [e for e in events if e["event"] == "done"][0]["data"]["meta"]
+        assert meta["gate_intercepts"] == 0
+        assert meta["stop_reason"] == "final"
+
+
+class TestKbMissSqlGate:
+    """兜底门控：意图判成 knowledge、模型要说「证据不足」，而问题里的实体在库内取值里 → 拒答之前先查一次业务表。
+
+    路由器只看得到工具描述，同一条提示词在温度 0 下仍会翻动，措辞修不干净；
+    这条兜底只在「眼看要拒答」的路径上触发，不会把已经能答的问题改坏。
+    """
+
+    CATALOG = (
+        "products.name 取值样例：橙子 / 酸奶；"
+        "products.description 存长文本，例：酸奶全程冷藏，胀包就直接扔掉。"
+    )
+
+    def kb_planner(self, *decisions) -> ScriptedPlanner:
+        return ScriptedPlanner(
+            route=RouteDecision(
+                intent="knowledge",
+                action={"tool": "kb_search", "args": {"query": "酸奶胀包 能否饮用"}},
+                reason="文档类问题",
+            ),
+            decisions=list(decisions),
+        )
+
+    def refusal(self) -> StepDecision:
+        return StepDecision(
+            action="final",
+            sufficient=False,
+            missing="证据中未包含酸奶胀包后是否可饮用的说明",
+            answer="",
+            reason="查过了，材料里没有",
+        )
+
+    def tools(self, tmp_path, catalog: str = CATALOG):
+        kb = RecordingTool("kb_search")
+        sql = RecordingTool("sql_query")
+        sql.catalog = catalog
+        return kb, sql
+
+    def test_entities_come_from_the_sample_lines(self):
+        assert _catalog_entities(self.CATALOG) == [
+            ("橙子", "products", "name"),
+            ("酸奶", "products", "name"),
+        ]
+
+    def test_queries_the_sql_tool_before_refusing(self, tmp_path):
+        kb, sql = self.tools(tmp_path)
+        runtime = make_runtime(tmp_path, [kb, sql], self.kb_planner(self.refusal()))
+        result = runtime.run("酸奶胀包了还能喝吗？")
+
+        # 强制的那次查询按实体过滤，不是整表扫：字符预算会被整表截掉靠后的记录
+        assert sql.calls == [{"sql": "SELECT * FROM products WHERE name LIKE '%酸奶%' LIMIT 5"}]
+        assert result.gate_intercepts == 1
+        gate_steps = [s for s in result.steps if s.kind == "gate"]
+        assert len(gate_steps) == 1
+        assert "酸奶" in gate_steps[0].reason
+        # 库里查到以后不再按证据不足拒答（脚本规划器第二次放行 final）
+        assert result.stop_reason == "final"
+        assert not result.answer.startswith(REFUSAL)
+
+    def test_long_text_example_is_not_treated_as_an_entity(self, tmp_path):
+        kb, sql = self.tools(tmp_path, catalog="products.description 存长文本，例：酸奶全程冷藏，胀包就直接扔掉。")
+        result = make_runtime(tmp_path, [kb, sql], self.kb_planner(self.refusal())).run("酸奶胀包了还能喝吗？")
+
+        assert sql.calls == []
+        assert result.stop_reason == "insufficient_evidence"
+
+    def test_question_without_a_catalog_entity_still_refuses(self, tmp_path):
+        kb, sql = self.tools(tmp_path)
+        planner = ScriptedPlanner(
+            route=RouteDecision(
+                intent="knowledge",
+                action={"tool": "kb_search", "args": {"query": "精排 原问题"}},
+                reason="文档类问题",
+            ),
+            decisions=[self.refusal()],
+        )
+        result = make_runtime(tmp_path, [kb, sql], planner).run("精排为什么始终用原问题？")
+
+        assert sql.calls == []
+        assert result.answer.startswith(REFUSAL)
+        assert result.gate_intercepts == 0
+
+    def test_forces_at_most_one_query(self, tmp_path):
+        kb, sql = self.tools(tmp_path)
+        result = make_runtime(
+            tmp_path, [kb, sql], self.kb_planner(self.refusal(), self.refusal())
+        ).run("酸奶胀包了还能喝吗？")
+
+        assert len(sql.calls) == 1
+        assert result.gate_intercepts == 1
+        # 库里也没有那项事实：照原样拒答，不再反复查
+        assert result.stop_reason == "insufficient_evidence"
+        assert result.answer.startswith(REFUSAL)
+
+    def test_no_second_look_when_the_sql_side_already_ran(self, tmp_path):
+        kb, sql = self.tools(tmp_path)
+        planner = self.kb_planner(
+            StepDecision(action="tool", tool="sql_query", args={"sql": "SELECT 1"}, reason="再查一次"),
+            self.refusal(),
+        )
+        result = make_runtime(tmp_path, [kb, sql], planner).run("酸奶胀包了还能喝吗？")
+
+        assert len(sql.calls) == 1
+        assert result.gate_intercepts == 0
+
+    def test_disabled_by_flag(self, tmp_path):
+        kb, sql = self.tools(tmp_path)
+        runtime = make_runtime(
+            tmp_path, [kb, sql], self.kb_planner(self.refusal()), kb_miss_sql_gate=False
+        )
+        result = runtime.run("酸奶胀包了还能喝吗？")
+
+        assert sql.calls == []
+        assert result.answer.startswith(REFUSAL)
+        assert result.gate_intercepts == 0
+
+    def test_gate_in_stream(self, tmp_path):
+        kb, sql = self.tools(tmp_path)
+        events = list(
+            make_runtime(tmp_path, [kb, sql], self.kb_planner(self.refusal())).run_stream(
+                "酸奶胀包了还能喝吗？"
+            )
+        )
+
+        assert sql.calls == [{"sql": "SELECT * FROM products WHERE name LIKE '%酸奶%' LIMIT 5"}]
+        step_events = [e for e in events if e["event"] == "step"]
+        assert [e["data"]["tool"] for e in step_events if e["data"].get("tool")] == [
+            "kb_search",
+            "sql_query",
+        ]
 
 
 class TestSharedToolRegistryAssembly:
