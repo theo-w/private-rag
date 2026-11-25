@@ -1,0 +1,309 @@
+{
+  "meta": {
+    "report_title": "# private-rag 检索策略评估报告：v8_agentic_expanded",
+    "generated_at": "2026-11-25T21:25:41+08:00",
+    "dataset": "eval/v8_agentic_expanded.jsonl",
+    "dataset_sha256": "a99e2ca3fa7784eb9bb6c6bc853497751c60125932ff32a50a152e208d58f634",
+    "datasets": [
+      "eval/v8_agentic_expanded.jsonl"
+    ],
+    "datasets_sha256": [
+      "a99e2ca3fa7784eb9bb6c6bc853497751c60125932ff32a50a152e208d58f634"
+    ],
+    "dataset_total": 40,
+    "samples_total": 1,
+    "samples_answerable": 1,
+    "samples_refusal": 0,
+    "sample_ids": [
+      "xd08"
+    ],
+    "categories": {
+      "database": 1
+    },
+    "configs": [
+      "agent"
+    ],
+    "agent": {
+      "enabled": true,
+      "configs": [
+        "agent"
+      ],
+      "sources": "config/sources.eval.agent.v8.yaml",
+      "tools": [
+        "kb_search",
+        "sql_query"
+      ],
+      "max_steps": 4,
+      "allow_sql": true,
+      "sql_rows": 20,
+      "trace_enabled": false
+    },
+    "dataset_is_default": false,
+    "output_markdown": "ab_kbmiss_xd08_2_on.md",
+    "output_json": "ab_kbmiss_xd08_2_on.json",
+    "llm_model": "qwen3.8:27b-mlx",
+    "judge_model": "qwen3.8:27b-mlx",
+    "embed_model": "bge-m3",
+    "ragas": {
+      "enabled": false,
+      "configs": [],
+      "limit": null,
+      "metrics": [
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall"
+      ],
+      "strictness": 3,
+      "max_workers": 1,
+      "cache": true,
+      "cache_dir": "storage/eval_cache"
+    },
+    "ragas_errors": {},
+    "duration_seconds": 82.7,
+    "git_commit": "a207ba4e376db0871c66672e01a761052a1fdc7e",
+    "git_dirty": true,
+    "run_note": "同一进程交替对照 第2轮 kb_miss_sql_gate=on"
+  },
+  "samples_meta": [
+    {
+      "id": "xd08",
+      "question": "酸奶胀包了还能喝吗？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    }
+  ],
+  "configs": {
+    "agent": {
+      "spec": {
+        "name": "agent",
+        "label": "Agentic：意图路由 + 工具循环（kb_search + 运行时只读 SQL）",
+        "use_lexical": true,
+        "use_rerank": true,
+        "top_k": 3,
+        "use_parent": true,
+        "query_rewrite": "off",
+        "context_max_chars": 6000,
+        "is_agent": true
+      },
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 0.0,
+        "both_sides_hit": null,
+        "answer_rate": 1.0,
+        "refusal_accuracy": null,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "avg_latency_ms": 82698.0,
+        "avg_retrieval_ms": 3723.0,
+        "avg_generation_ms": 78975.0,
+        "generation_cache_hits": 0,
+        "avg_retrieved": 10.0,
+        "avg_context_chars": 3240.0,
+        "avg_query_count": 3.0,
+        "avg_tool_calls": 4.0,
+        "avg_tool_steps": 7.0,
+        "avg_tool_calls_knowledge": 4.0,
+        "avg_tool_calls_database": null,
+        "avg_tool_calls_mixed": null,
+        "dual_tool_rate": 1.0,
+        "dual_tool_rate_knowledge": 1.0,
+        "dual_tool_rate_database": null,
+        "dual_tool_rate_mixed": null,
+        "gate_intercept_rate": 1.0,
+        "used_parent_rate": 1.0,
+        "rewrite_fallbacks": 0,
+        "n_answerable": 1,
+        "n_refusal": 0,
+        "n_errors": 0
+      },
+      "ragas": null,
+      "n_results": 1
+    }
+  },
+  "samples": [
+    {
+      "id": "xd08",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "酸奶胀包了还能喝吗？",
+      "reference": "胀包就直接扔掉；过期一天但没拆封的一般还能喝。",
+      "evidence": [
+        "胀包就直接扔掉"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "根据产品记录中的说明，酸奶胀包了**不能喝，应直接扔掉**。[10]\n\n该记录（demo.products 表，id=12，名称\"酸奶\"）的 description 字段原文为：\"酸奶全程冷藏，过期一天未拆封一般还能喝，**胀包就直接扔掉**。\" [10] 此外，该酸奶的存储要求为全程冷藏 2–6℃。[10]",
+      "contexts": [
+        "- [ ] **有一条数据侧样本仍然判错**：交替 A/B 之后 `database` 类别仍有 1 条判 `knowledge`，模型把它当成食品安全\n      判断而不是某条记录的字段内容。没有为了让数字好看去改标注，也没有把那条问法写进提示词或文档\n      （`docs/*.md` 会被入库成评估语料）\n- [ ] **仍然看不到的实体**：目录每列只扫前 `AGENT_CATALOG_SCAN_ROWS` 行，更大的库里排在后面的实体照样进不了目录，\n      那种情形只能靠规则 4（拿不准且 `sql_query` 可用时选 `mixed`）兜底，不是靠目录列全。换成大表应该调这个参数，\n      或者用 `RAG_AGENT_CATALOG_SAMPLES=0` 只列列名不取样例\n- [ ] **耗时不作收益依据**：同设置的第 1 轮与第 3 轮差 30%（43.3s vs 56.5s），比 `on` / `off` 之间的差还大，\n      所以这轮只能说方向——`on` 的工具调用 1.55 次 vs 1.73 次、上下文字符 1529 vs 2097（−27%），机制是数据侧\n      样本从 3–4 次调用变成一次 SQL。要量耗时得再单独做几对暖轮交替",
+        "默认无鉴权。需要加锁时设 `RAG_DEMO_TOKEN`（或启动加 `--token`），此后 `/api/v1/*`\n要求请求头 `X-Demo-Token` 与之相等，缺失或不匹配返回 401；`/health` 与 `/ready` 不受限。",
+        "- Swagger 文档：<http://127.0.0.1:8000/docs>\n- `GET /health`：存活检查；`GET /ready`：检查 Qdrant 集合、BM25 与 reranker，未就绪返回 503。\n- 默认只监听本机、无鉴权，请勿直接暴露公网。\n- `--no-rerank` 等价于 `RAG_DISABLE_RERANK=1`；readiness 会显示“重排模型未加载”，问答仍按融合结果降级运行。",
+        "默认无鉴权。需要加锁时设 `RAG_DEMO_TOKEN`（或启动加 `--token`），此后 `/api/v1/*`\n要求请求头 `X-Demo-Token` 与之相等，缺失或不匹配返回 401；`/health` 与 `/ready` 不受限。",
+        "- [ ] **有一条数据侧样本仍然判错**：交替 A/B 之后 `database` 类别仍有 1 条判 `knowledge`，模型把它当成食品安全\n      判断而不是某条记录的字段内容。没有为了让数字好看去改标注，也没有把那条问法写进提示词或文档\n      （`docs/*.md` 会被入库成评估语料）\n- [ ] **仍然看不到的实体**：目录每列只扫前 `AGENT_CATALOG_SCAN_ROWS` 行，更大的库里排在后面的实体照样进不了目录，\n      那种情形只能靠规则 4（拿不准且 `sql_query` 可用时选 `mixed`）兜底，不是靠目录列全。换成大表应该调这个参数，\n      或者用 `RAG_AGENT_CATALOG_SAMPLES=0` 只列列名不取样例\n- [ ] **耗时不作收益依据**：同设置的第 1 轮与第 3 轮差 30%（43.3s vs 56.5s），比 `on` / `off` 之间的差还大，\n      所以这轮只能说方向——`on` 的工具调用 1.55 次 vs 1.73 次、上下文字符 1529 vs 2097（−27%），机制是数据侧\n      样本从 3–4 次调用变成一次 SQL。要量耗时得再单独做几对暖轮交替",
+        "- Swagger 文档：<http://127.0.0.1:8000/docs>\n- `GET /health`：存活检查；`GET /ready`：检查 Qdrant 集合、BM25 与 reranker，未就绪返回 503。\n- 默认只监听本机、无鉴权，请勿直接暴露公网。\n- `--no-rerank` 等价于 `RAG_DISABLE_RERANK=1`；readiness 会显示“重排模型未加载”，问答仍按融合结果降级运行。",
+        "- [ ] **有一条数据侧样本仍然判错**：交替 A/B 之后 `database` 类别仍有 1 条判 `knowledge`，模型把它当成食品安全\n      判断而不是某条记录的字段内容。没有为了让数字好看去改标注，也没有把那条问法写进提示词或文档\n      （`docs/*.md` 会被入库成评估语料）\n- [ ] **仍然看不到的实体**：目录每列只扫前 `AGENT_CATALOG_SCAN_ROWS` 行，更大的库里排在后面的实体照样进不了目录，\n      那种情形只能靠规则 4（拿不准且 `sql_query` 可用时选 `mixed`）兜底，不是靠目录列全。换成大表应该调这个参数，\n      或者用 `RAG_AGENT_CATALOG_SAMPLES=0` 只列列名不取样例\n- [ ] **耗时不作收益依据**：同设置的第 1 轮与第 3 轮差 30%（43.3s vs 56.5s），比 `on` / `off` 之间的差还大，\n      所以这轮只能说方向——`on` 的工具调用 1.55 次 vs 1.73 次、上下文字符 1529 vs 2097（−27%），机制是数据侧\n      样本从 3–4 次调用变成一次 SQL。要量耗时得再单独做几对暖轮交替",
+        "默认无鉴权。需要加锁时设 `RAG_DEMO_TOKEN`（或启动加 `--token`），此后 `/api/v1/*`\n要求请求头 `X-Demo-Token` 与之相等，缺失或不匹配返回 401；`/health` 与 `/ready` 不受限。",
+        "- Swagger 文档：<http://127.0.0.1:8000/docs>\n- `GET /health`：存活检查；`GET /ready`：检查 Qdrant 集合、BM25 与 reranker，未就绪返回 503。\n- 默认只监听本机、无鉴权，请勿直接暴露公网。\n- `--no-rerank` 等价于 `RAG_DISABLE_RERANK=1`；readiness 会显示“重排模型未加载”，问答仍按融合结果降级运行。",
+        "id | name | category | description | storage | supplier | stock | price | updated_at\n12 | 酸奶 | 乳制品 | 酸奶全程冷藏，过期一天未拆封一般还能喝，胀包就直接扔掉。 | 全程冷藏 2-6℃ | 北方牧场 | 150 | 7.5 | 2026-02-23"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [ ] **有一条数据侧样本仍然判错**：交替 A/B 之后 `database` 类别仍有 1 条判 `knowledge`，模型把它当成食品安全 判断而不是某条记录的字段内容。没有为了让数字好看去改标注，也没有把那条问法写进提示词或…",
+          "page": null,
+          "table": null,
+          "score": -5.93359375
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "默认无鉴权。需要加锁时设 `RAG_DEMO_TOKEN`（或启动加 `--token`），此后 `/api/v1/*` 要求请求头 `X-Demo-Token` 与之相等，缺失或不匹配返回 401；`/health` 与 `/ready`…",
+          "page": null,
+          "table": null,
+          "score": -6.5
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "- Swagger 文档：<http://127.0.0.1:8000/docs> - `GET /health`：存活检查；`GET /ready`：检查 Qdrant 集合、BM25 与 reranker，未就绪返回 503。 - 默认…",
+          "page": null,
+          "table": null,
+          "score": -7.75
+        },
+        {
+          "index": 4,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "默认无鉴权。需要加锁时设 `RAG_DEMO_TOKEN`（或启动加 `--token`），此后 `/api/v1/*` 要求请求头 `X-Demo-Token` 与之相等，缺失或不匹配返回 401；`/health` 与 `/ready`…",
+          "page": null,
+          "table": null,
+          "score": -6.3359375
+        },
+        {
+          "index": 5,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [ ] **有一条数据侧样本仍然判错**：交替 A/B 之后 `database` 类别仍有 1 条判 `knowledge`，模型把它当成食品安全 判断而不是某条记录的字段内容。没有为了让数字好看去改标注，也没有把那条问法写进提示词或…",
+          "page": null,
+          "table": null,
+          "score": -6.35546875
+        },
+        {
+          "index": 6,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "- Swagger 文档：<http://127.0.0.1:8000/docs> - `GET /health`：存活检查；`GET /ready`：检查 Qdrant 集合、BM25 与 reranker，未就绪返回 503。 - 默认…",
+          "page": null,
+          "table": null,
+          "score": -7.01953125
+        },
+        {
+          "index": 7,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [ ] **有一条数据侧样本仍然判错**：交替 A/B 之后 `database` 类别仍有 1 条判 `knowledge`，模型把它当成食品安全 判断而不是某条记录的字段内容。没有为了让数字好看去改标注，也没有把那条问法写进提示词或…",
+          "page": null,
+          "table": null,
+          "score": -6.4296875
+        },
+        {
+          "index": 8,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "默认无鉴权。需要加锁时设 `RAG_DEMO_TOKEN`（或启动加 `--token`），此后 `/api/v1/*` 要求请求头 `X-Demo-Token` 与之相等，缺失或不匹配返回 401；`/health` 与 `/ready`…",
+          "page": null,
+          "table": null,
+          "score": -6.5234375
+        },
+        {
+          "index": 9,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "- Swagger 文档：<http://127.0.0.1:8000/docs> - `GET /health`：存活检查；`GET /ready`：检查 Qdrant 集合、BM25 与 reranker，未就绪返回 503。 - 默认…",
+          "page": null,
+          "table": null,
+          "score": -7.32421875
+        },
+        {
+          "index": 10,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "id | name | category | description | storage | supplier | stock | price | updated_at；首行：12 | 酸奶 | 乳制品 | 酸奶全程冷藏，过期一天未拆封一般…",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "docs/ROADMAP.md",
+        "README.md",
+        "README.md",
+        "README.md",
+        "docs/ROADMAP.md",
+        "README.md",
+        "docs/ROADMAP.md",
+        "README.md",
+        "README.md",
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 3,
+      "context_chars": 3240,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 10,
+      "refusal": false,
+      "intent": "knowledge",
+      "stop_reason": "max_steps",
+      "tool_calls": 4,
+      "tool_steps": 7,
+      "tool_names": [
+        "sql_query",
+        "kb_search"
+      ],
+      "gate_intercepts": 1,
+      "trace_id": "4f180580c36c",
+      "history_turns": 0,
+      "retrieval_ms": 3723.0,
+      "generation_ms": 78975.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    }
+  ]
+}

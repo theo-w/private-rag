@@ -1,0 +1,1003 @@
+{
+  "meta": {
+    "report_title": "# private-rag 检索策略评估报告：v8_agentic_expanded",
+    "generated_at": "2026-11-25T21:45:07+08:00",
+    "dataset": "eval/v8_agentic_expanded.jsonl",
+    "dataset_sha256": "a99e2ca3fa7784eb9bb6c6bc853497751c60125932ff32a50a152e208d58f634",
+    "datasets": [
+      "eval/v8_agentic_expanded.jsonl"
+    ],
+    "datasets_sha256": [
+      "a99e2ca3fa7784eb9bb6c6bc853497751c60125932ff32a50a152e208d58f634"
+    ],
+    "dataset_total": 40,
+    "samples_total": 8,
+    "samples_answerable": 8,
+    "samples_refusal": 0,
+    "sample_ids": [
+      "xd01",
+      "xd02",
+      "xd03",
+      "xd04",
+      "xd05",
+      "xd06",
+      "xd07",
+      "xd08"
+    ],
+    "categories": {
+      "database": 8
+    },
+    "configs": [
+      "agent"
+    ],
+    "agent": {
+      "enabled": true,
+      "configs": [
+        "agent"
+      ],
+      "sources": "config/sources.eval.agent.v8.yaml",
+      "tools": [
+        "kb_search",
+        "sql_query"
+      ],
+      "max_steps": 4,
+      "allow_sql": true,
+      "sql_rows": 20,
+      "trace_enabled": false
+    },
+    "dataset_is_default": false,
+    "output_markdown": "ab_kbmiss_data_2_on.md",
+    "output_json": "ab_kbmiss_data_2_on.json",
+    "llm_model": "qwen3.8:27b-mlx",
+    "judge_model": "qwen3.8:27b-mlx",
+    "embed_model": "bge-m3",
+    "ragas": {
+      "enabled": false,
+      "configs": [],
+      "limit": null,
+      "metrics": [
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall"
+      ],
+      "strictness": 3,
+      "max_workers": 1,
+      "cache": true,
+      "cache_dir": "storage/eval_cache"
+    },
+    "ragas_errors": {},
+    "duration_seconds": 605.47,
+    "git_commit": "a207ba4e376db0871c66672e01a761052a1fdc7e",
+    "git_dirty": true,
+    "run_note": "同一进程交替对照 第2轮 kb_miss_sql_gate=on"
+  },
+  "samples_meta": [
+    {
+      "id": "xd01",
+      "question": "蓝莓收到以后该怎么处理？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd02",
+      "question": "牛油果买回来还是硬的，该拿它怎么办？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd03",
+      "question": "芒果放冰箱能多存几天吗？会有什么代价？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd04",
+      "question": "核桃剥了壳以后还能常温放着吗？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd05",
+      "question": "腰果拆开以后一直敞着放，会出什么问题？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd06",
+      "question": "桂圆干开袋以后要注意什么？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd07",
+      "question": "鳕鱼放到冷藏化冻以后，还有什么要求？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd08",
+      "question": "酸奶胀包了还能喝吗？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    }
+  ],
+  "configs": {
+    "agent": {
+      "spec": {
+        "name": "agent",
+        "label": "Agentic：意图路由 + 工具循环（kb_search + 运行时只读 SQL）",
+        "use_lexical": true,
+        "use_rerank": true,
+        "top_k": 3,
+        "use_parent": true,
+        "query_rewrite": "off",
+        "context_max_chars": 6000,
+        "is_agent": true
+      },
+      "metrics": {
+        "evidence_hit@3": 0.625,
+        "evidence_recall@3": 0.625,
+        "context_precision@3": 0.4583333333333333,
+        "mrr@3": 0.625,
+        "source_hit": 0.625,
+        "both_sides_hit": null,
+        "answer_rate": 1.0,
+        "refusal_accuracy": null,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "avg_latency_ms": 75682.125,
+        "avg_retrieval_ms": 1176.75,
+        "avg_generation_ms": 74505.375,
+        "generation_cache_hits": 0,
+        "avg_retrieved": 3.625,
+        "avg_context_chars": 1749.375,
+        "avg_query_count": 1.75,
+        "avg_tool_calls": 2.375,
+        "avg_tool_steps": 5.0,
+        "avg_tool_calls_knowledge": 2.6666666666666665,
+        "avg_tool_calls_database": 1.0,
+        "avg_tool_calls_mixed": 4.0,
+        "dual_tool_rate": 0.625,
+        "dual_tool_rate_knowledge": 1.0,
+        "dual_tool_rate_database": 0.0,
+        "dual_tool_rate_mixed": 1.0,
+        "gate_intercept_rate": 0.375,
+        "used_parent_rate": 1.0,
+        "rewrite_fallbacks": 0,
+        "n_answerable": 8,
+        "n_refusal": 0,
+        "n_errors": 0
+      },
+      "ragas": null,
+      "n_results": 8
+    }
+  },
+  "samples": [
+    {
+      "id": "xd01",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "蓝莓收到以后该怎么处理？",
+      "reference": "蓝莓娇嫩易压，收到后应尽快食用；没洗过的那种可以冷藏存放三四天。",
+      "evidence": [
+        "收到后应尽快食用，未洗的可以冷藏存放三四天"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "蓝莓收到后应尽快食用；如果未清洗，可以冷藏存放三四天[1]。",
+      "contexts": [
+        "name | storage | description\n蓝莓 | 冷藏 0-4℃ | 蓝莓娇嫩易压，收到后应尽快食用，未洗的可以冷藏存放三四天。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：蓝莓 | 冷藏 0-4℃ | 蓝莓娇嫩易压，收到后应尽快食用，未洗的可以冷藏存放三四天。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 104,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "tool_names": [
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "e3578d4d8531",
+      "history_turns": 0,
+      "retrieval_ms": 1.0,
+      "generation_ms": 46782.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd02",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "牛油果买回来还是硬的，该拿它怎么办？",
+      "reference": "牛油果硬的时候常温放两三天催熟，等捏着发软再吃。",
+      "evidence": [
+        "牛油果硬的时候常温放两三天催熟"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "牛油果硬的时候，**常温放两三天催熟**即可；捏着发软就要当天吃，切开吃不完需冷藏并淋柠檬汁。[1]",
+      "contexts": [
+        "name | storage | description\n牛油果 | 常温催熟后冷藏 | 牛油果硬的时候常温放两三天催熟，捏着发软就要当天吃，切开吃不完需冷藏并淋柠檬汁。",
+        "## v7.2 详细验收（意图路由与拒答策略）\n\nv7.1 报告量出的两条短板都在「模型看不见它需要的东西」上：路由器只能读到工具的 `description`，而描述里只有\n「精确数值查询」这类抽象说明，它不知道 `products.description` 存的就是保存建议，于是「香蕉到底能不能放冰箱」\n被判成 `knowledge`；关键词回退同样瞎——`DATABASE_HINTS` 清一色是数字词。第二段短板是答与不答没有判据，\n证据不够时模型倾向于硬凑（d06 补了苹果氧化的通用知识，r04 补了商业版定价）。",
+        "15 条需要业务库的样本里 agentic 有 9 条真的引用 `demo.products#sql_query` 给出正确数据（单价、价格排序、维 C 对比、比平均价再筛），`full` 组 26 条一条都没碰过业务数据；`knowledge` 类 7 条两组逐项持平，工具循环没把纯文档问答做坏。代价是单条耗时约 4.2 倍（多次决策调用的模型开销占 68.8 秒，工具执行只占 2.4 秒）。\n\n量出来的两条真实短板：一是路由受问法影响——像「香蕉能不能放冰箱」这种读起来像生活常识的问题，决策模型判成 `knowledge` 去查文档（保存方法其实在 `products.description` 里），6 条样本因此没查到库；二是证据不足时 agentic 倾向作答而不是拒答，`refusal_accuracy` 从 1.000 掉到 0.250，其中 d06、r04 在没有知识库依据的情况下补了通用知识（苹果氧化、商业版定价），属于该拒答却作答。\n\n**v7.2 对这两条的改法与复跑**：路由判据换成「回答所需的事实住在哪一侧」，并在装配 `sql_query` 时把白名单表的\n列名与少量样例值有界采样进工具描述——库里到底存着什么，模型看不见就判不准，这不是问法的错；答与不答改由步进\n决策声明充分性，判不足就不进生成、直接返回拒答哨兵并写明缺哪一项（`stop_reason` 新增 `insufficient_evidence`），\n生成侧同时禁掉「用通用常识补全」和「资料没提到就等于不存在」两条偷懒路径。把判错的 9 条单独重跑\n（`eval/reports/v7_2_routing_report.md`）：6 条业务库样本全部改判 `database`/`mixed` 并真的引用\n`demo.products#sql_query`，3 条应拒答样本输出哨兵文本；同样子集均值 `source_hit` 0.000→1.000、\n`citation_rate` 0.500→1.000。全量 26 条复跑（同生成模型、同确定性口径，`eval/reports/v7_2_agent_report.md`）确认这不是子集效应：\n\n| 指标（`agent` 组） | v7.1 | v7.2 |\n|---|---:|---:|\n| `answer_rate` | 0.909 | 1.000 |\n| `refusal_accuracy` | 0.250 | 1.000 |\n| `source_hit` | 0.591 | 1.000 |\n| `evidence_hit@3` | 0.409 | 0.864 |\n| `mrr@3` | 0.348 | 0.811 |\n| `citation_rate` | 0.864 | 0.955 |\n| 单条平均耗时 | 71.…",
+        "## 关键函数\n\n| 函数 / 类 | 接收什么 | 做什么 | 返回什么 |\n|---|---|---|---|\n| `run_ingest`（[pipeline.py](../private_rag/ingestion/pipeline.py)） | 数据源配置 | 逐个来源读取、父子两级切块、算子块向量、写 Qdrant，最后重建 BM25 | 入库统计（新增/更新/跳过/失败） |\n| `split_parent_child`（[chunking.py](../private_rag/ingestion/chunking.py)） | 一篇文档的正文 | 先按 2000 字符切父块，再在父块内按 700/100 切子块；给每个父块生成稳定 ID | 子块列表，每块带父块原文与序号 |\n| `load_file_documents` / `load_web_documents` / `load_sql_documents` | 一个文件、一批 URL、一条 SQL 查询 | 把三种不同来源都转成统一文档；PDF 按页、SQL 按行 | 文档列表 + 错误列表 |\n| `HybridRetriever.retrieve`（[hybrid.py](../private_rag/retrieval/hybrid.py)） | 用户问题、来源/标签过滤 | 同时跑向量检索和 BM25，再用 RRF 合并；多查询结果可再融合 | 融合后的候选子块 |\n| `Reranker.rerank`（[rerank.py](../private_rag/retrieval/rerank.py)） | 原问题 + 候选子块 | 逐条精读打分，按相关性排序 | 最相关的 N 条（默认 3） |\n| `expand_parents`（[parent.py](../private_rag/retrieval/parent.py)） | 精排后的子块、字符预算 | 按父块去重；放得下就换整段父块，放不下退回子块并截断 | 实际送入 LLM 的上下文片段 |\n| `rewrite_queries`（[query_rewrite.py](../private_rag/query_rewrite.py)） | 原问题、改写模式 | 调本地 LLM 生成同义查询或 HyDE 文本；任何失败都退回原问题 | 用于检索的查询列表 |\n| `build_prompt` / `generate_answer` / `stream_answer`（[generation.py](../private_rag/generation.py)） | 问题、父块、历史 | 拼出严格提示词，调用本地 LLM；没有候选时直接拒答 | 答案文本 + 引用列表（流式则逐段文字） |\n| `RagEngine.ret…"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：牛油果 | 常温催熟后冷藏 | 牛油果硬的时候常温放两三天催熟，捏着发软就要当天吃，切开吃不完需冷藏并淋柠檬汁。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "## v7.2 详细验收（意图路由与拒答策略） v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上：路由器只能读到工具的 `description`，而描述里只有 「精确数值查询」这类抽象说明，它不知道 `products.des…",
+          "page": null,
+          "table": null,
+          "score": -8.25
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "15 条需要业务库的样本里 agentic 有 9 条真的引用 `demo.products#sql_query` 给出正确数据（单价、价格排序、维 C 对比、比平均价再筛），`full` 组 26 条一条都没碰过业务数据；`knowled…",
+          "page": null,
+          "table": null,
+          "score": -8.890625
+        },
+        {
+          "index": 4,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "| 函数 / 类 | 接收什么 | 做什么 | 返回什么 | |---|---|---|---| | `run_ingest`（[pipeline.py](../private_rag/ingestion/pipeline.py)） | 数…",
+          "page": null,
+          "table": null,
+          "score": -9.0
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "docs/ROADMAP.md",
+        "README.md",
+        "docs/beginner-guide.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 3,
+      "context_chars": 2918,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "max_steps",
+      "tool_calls": 4,
+      "tool_steps": 8,
+      "tool_names": [
+        "sql_query",
+        "kb_search"
+      ],
+      "gate_intercepts": 2,
+      "trace_id": "0f3d21bea602",
+      "history_turns": 0,
+      "retrieval_ms": 1588.0,
+      "generation_ms": 98019.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd03",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "芒果放冰箱能多存几天吗？会有什么代价？",
+      "reference": "成熟后冷藏可多放两天，代价是香气会变淡。",
+      "evidence": [
+        "成熟后冷藏可多放两天，但香气会变淡"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "芒果在常温催熟后放入冰箱冷藏，可以多存放两天，但代价是香气会变淡 [1]。",
+      "contexts": [
+        "name | storage | description\n芒果 | 常温催熟后冷藏 | 芒果常温催熟，表皮起皱前食用，成熟后冷藏可多放两天，但香气会变淡。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：芒果 | 常温催熟后冷藏 | 芒果常温催熟，表皮起皱前食用，成熟后冷藏可多放两天，但香气会变淡。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 108,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "tool_names": [
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "507cca2fe51d",
+      "history_turns": 0,
+      "retrieval_ms": 4.0,
+      "generation_ms": 47031.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd04",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "核桃剥了壳以后还能常温放着吗？",
+      "reference": "剥壳后必须密封冷藏；受潮会变苦。带壳的干燥常温能放半年。",
+      "evidence": [
+        "剥壳后必须密封冷藏，受潮会变苦"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "核桃剥壳后不能常温存放，必须密封冷藏，否则受潮会变苦 [4]。",
+      "contexts": [
+        "## v7.2 详细验收（意图路由与拒答策略）\n\nv7.1 报告量出的两条短板都在「模型看不见它需要的东西」上：路由器只能读到工具的 `description`，而描述里只有\n「精确数值查询」这类抽象说明，它不知道 `products.description` 存的就是保存建议，于是「香蕉到底能不能放冰箱」\n被判成 `knowledge`；关键词回退同样瞎——`DATABASE_HINTS` 清一色是数字词。第二段短板是答与不答没有判据，\n证据不够时模型倾向于硬凑（d06 补了苹果氧化的通用知识，r04 补了商业版定价）。",
+        "15 条需要业务库的样本里 agentic 有 9 条真的引用 `demo.products#sql_query` 给出正确数据（单价、价格排序、维 C 对比、比平均价再筛），`full` 组 26 条一条都没碰过业务数据；`knowledge` 类 7 条两组逐项持平，工具循环没把纯文档问答做坏。代价是单条耗时约 4.2 倍（多次决策调用的模型开销占 68.8 秒，工具执行只占 2.4 秒）。\n\n量出来的两条真实短板：一是路由受问法影响——像「香蕉能不能放冰箱」这种读起来像生活常识的问题，决策模型判成 `knowledge` 去查文档（保存方法其实在 `products.description` 里），6 条样本因此没查到库；二是证据不足时 agentic 倾向作答而不是拒答，`refusal_accuracy` 从 1.000 掉到 0.250，其中 d06、r04 在没有知识库依据的情况下补了通用知识（苹果氧化、商业版定价），属于该拒答却作答。\n\n**v7.2 对这两条的改法与复跑**：路由判据换成「回答所需的事实住在哪一侧」，并在装配 `sql_query` 时把白名单表的\n列名与少量样例值有界采样进工具描述——库里到底存着什么，模型看不见就判不准，这不是问法的错；答与不答改由步进\n决策声明充分性，判不足就不进生成、直接返回拒答哨兵并写明缺哪一项（`stop_reason` 新增 `insufficient_evidence`），\n生成侧同时禁掉「用通用常识补全」和「资料没提到就等于不存在」两条偷懒路径。把判错的 9 条单独重跑\n（`eval/reports/v7_2_routing_report.md`）：6 条业务库样本全部改判 `database`/`mixed` 并真的引用\n`demo.products#sql_query`，3 条应拒答样本输出哨兵文本；同样子集均值 `source_hit` 0.000→1.000、\n`citation_rate` 0.500→1.000。全量 26 条复跑（同生成模型、同确定性口径，`eval/reports/v7_2_agent_report.md`）确认这不是子集效应：\n\n| 指标（`agent` 组） | v7.1 | v7.2 |\n|---|---:|---:|\n| `answer_rate` | 0.909 | 1.000 |\n| `refusal_accuracy` | 0.250 | 1.000 |\n| `source_hit` | 0.591 | 1.000 |\n| `evidence_hit@3` | 0.409 | 0.864 |\n| `mrr@3` | 0.348 | 0.811 |\n| `citation_rate` | 0.864 | 0.955 |\n| 单条平均耗时 | 71.…",
+        "### 父子块：小块召回，大段阅读\n\n- 入库先按 2000 字符、0 重叠切父块，再在每个父块内按 700/100 切子块；向量与 BM25 **只索引子块**。\n- 子块 payload 带 `parent.id/index/count/text`，BM25 索引同样保存父块字段；命中后按父块去重，在 `RAG_CONTEXT_MAX_CHARS` 预算内送父块整段原文。\n- 父块放不进剩余预算时回退到命中的子块（必要时截断），保证命中内容不丢；`snippet_text` 保存子块原文，用于引用展示。\n- `top_k` 限制的是最终送入的父块数；`retrieved` 也按父块数计。\n- 旧库没有 `parent` 字段时自动回退子块，无需迁移；重新执行 ingest 后生效。\n- 父块文本随每个子块各存一份，Qdrant 与 BM25 体积约放大 2–3 倍；换来的是无需额外 docstore，也不会出现父子存储不一致。\n\n| 环境变量 | 默认 | 说明 |\n|---|---:|---|\n| `RAG_PARENT_CHUNK_SIZE` | 2000 | 父块最大字符数；修改后需重建知识库 |\n| `RAG_PARENT_CHUNK_OVERLAP` | 0 | 父块重叠字符数 |\n| `RAG_CONTEXT_MAX_CHARS` | 6000 | 送入 LLM 的父块总字符预算 |",
+        "name | storage | description\n核桃 | 密封干燥常温 | 核桃带壳干燥常温能放半年，剥壳后必须密封冷藏，受潮会变苦。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "## v7.2 详细验收（意图路由与拒答策略） v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上：路由器只能读到工具的 `description`，而描述里只有 「精确数值查询」这类抽象说明，它不知道 `products.des…",
+          "page": null,
+          "table": null,
+          "score": -6.8984375
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "15 条需要业务库的样本里 agentic 有 9 条真的引用 `demo.products#sql_query` 给出正确数据（单价、价格排序、维 C 对比、比平均价再筛），`full` 组 26 条一条都没碰过业务数据；`knowled…",
+          "page": null,
+          "table": null,
+          "score": -8.0234375
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### 父子块：小块召回，大段阅读 - 入库先按 2000 字符、0 重叠切父块，再在每个父块内按 700/100 切子块；向量与 BM25 **只索引子块**。 - 子块 payload 带 `parent.id/index/count/…",
+          "page": null,
+          "table": null,
+          "score": -8.3984375
+        },
+        {
+          "index": 4,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：核桃 | 密封干燥常温 | 核桃带壳干燥常温能放半年，剥壳后必须密封冷藏，受潮会变苦。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "docs/ROADMAP.md",
+        "README.md",
+        "README.md",
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 2292,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "knowledge",
+      "stop_reason": "final",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "tool_names": [
+        "sql_query",
+        "kb_search"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "795da414801a",
+      "history_turns": 0,
+      "retrieval_ms": 1326.0,
+      "generation_ms": 118227.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd05",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "腰果拆开以后一直敞着放，会出什么问题？",
+      "reference": "敞放两周就会返软失去脆度，所以开封后必须密封并冷藏。",
+      "evidence": [
+        "敞放两周就会返软失去脆度"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "腰果开封后如果一直敞着放，两周就会返软失去脆度；因此开封后务必密封并冷藏保存 [7]。",
+      "contexts": [
+        "## v8.8 详细验收（数据侧路由：把库内取值列全，再补一条「记录自身字段」规则）\n\nv8.7 那条「两种解释都成立」的缺口在本轮收口：**同进程交替 A/B 显示是目录缺信息，不是问法不像数据题**\n（根因见上面 v8.7 那条）。改动分两半，加两个各自可退回的开关。",
+        "### 父子块：小块召回，大段阅读\n\n- 入库先按 2000 字符、0 重叠切父块，再在每个父块内按 700/100 切子块；向量与 BM25 **只索引子块**。\n- 子块 payload 带 `parent.id/index/count/text`，BM25 索引同样保存父块字段；命中后按父块去重，在 `RAG_CONTEXT_MAX_CHARS` 预算内送父块整段原文。\n- 父块放不进剩余预算时回退到命中的子块（必要时截断），保证命中内容不丢；`snippet_text` 保存子块原文，用于引用展示。\n- `top_k` 限制的是最终送入的父块数；`retrieved` 也按父块数计。\n- 旧库没有 `parent` 字段时自动回退子块，无需迁移；重新执行 ingest 后生效。\n- 父块文本随每个子块各存一份，Qdrant 与 BM25 体积约放大 2–3 倍；换来的是无需额外 docstore，也不会出现父子存储不一致。\n\n| 环境变量 | 默认 | 说明 |\n|---|---:|---|\n| `RAG_PARENT_CHUNK_SIZE` | 2000 | 父块最大字符数；修改后需重建知识库 |\n| `RAG_PARENT_CHUNK_OVERLAP` | 0 | 父块重叠字符数 |\n| `RAG_CONTEXT_MAX_CHARS` | 6000 | 送入 LLM 的父块总字符预算 |",
+        "## 结论\n\n路由和指代消解都没坏：c03 判的是 `mixed`，「刚才那条记录」也被正确还原成香蕉（回答里自己写了「香蕉」）。\n缺的是第三条约束——**指代还原以后，那一半还得重新取证**，而这条约束在链路上压根不存在：步进决策的充分性判据没排除历史，\n最终作答的接地规则没标注历史，评估口径又只考一侧，所以这个缺口既不会被拦住，也不会被看见。\n\n三个层次，按可控程度从难到易：\n\n1. **步进决策**：`sufficient` 完全由模型自报，代码不校验；判据措辞让「历史里已有的事实」也算被支撑。\n2. **最终作答**：`FINAL_PROMPT` 把历史渲染成无编号、无标注的裸文本，紧贴证据块，实际地位等同于一条匿名证据。\n3. **评估口径**：`expected_source` 只能标一侧，双侧样本「查了几侧」没有任何指标量得到。",
+        "## v7.2 详细验收（意图路由与拒答策略）\n\nv7.1 报告量出的两条短板都在「模型看不见它需要的东西」上：路由器只能读到工具的 `description`，而描述里只有\n「精确数值查询」这类抽象说明，它不知道 `products.description` 存的就是保存建议，于是「香蕉到底能不能放冰箱」\n被判成 `knowledge`；关键词回退同样瞎——`DATABASE_HINTS` 清一色是数字词。第二段短板是答与不答没有判据，\n证据不够时模型倾向于硬凑（d06 补了苹果氧化的通用知识，r04 补了商业版定价）。",
+        "15 条需要业务库的样本里 agentic 有 9 条真的引用 `demo.products#sql_query` 给出正确数据（单价、价格排序、维 C 对比、比平均价再筛），`full` 组 26 条一条都没碰过业务数据；`knowledge` 类 7 条两组逐项持平，工具循环没把纯文档问答做坏。代价是单条耗时约 4.2 倍（多次决策调用的模型开销占 68.8 秒，工具执行只占 2.4 秒）。\n\n量出来的两条真实短板：一是路由受问法影响——像「香蕉能不能放冰箱」这种读起来像生活常识的问题，决策模型判成 `knowledge` 去查文档（保存方法其实在 `products.description` 里），6 条样本因此没查到库；二是证据不足时 agentic 倾向作答而不是拒答，`refusal_accuracy` 从 1.000 掉到 0.250，其中 d06、r04 在没有知识库依据的情况下补了通用知识（苹果氧化、商业版定价），属于该拒答却作答。\n\n**v7.2 对这两条的改法与复跑**：路由判据换成「回答所需的事实住在哪一侧」，并在装配 `sql_query` 时把白名单表的\n列名与少量样例值有界采样进工具描述——库里到底存着什么，模型看不见就判不准，这不是问法的错；答与不答改由步进\n决策声明充分性，判不足就不进生成、直接返回拒答哨兵并写明缺哪一项（`stop_reason` 新增 `insufficient_evidence`），\n生成侧同时禁掉「用通用常识补全」和「资料没提到就等于不存在」两条偷懒路径。把判错的 9 条单独重跑\n（`eval/reports/v7_2_routing_report.md`）：6 条业务库样本全部改判 `database`/`mixed` 并真的引用\n`demo.products#sql_query`，3 条应拒答样本输出哨兵文本；同样子集均值 `source_hit` 0.000→1.000、\n`citation_rate` 0.500→1.000。全量 26 条复跑（同生成模型、同确定性口径，`eval/reports/v7_2_agent_report.md`）确认这不是子集效应：\n\n| 指标（`agent` 组） | v7.1 | v7.2 |\n|---|---:|---:|\n| `answer_rate` | 0.909 | 1.000 |\n| `refusal_accuracy` | 0.250 | 1.000 |\n| `source_hit` | 0.591 | 1.000 |\n| `evidence_hit@3` | 0.409 | 0.864 |\n| `mrr@3` | 0.348 | 0.811 |\n| `citation_rate` | 0.864 | 0.955 |\n| 单条平均耗时 | 71.…",
+        "## 语料接入详细验收（Google Drive 预下载）\n\n边界与选型见 [docs/adr/0003](adr/0003-google-drive-corpus-cli-prefetch.md)，用法见 README「Google Drive 语料接入（预下载）」。\n\n- [x] 下载工具是本机 CLI（默认 `rclone`，可切 `gdrive`），Python 侧零新增依赖——仓库钉 Python 3.9 且尽量少依赖\n- [x] 联网只在下载这一步：入库与检索链路不碰 Google API，仓库不引入 Google SDK\n- [x] 凭据只留本机（`~/.config/rclone/rclone.conf`、`~/.gdrive/`），不进命令行、不进日志、不进仓库\n- [x] 下载目录默认 `data/gdrive` 并写进 `.gitignore`；仓库内的目录未被忽略时拒绝同步（ADR 0002），逃生口 `--allow-tracked-dest`\n- [x] 复用现有链路：下载目录就是 `type: file` + `tags: [gdrive]` 的源，分块与嵌入一处未动；`source_type` 不扩张（API schema 与 CLI 仍是 file/web/sql）\n- [x] Google 原生文档导出格式钉成 `pdf`（入库链路只认 txt/md/pdf）；同步后清点目录、列出不支持的后缀，一个可入库文件都没有时明确失败而不是静默入库 0 条\n- [x] `--mode sync --ingest --prune` 让知识库跟着 Drive 的删除收缩；`--skip-sync` 只用已下载内容；`--` 之后的参数透传给下载工具\n- [x] 26 条 mock 单测：命令拼装与失败信息、目录安全边界（含真实 `git check-ignore` 探测）、目录清点、假下载产物走 `run_ingest` 的幂等；不依赖真实 Google 账号与 Ollama\n- [x] 真机冒烟（2026-11-22，本机 Ollama）：假下载产物（2 个 md/txt + 1 个 xlsx）走 CLI 用真实 `bge-m3` 入库到隔离 collection（`RAG_COLLECTION_NAME` / `RAG_STORAGE_DIR` / `RAG_LEXICAL_INDEX_PATH` 指向 /tmp，演示库未被动）——`新增 2 / 写入 2 chunk`、xlsx 被清点为不支持、BM25 建成；二次运行 `新增 0 / 跳过 2`；「橙子有什么营养」的向量检索第一条是橙子，metadata 为 `source_type=file` + `tags=[\"gdrive\"]`\n- [ ] 真实 Google 账号端到端（…",
+        "name | description | storage\n腰果 | 腰果开封后务必密封并冷藏，敞放两周就会返软失去脆度。 | 密封冷藏"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "## v8.8 详细验收（数据侧路由：把库内取值列全，再补一条「记录自身字段」规则） v8.7 那条「两种解释都成立」的缺口在本轮收口：**同进程交替 A/B 显示是目录缺信息，不是问法不像数据题** （根因见上面 v8.7 那条）。改动分…",
+          "page": null,
+          "table": null,
+          "score": -5.1953125
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### 父子块：小块召回，大段阅读 - 入库先按 2000 字符、0 重叠切父块，再在每个父块内按 700/100 切子块；向量与 BM25 **只索引子块**。 - 子块 payload 带 `parent.id/index/count/…",
+          "page": null,
+          "table": null,
+          "score": -5.9296875
+        },
+        {
+          "index": 3,
+          "title": "v7.4-history-as-evidence.md",
+          "source_type": "file",
+          "source_uri": "docs/v7.4-history-as-evidence.md",
+          "snippet": "## 结论 路由和指代消解都没坏：c03 判的是 `mixed`，「刚才那条记录」也被正确还原成香蕉（回答里自己写了「香蕉」）。 缺的是第三条约束——**指代还原以后，那一半还得重新取证**，而这条约束在链路上压根不存在：步进决策的充分性判…",
+          "page": null,
+          "table": null,
+          "score": -6.5625
+        },
+        {
+          "index": 4,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "## v7.2 详细验收（意图路由与拒答策略） v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上：路由器只能读到工具的 `description`，而描述里只有 「精确数值查询」这类抽象说明，它不知道 `products.des…",
+          "page": null,
+          "table": null,
+          "score": -5.5234375
+        },
+        {
+          "index": 5,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "15 条需要业务库的样本里 agentic 有 9 条真的引用 `demo.products#sql_query` 给出正确数据（单价、价格排序、维 C 对比、比平均价再筛），`full` 组 26 条一条都没碰过业务数据；`knowled…",
+          "page": null,
+          "table": null,
+          "score": -6.3671875
+        },
+        {
+          "index": 6,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [x] `--mode sync --ingest --prune` 让知识库跟着 Drive 的删除收缩；`--skip-sync` 只用已下载内容；`--` 之后的参数透传给下载工具 - [x] 26 条 mock 单测：命令拼装与…",
+          "page": null,
+          "table": null,
+          "score": -7.03125
+        },
+        {
+          "index": 7,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | description | storage；首行：腰果 | 腰果开封后务必密封并冷藏，敞放两周就会返软失去脆度。 | 密封冷藏",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "docs/ROADMAP.md",
+        "README.md",
+        "docs/v7.4-history-as-evidence.md",
+        "docs/ROADMAP.md",
+        "README.md",
+        "docs/ROADMAP.md",
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 2,
+      "context_chars": 4163,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 7,
+      "refusal": false,
+      "intent": "knowledge",
+      "stop_reason": "final",
+      "tool_calls": 3,
+      "tool_steps": 5,
+      "tool_names": [
+        "sql_query",
+        "kb_search"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "39dd8a10c8c3",
+      "history_turns": 0,
+      "retrieval_ms": 2832.0,
+      "generation_ms": 108282.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd06",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "桂圆干开袋以后要注意什么？",
+      "reference": "开袋后尽快吃完；返潮容易发霉。未开封的阴凉干燥处可放一年。",
+      "evidence": [
+        "开袋后尽快吃完，返潮容易发霉"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "根据资料，桂圆干开袋后需要注意以下几点 [1]：\n\n- **尽快吃完**：开袋后应尽快食用，不宜久放。\n- **防返潮**：返潮后容易发霉，因此要注意保持干燥。\n\n（未开封时放在阴凉干燥处可保存一年，但一旦开袋就需尽快食用。）[1]",
+      "contexts": [
+        "name | storage | description\n桂圆干 | 阴凉干燥 | 桂圆干未开封阴凉干燥处可放一年，开袋后尽快吃完，返潮容易发霉。",
+        "### 父子块：小块召回，大段阅读\n\n- 入库先按 2000 字符、0 重叠切父块，再在每个父块内按 700/100 切子块；向量与 BM25 **只索引子块**。\n- 子块 payload 带 `parent.id/index/count/text`，BM25 索引同样保存父块字段；命中后按父块去重，在 `RAG_CONTEXT_MAX_CHARS` 预算内送父块整段原文。\n- 父块放不进剩余预算时回退到命中的子块（必要时截断），保证命中内容不丢；`snippet_text` 保存子块原文，用于引用展示。\n- `top_k` 限制的是最终送入的父块数；`retrieved` 也按父块数计。\n- 旧库没有 `parent` 字段时自动回退子块，无需迁移；重新执行 ingest 后生效。\n- 父块文本随每个子块各存一份，Qdrant 与 BM25 体积约放大 2–3 倍；换来的是无需额外 docstore，也不会出现父子存储不一致。\n\n| 环境变量 | 默认 | 说明 |\n|---|---:|---|\n| `RAG_PARENT_CHUNK_SIZE` | 2000 | 父块最大字符数；修改后需重建知识库 |\n| `RAG_PARENT_CHUNK_OVERLAP` | 0 | 父块重叠字符数 |\n| `RAG_CONTEXT_MAX_CHARS` | 6000 | 送入 LLM 的父块总字符预算 |",
+        "默认无鉴权。需要加锁时设 `RAG_DEMO_TOKEN`（或启动加 `--token`），此后 `/api/v1/*`\n要求请求头 `X-Demo-Token` 与之相等，缺失或不匹配返回 401；`/health` 与 `/ready` 不受限。",
+        "### 会话与并发模型\n\n- 会话保存在进程内存：默认 TTL 30 分钟、最多 500 个会话、每个会话最多 60 条消息；服务重启即清空。\n- 送入 LLM 的历史默认只取最近 6 轮，并按 3000 字符预算从新到旧裁剪，避免 prompt 无限增长。\n- 同一会话的并发请求用会话锁串行，不同会话可并行；Qdrant 本地 client 与 reranker 由引擎锁保护，生成阶段不锁。\n- 路由使用同步函数，由 FastAPI 放入线程池执行；SSE 使用同步生成器，不阻塞事件循环。\n- Qdrant 本地磁盘模式同一路径只允许一个进程，因此 `serve.py` 固定单 worker。需要多 worker/横向扩展时，请切换 Qdrant server 模式，并把内存会话替换为 Redis/SQLite 等外部存储，同时补充鉴权与限流。\n\n会话与服务参数可用环境变量覆盖：\n\n| 环境变量 | 默认 | 说明 |\n|---|---|---|\n| `RAG_SESSION_TTL_SECONDS` | 1800 | 会话空闲过期时间 |\n| `RAG_MAX_SESSIONS` | 500 | 进程内最大会话数 |\n| `RAG_MAX_SESSION_MESSAGES` | 60 | 每个会话保留的消息条数（问答成对） |\n| `RAG_MAX_STORED_MESSAGE_CHARS` | 4000 | 单条消息落库截断长度 |\n| `RAG_MAX_HISTORY_TURNS` | 6 | 送入 prompt 的最大历史轮次 |\n| `RAG_MAX_HISTORY_CHARS` | 3000 | 历史总字符预算 |\n| `RAG_MAX_HISTORY_MESSAGE_CHARS` | 800 | 历史中单条消息截断长度 |\n| `RAG_DISABLE_RERANK` | 未设置 | 设为 `1/true/yes/on` 时跳过 reranker |\n| `RAG_DISABLE_AGENT_NONE_PROBE` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：路由判 `none` 就跳过检索直接拒答（默认先用原问题做一次验证检索） |\n| `RAG_AGENT_PLANNER_MODE` | `json` | 设为 `function` 时路由/步进决策改走原生 function calling（同一提示词与预算，见 `ask_tool_json`）；非法值归一为 `json`。两条通道的对比读数见 `eval/reports/fc_comparison_report.md` |"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：桂圆干 | 阴凉干燥 | 桂圆干未开封阴凉干燥处可放一年，开袋后尽快吃完，返潮容易发霉。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### 父子块：小块召回，大段阅读 - 入库先按 2000 字符、0 重叠切父块，再在每个父块内按 700/100 切子块；向量与 BM25 **只索引子块**。 - 子块 payload 带 `parent.id/index/count/…",
+          "page": null,
+          "table": null,
+          "score": -5.7109375
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "默认无鉴权。需要加锁时设 `RAG_DEMO_TOKEN`（或启动加 `--token`），此后 `/api/v1/*` 要求请求头 `X-Demo-Token` 与之相等，缺失或不匹配返回 401；`/health` 与 `/ready`…",
+          "page": null,
+          "table": null,
+          "score": -5.984375
+        },
+        {
+          "index": 4,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### 会话与并发模型 - 会话保存在进程内存：默认 TTL 30 分钟、最多 500 个会话、每个会话最多 60 条消息；服务重启即清空。 - 送入 LLM 的历史默认只取最近 6 轮，并按 3000 字符预算从新到旧裁剪，避免 prom…",
+          "page": null,
+          "table": null,
+          "score": -6.046875
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "README.md",
+        "README.md",
+        "README.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 3,
+      "context_chars": 2075,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "max_steps",
+      "tool_calls": 4,
+      "tool_steps": 8,
+      "tool_names": [
+        "sql_query",
+        "kb_search"
+      ],
+      "gate_intercepts": 2,
+      "trace_id": "4e4c61b7e8b5",
+      "history_turns": 0,
+      "retrieval_ms": 1243.0,
+      "generation_ms": 90334.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd07",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "鳕鱼放到冷藏化冻以后，还有什么要求？",
+      "reference": "冷藏化冻后当天必须烹煮，否则腥味明显。",
+      "evidence": [
+        "冷藏化冻后当天必须烹煮，否则腥味明显"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "鳕鱼冷藏化冻后，当天必须烹煮，否则腥味会明显 [1]。",
+      "contexts": [
+        "name | storage | description\n鳕鱼 | 冷冻 -18℃ | 鳕鱼冷冻保存不要反复解冻，冷藏化冻后当天必须烹煮，否则腥味明显。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：鳕鱼 | 冷冻 -18℃ | 鳕鱼冷冻保存不要反复解冻，冷藏化冻后当天必须烹煮，否则腥味明显。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 107,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "tool_names": [
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "502dc6d0d9c6",
+      "history_turns": 0,
+      "retrieval_ms": 2.0,
+      "generation_ms": 30764.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd08",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "酸奶胀包了还能喝吗？",
+      "reference": "胀包就直接扔掉；过期一天但没拆封的一般还能喝。",
+      "evidence": [
+        "胀包就直接扔掉"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "酸奶胀包了不能喝，应直接扔掉。根据产品资料，酸奶全程冷藏，过期一天未拆封一般还能喝，但一旦胀包就直接扔掉 [7]。",
+      "contexts": [
+        "- [ ] **有一条数据侧样本仍然判错**：交替 A/B 之后 `database` 类别仍有 1 条判 `knowledge`，模型把它当成食品安全\n      判断而不是某条记录的字段内容。没有为了让数字好看去改标注，也没有把那条问法写进提示词或文档\n      （`docs/*.md` 会被入库成评估语料）\n- [ ] **仍然看不到的实体**：目录每列只扫前 `AGENT_CATALOG_SCAN_ROWS` 行，更大的库里排在后面的实体照样进不了目录，\n      那种情形只能靠规则 4（拿不准且 `sql_query` 可用时选 `mixed`）兜底，不是靠目录列全。换成大表应该调这个参数，\n      或者用 `RAG_AGENT_CATALOG_SAMPLES=0` 只列列名不取样例\n- [ ] **耗时不作收益依据**：同设置的第 1 轮与第 3 轮差 30%（43.3s vs 56.5s），比 `on` / `off` 之间的差还大，\n      所以这轮只能说方向——`on` 的工具调用 1.55 次 vs 1.73 次、上下文字符 1529 vs 2097（−27%），机制是数据侧\n      样本从 3–4 次调用变成一次 SQL。要量耗时得再单独做几对暖轮交替",
+        "默认无鉴权。需要加锁时设 `RAG_DEMO_TOKEN`（或启动加 `--token`），此后 `/api/v1/*`\n要求请求头 `X-Demo-Token` 与之相等，缺失或不匹配返回 401；`/health` 与 `/ready` 不受限。",
+        "- Swagger 文档：<http://127.0.0.1:8000/docs>\n- `GET /health`：存活检查；`GET /ready`：检查 Qdrant 集合、BM25 与 reranker，未就绪返回 503。\n- 默认只监听本机、无鉴权，请勿直接暴露公网。\n- `--no-rerank` 等价于 `RAG_DISABLE_RERANK=1`；readiness 会显示“重排模型未加载”，问答仍按融合结果降级运行。",
+        "- [ ] **有一条数据侧样本仍然判错**：交替 A/B 之后 `database` 类别仍有 1 条判 `knowledge`，模型把它当成食品安全\n      判断而不是某条记录的字段内容。没有为了让数字好看去改标注，也没有把那条问法写进提示词或文档\n      （`docs/*.md` 会被入库成评估语料）\n- [ ] **仍然看不到的实体**：目录每列只扫前 `AGENT_CATALOG_SCAN_ROWS` 行，更大的库里排在后面的实体照样进不了目录，\n      那种情形只能靠规则 4（拿不准且 `sql_query` 可用时选 `mixed`）兜底，不是靠目录列全。换成大表应该调这个参数，\n      或者用 `RAG_AGENT_CATALOG_SAMPLES=0` 只列列名不取样例\n- [ ] **耗时不作收益依据**：同设置的第 1 轮与第 3 轮差 30%（43.3s vs 56.5s），比 `on` / `off` 之间的差还大，\n      所以这轮只能说方向——`on` 的工具调用 1.55 次 vs 1.73 次、上下文字符 1529 vs 2097（−27%），机制是数据侧\n      样本从 3–4 次调用变成一次 SQL。要量耗时得再单独做几对暖轮交替",
+        "默认无鉴权。需要加锁时设 `RAG_DEMO_TOKEN`（或启动加 `--token`），此后 `/api/v1/*`\n要求请求头 `X-Demo-Token` 与之相等，缺失或不匹配返回 401；`/health` 与 `/ready` 不受限。",
+        "- Swagger 文档：<http://127.0.0.1:8000/docs>\n- `GET /health`：存活检查；`GET /ready`：检查 Qdrant 集合、BM25 与 reranker，未就绪返回 503。\n- 默认只监听本机、无鉴权，请勿直接暴露公网。\n- `--no-rerank` 等价于 `RAG_DISABLE_RERANK=1`；readiness 会显示“重排模型未加载”，问答仍按融合结果降级运行。",
+        "id | name | category | description | storage | supplier | stock | price | updated_at\n12 | 酸奶 | 乳制品 | 酸奶全程冷藏，过期一天未拆封一般还能喝，胀包就直接扔掉。 | 全程冷藏 2-6℃ | 北方牧场 | 150 | 7.5 | 2026-02-23"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [ ] **有一条数据侧样本仍然判错**：交替 A/B 之后 `database` 类别仍有 1 条判 `knowledge`，模型把它当成食品安全 判断而不是某条记录的字段内容。没有为了让数字好看去改标注，也没有把那条问法写进提示词或…",
+          "page": null,
+          "table": null,
+          "score": -5.93359375
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "默认无鉴权。需要加锁时设 `RAG_DEMO_TOKEN`（或启动加 `--token`），此后 `/api/v1/*` 要求请求头 `X-Demo-Token` 与之相等，缺失或不匹配返回 401；`/health` 与 `/ready`…",
+          "page": null,
+          "table": null,
+          "score": -6.5
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "- Swagger 文档：<http://127.0.0.1:8000/docs> - `GET /health`：存活检查；`GET /ready`：检查 Qdrant 集合、BM25 与 reranker，未就绪返回 503。 - 默认…",
+          "page": null,
+          "table": null,
+          "score": -7.75
+        },
+        {
+          "index": 4,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [ ] **有一条数据侧样本仍然判错**：交替 A/B 之后 `database` 类别仍有 1 条判 `knowledge`，模型把它当成食品安全 判断而不是某条记录的字段内容。没有为了让数字好看去改标注，也没有把那条问法写进提示词或…",
+          "page": null,
+          "table": null,
+          "score": -6.4296875
+        },
+        {
+          "index": 5,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "默认无鉴权。需要加锁时设 `RAG_DEMO_TOKEN`（或启动加 `--token`），此后 `/api/v1/*` 要求请求头 `X-Demo-Token` 与之相等，缺失或不匹配返回 401；`/health` 与 `/ready`…",
+          "page": null,
+          "table": null,
+          "score": -6.5234375
+        },
+        {
+          "index": 6,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "- Swagger 文档：<http://127.0.0.1:8000/docs> - `GET /health`：存活检查；`GET /ready`：检查 Qdrant 集合、BM25 与 reranker，未就绪返回 503。 - 默认…",
+          "page": null,
+          "table": null,
+          "score": -7.32421875
+        },
+        {
+          "index": 7,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "id | name | category | description | storage | supplier | stock | price | updated_at；首行：12 | 酸奶 | 乳制品 | 酸奶全程冷藏，过期一天未拆封一般…",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "docs/ROADMAP.md",
+        "README.md",
+        "README.md",
+        "docs/ROADMAP.md",
+        "README.md",
+        "README.md",
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 2,
+      "context_chars": 2228,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 7,
+      "refusal": false,
+      "intent": "knowledge",
+      "stop_reason": "final",
+      "tool_calls": 3,
+      "tool_steps": 6,
+      "tool_names": [
+        "sql_query",
+        "kb_search"
+      ],
+      "gate_intercepts": 1,
+      "trace_id": "8bdc2a7b0cbb",
+      "history_turns": 0,
+      "retrieval_ms": 2418.0,
+      "generation_ms": 56604.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    }
+  ]
+}

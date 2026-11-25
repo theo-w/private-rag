@@ -309,6 +309,9 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent,ful
   --output eval/reports/v7_agent_report.md --json-output eval/reports/v7_agent_report.json
 # 只看“会检索但不让查库”的能力上限
 python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --no-agent-sql --skip-ragas
+# 树索引（v8.6）：先给评估库建索引，再在同一进程里开/关交替跑
+python3 scripts/build_tree_index.py --eval
+python3 scripts/measure_tree_index_ab.py --values off,on,off --keep-reports
 ```
 
 `--agent-max-steps`（默认 `AGENT_MAX_STEPS`）与 `--agent-sources` 可覆盖循环边界与运行时数据源。
@@ -860,6 +863,96 @@ python3 scripts/measure_thinking_ab.py --setting thinking_brief --values off,on,
 实测三步 37.6s 对 37.8s，没有差别。这台 Ollama 的前缀缓存只在「整段开头与上一次请求完全相同」时才复用
 ——同一份提示词原样重发才能把读提示词从 30s 压到 0.4s——重排段落顺序换不来复用。
 
+### 章节树索引开/关复跑（2026-11-24，`claude/v8-tree-index-7ac6d0`）
+
+量的是「命中块换成它所在的章节 + 层级路径」这一路（`RAG_ENABLE_TREE_INDEX`，默认关）。检索召回、精排、
+步数、门控与指标判定式都没动，两档只差在上下文的边界语义（标题边界 vs 固定字符窗口）。
+
+```bash
+python3 scripts/init_demo_db.py
+python3 scripts/prepare_eval_kb.py --recreate
+python3 scripts/build_tree_index.py --eval          # 给评估库建章节树，245 个块全部归属成功
+
+python3 scripts/measure_tree_index_ab.py --values off,on,off --keep-reports
+```
+
+29 条 × `agent`，同一进程交替三轮（第一轮冷启动作废），隔离评估库，`--skip-ragas --max-workers 1`，
+评估链路钉死 `temperature=0` 与 `seed=7`。报告 `eval/reports/v8_5_tree_ab_{1,2,3}_{off,on,off}`，
+三轮都记 `git_commit = b85cb92`、`git_dirty = false`。
+
+| 轮次 | 设置 | 单条均耗时 | answer_rate | source_hit | refusal_accuracy | both_sides_hit | evidence_hit@3 | mrr@3 | context_precision@3 | used_tree_rate | avg_context_chars | avg_retrieved | avg_tool_calls |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 第 1 轮 | 关（冷启动，耗时作废） | 41.3s | 1.000 | 1.000 | 1.000 | 1.000 | 0.840 | 0.7933 | 0.5733 | 0.000 | 1498 | 2.69 | 1.724 |
+| 第 2 轮 | **开** | 51.3s | 1.000 | 1.000 | 1.000 | **0.833** | 0.840 | 0.7933 | 0.5733 | 0.621 | 1700 | 2.52 | 1.483 |
+| 第 3 轮 | 关（暖轮，参照） | 54.8s | 1.000 | 1.000 | 1.000 | 1.000 | 0.840 | 0.7933 | 0.5733 | 0.000 | 1403 | 2.59 | 1.621 |
+
+结论与限制，引用这轮数字时一并带上：
+
+- **两个「关」轮九项指标完全一致**（`compare_eval_noise.py` 判一致），逐条行为只有 `r03` 翻（意图
+  `mixed` → `database`、停止原因 `max_steps` → `insufficient_evidence`、工具 4 → 1，仍是正确拒答）。
+  `r03` 是拒答样本，逐条的 `source_hit` / `both_sides_hit` / `evidence_hit@3` 都记 `None`，不进任何均值；
+  引用两项三轮都是 1.000，这一轮没有措辞推动指标的问题。剩下的启发是 `mixed` / `database` 样本的
+  意图与步数本来就不完全钉得住。
+- **一项门禁回退：`both_sides_hit` 1.000 → 0.833，是 `c03` 一条，丢的是数据库那一侧**（≥1 条门槛，
+  且两个「关」轮里它都是 4 次工具、两侧都引到）。开档那轮它的工具序列只有 `['kb_search']`、1 次查询就
+  `final`；暖「关」轮是 `['kb_search', 'sql_query']`、3 次查询，上下文里带一段 SQL 结果表。也就是读到
+  一整节带路径的文档正文以后判定证据够了，**少查了数据库那一侧**。`source_hit` 与 `evidence_hit@3`
+  仍 1.0，答案没答错，是「少取一侧」。与 v7.4 记的「把检索到的文本当足够、不回查」同源，本轮被这一路
+  变成稳定触发。**按代价记，不是噪声**：所以默认档只能关，要打开先补门控。`m01` / `m04` 也提前收手
+  （4 → 2 次工具）但两侧仍都调到（`['kb_search', 'sql_query']`），不计入回退。
+- **没有质量收益**：三项命中指标、引用两项三轮完全相同，`n_errors` 0。
+- **耗时不可判定**：暖轮开 51.3s 对暖轮关 54.8s（-6.4%）看着像收益，但同一设置的两轮「关」本身就差
+  32.6%（冷 41.3s 对暖 54.8s），逐条从 -69%（`c03`）到 +87%（`r03`），而每个设置只有 1 个可用暖轮，
+  没有「暖关对暖关」这一对来定噪声底，所以只有方向、没有幅度。剔除三条提前收手的样本（`m01` 130→52s、
+  `m04` 117→62s、`c03` 162→50s）后剩下 26 条是 50.9s 对 45.4s（+12.3%），同样缺同配置暖轮对照，只当观察值。
+  省下的时间靠少跑几步，而少跑几步正是 `c03` 回退的成因——所以「更快」即使成立也不算收益。
+- **上下文反而变大，要和块数一起读**：每样本 `avg_context_chars` 暖关 1403 / 开 1700（+21%），同轮
+  `avg_retrieved` 暖关 2.59 / 开 2.52——块数由模型的查询与步数决定，不是这一路直接控制的。换算成每块
+  送出量才是这一路自己的读数：542 字符/块 → 675 字符/块（+24%），逐块中位 322 → 629 字符（父块扩展在
+  共用预算里常被截断）。
+- **机制生效的证据（不是收益）**：`used_tree_rate` 0.621、18/29 条的上下文出现 `章节路径: `、全轮共
+  55 行章节路径。没有路径的 11 条（`d01`–`d06`、`s01`–`s04`、`c02`）只调 `sql_query`、不调 `kb_search`，属预期。
+- 这一路默认关闭，以上回退只在打开时出现；细节见 `docs/ROADMAP.md` 的 v8.6。
+
+### 按意图收窄以后重跑（2026-11-24，同一口径）
+
+上一轮唯一的代价是混合问题提前收手，所以把这一路收窄成「只在路由判成纯知识的问题上启用」
+（`TREE_KNOWLEDGE_ONLY`，默认开；`RAG_DISABLE_TREE_KNOWLEDGE_ONLY=1` 退回任何意图都启用）以后重跑一遍。
+
+```bash
+python3 scripts/build_tree_index.py --eval          # 索引没变，上一条命令建的仍在
+
+python3 scripts/measure_tree_index_ab.py --values off,on,off --keep-reports --prefix v8_5_tree_know_ab
+```
+
+命令与上一轮完全相同（同一评估集、同一隔离评估库、同一进程 `off,on,off`、串行单并发、`--skip-ragas`、
+`temperature=0` 与 `seed=7`），只是报告名加了前缀。报告 `eval/reports/v8_5_tree_know_ab_{1,2,3}_{off,on,off}`，
+三轮都记 `git_commit = 7f07afe`（本轮唯一改动就是它），`git_dirty = true` 来自跑批时新写的报告文件与本轮文档改动。
+
+| 轮次 | 设置 | 单条均耗时 | answer_rate | source_hit | refusal_accuracy | both_sides_hit | evidence_hit@3 | mrr@3 | context_precision@3 | used_tree_rate | avg_context_chars | avg_retrieved | avg_tool_calls |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 第 1 轮 | 关（冷启动，耗时作废） | 30.9s | 1.000 | 1.000 | 1.000 | 1.000 | 0.800 | 0.7533 | 0.5333 | 0.000 | 1562 | 2.83 | 1.793 |
+| 第 2 轮 | **开**（只在纯知识意图） | 27.1s | 1.000 | 1.000 | 1.000 | 1.000 | 0.840 | 0.7933 | 0.5733 | 0.345 | 1683 | 2.69 | 1.724 |
+| 第 3 轮 | 关（暖轮，参照） | 36.4s | 1.000 | 1.000 | 1.000 | 1.000 | 0.840 | 0.7933 | 0.5733 | 0.000 | 1403 | 2.59 | 1.621 |
+
+结论与限制，引用这轮数字时一并带上：
+
+- **上一轮那条回退消失了**：`both_sides_hit` 三轮都是 1.000，四项门禁全持平。逐条确认过 `c03`、`m01`、`m04`：
+  开档轮仍是 4 次工具、`kb_search` 与 `sql_query` 都调到、上下文里没有 `章节路径: `（它们判成 `mixed`，
+  这一路不再作用于）。`m01` 与 `m04` 上一轮的提前收手也一并没了。
+- **生效面正好等于纯知识那一侧**：开档轮只有 10 条带章节路径（`used_tree_rate` 0.345、全轮 32 行路径），
+  就是判成 `knowledge` 的 `k01`–`k07`、`c01`、`r02`、`r04`；其余 19 条一条路径都没有。
+- **纯知识这一侧也量不出收益**：开档轮三项命中指标与暖「关」轮逐字相同（0.840 / 0.7933 / 0.5733）。
+  第 1 轮冷是 0.800 / 0.7533 / 0.5333，看着像「开档涨了 0.04」，但同设置的两个「关」轮自己就把这三项
+  判为不一致，差异全来自 `d05` 一条（意图 `database`，这一路根本不作用于它）——属于冷轮与同设置噪声。
+- **耗时仍不可判定**：开档 27.1s 对暖关 36.4s（-25.6%）幅度看着大，可同设置的两个「关」轮差 17.9%，
+  逐条从 -70%（`d06`）到 +143%（`r03`）；而「变快最多」的 `d06`、`d05`、`s01` 都是 `database` 意图、
+  这一路没作用于它们，说明这个幅度绝大部分不是这一路带来的。
+- 行为差异只剩 `r03` 一条（意图与步数翻动，仍是正确拒答），与上一轮同一条样本——`mixed` / `database`
+  样本的意图与步数本来就不完全钉得住。
+- 结论：收窄把唯一的代价堵住了，但打开换不来可测的收益，`RAG_ENABLE_TREE_INDEX` 仍默认关。
+  真要打开，作用面只有纯知识问题，风险比上一轮小得多。完整读数见 `docs/ROADMAP.md` 的 v8.6。
+
 ## v8 解析基准集（`v8_parse_bench.jsonl`）
 
 要量的问题：v6.2 的消融证明自建版面表格把 `evidence_hit@3` 从 0.2 抬到 1.0，但那只是「比自己不开这个模块」
@@ -1243,7 +1336,154 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
 - **交替那轮只测了新集 40 条**：对 v7 那 29 条的影响在上面的「对 v7 那 29 条的影响」一节单独量了，结论是没有
   可见影响（差异等于漂移量级，判不可判定）；那一轮用的是 v7 原本的演示库，不涉及超集库多出来的 8 行。
 
-## v8.9 边界题 11 条，与「全集 / 可比子集」两套口径（`eval/v8_agentic_edge.jsonl`）
+## v8.9 / v8.10 两道门控的前后对比（`gate_side_tracking`、`kb_miss_sql_gate`）
+
+同一个分支上的两处改动，各自有开关、各自有读数：
+
+- **v8.9 `gate_side_tracking`**：mixed 双侧门控原来拿证据块的**标签文字**找工具名来认「这一侧查过没有」。
+  真实链路的标签是「SQL 查询（表 …）」与文档标题，里面没有工具名，等于永远判「一侧零证据」，
+  每条 `mixed` 都被反复逼到步数用尽。改成看工具到底跑过没有（`kb_ran` / `sql_ran`），
+  并规定每一侧最多逼一次、那一侧没挂工具就不逼。
+  `RAG_DISABLE_AGENT_GATE_SIDE_TRACKING=1` 逐字退回老行为。
+- **v8.10 `kb_miss_sql_gate`**：意图判成 `knowledge`、模型要说「证据不足」，而问题指名的实体在
+  「库内数据」的取值样例里时，拒答之前先按那个实体查一次业务表（一条问题只兜一次）。
+  `RAG_DISABLE_AGENT_KB_MISS_SQL_GATE=1` 退回原行为。
+
+### 复现命令
+
+```bash
+# v8.9：12 条双侧 mixed（新集 xm01–xm07 + v7 的 m01–m05），一轮约 10–13 分钟，三轮约半小时
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting gate_side_tracking --values off,on,off \
+  --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl \
+  --ids xm01,xm02,xm03,xm04,xm05,xm06,xm07,m01,m02,m03,m04,m05 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_gateside
+
+# v8.10 的收益侧：把路由提示词第 10 条一起关掉，模拟「路由判错」这道兜底要兜的情形
+RAG_DISABLE_AGENT_ROUTE_DATA_SIDE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+python3 scripts/measure_thinking_ab.py --setting kb_miss_sql_gate --values off,on,off \
+  --dataset eval/v8_agentic_expanded.jsonl \
+  --ids xd01,xd02,xd03,xd04,xd05,xd06,xd07,xd08 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_kbmiss_data
+
+# v8.10 的护栏侧：knowledge 9 条 + 应拒答 5 条 + mixed 7 条，出厂设置
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting kb_miss_sql_gate --values off,on,off --dataset eval/v8_agentic_expanded.jsonl \
+  --ids xk01,xk02,xk03,xk04,xk05,xk06,xk07,xk08,xk09,xr01,xr02,xr03,xr04,xr05,xm01,xm02,xm03,xm04,xm05,xm06,xm07 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_kbmiss_guard
+
+# 合入前复查：文档定稿以后先重建评估库（评估语料就是 README + docs/*.md），再按最终代码重跑
+# 上面那 29 条，两道门控各三轮。一轮约 12–18 分钟，六轮约两小时
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/prepare_eval_kb.py --recreate
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting gate_side_tracking --values off,on,off --dataset eval/v8_agentic_expanded.jsonl \
+  --ids xd01,xd02,xd03,xd04,xd05,xd06,xd07,xd08,xk01,xk02,xk03,xk04,xk05,xk06,xk07,xk08,xk09,xr01,xr02,xr03,xr04,xr05,xm01,xm02,xm03,xm04,xm05,xm06,xm07 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_final_gateside
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting kb_miss_sql_gate --values off,on,off --dataset eval/v8_agentic_expanded.jsonl \
+  --ids xd01,xd02,xd03,xd04,xd05,xd06,xd07,xd08,xk01,xk02,xk03,xk04,xk05,xk06,xk07,xk08,xk09,xr01,xr02,xr03,xr04,xr05,xm01,xm02,xm03,xm04,xm05,xm06,xm07 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_final_kbmiss
+```
+
+`--ids` 只在这几轮里用（它们是「只看这一类样本」的读数）；与整轮对照时不要加，样本数变了指标均值不可比。
+跑前确认日志里有 `reranker=有`、单条耗时是秒级——精排静默失效时每条只花 50 毫秒，报告照样出数。
+调试一律 `--output /tmp`，不动 `eval/reports/` 里已跟踪的历史报告；下面这两组读数的原始报告以新名字存在
+`eval/reports/`：`v8_9_gate_side_ab_*`、`v8_10_kbmiss_data_ab_*`、`v8_10_kbmiss_guard_ab_*`、
+`v8_10_kbmiss_xd08_*`（每轮 `.md` 与 `.json` 各一份）。
+
+### v8.9 读数（2026-11-26 凌晨，本机单并发 MLX，12 条双侧 `mixed` × `agent`，339 向量评估库）
+
+| 轮 | 设置 | answer_rate | source_hit | both_sides_hit | evidence_hit@3 | citation / validity | mrr@3 | context_precision@3 | 工具调用 / 步数 | 检索片段 | 单条均耗时 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 第 1 轮 | `off` | 0.917（11/12） | 0.917（11/12） | 0.833（10/12） | 0.667（8/12） | 1.000 / 1.000 | 0.667 | 0.222 | 3.58 / 7.08 | 2.58 | 65.3s（冷启动，作废） |
+| 第 2 轮 | `on` | **1.000（12/12）** | 0.917 | 0.833 | 0.667 | 1.000 / 1.000 | 0.667 | 0.222 | **2.58 / 5.08** | **1.58** | 41.2s |
+| 第 3 轮 | `off` | 0.917（11/12） | 0.917 | 0.833 | 0.667 | 1.000 / 1.000 | 0.667 | 0.222 | 3.58 / 7.08 | 2.58 | 61.0s |
+
+逐条翻动 8 条，形状完全一样：`xm01` `xm02` `xm05` `m01` `m02` `m04` `m05` 从
+「`stop_reason=max_steps`、4 次工具」变成「`final`、2–3 次工具」，`xm03`（可回答样本）从拒答变作答。
+`source_hit` / `both_sides_hit` / `evidence_hit@3` / 引用两项三轮逐字相同——少一次调用没有少引用某一侧。
+**噪声底**：同设置的第 1 轮与第 3 轮九项指标与逐条行为逐字相同，这批样本这一轮漂移为 0，
+所以翻动可以归因到改动本身。耗时 41.2s vs 61.0s 只记方向（机制是每条少一次强制调用），不作收益依据。
+其中只有「`xm03` 从拒答变作答」这一条在下面合入前复查的 29 条里没复现（复查那轮的漂移正好落在它身上），
+所以这道改动记到的收益是「不再把步数烧光」，不是作答率。
+
+### v8.10 读数（2026-11-25 晚，本机单并发 MLX，339 向量评估库）
+
+收益侧（`xd01`–`xd08` 8 条，路由提示词第 10 条一起关掉）：
+
+| 轮 | 设置 | answer_rate | source_hit | evidence_hit@3 | citation / validity | refusal_accuracy | 工具调用 / 步数 | 单条均耗时 |
+|---|---|---|---|---|---|---|---|---|
+| 第 1 轮 | `off` | 0.625（5/8） | 0.500（4/8） | 0.500 | 0.625 / 0.625 | — | 2.25 / 4.88 | 58.9s（冷启动，作废） |
+| 第 2 轮 | `on` | **1.000（8/8）** | 0.625 | 0.625 | **1.000 / 1.000** | — | 2.38 / 5.00 | 75.7s |
+| 第 3 轮 | `off` | 0.750（6/8） | 0.625 | 0.625 | 0.750 / 0.750 | — | 2.25 / 5.00 | 68.9s |
+
+能归因给门控的是两条：`xd05` 与 `xd08` 在两个 `off` 轮都是「拒答 / `insufficient_evidence` / 1–2 次工具」，
+在 `on` 轮都是「作答 / `final` / 3 次工具」。`xd02` 在暖 `off` 轮也作答了（属漂移），
+`xd01` 的意图翻动是路由器自己（第 10 条被关掉）。同设置两个 `off` 轮自己差 1 条
+（`answer_rate` 0.625 vs 0.750），所以这道兜底在这批样本上的可见收益是 **+2 条，比漂移多 1 条**——
+够过「≥1 条才算」这条线，但余量小，别当成大收益。
+
+护栏侧（21 条，出厂设置，`off → on → off`）：九项指标 `off` 与 `on` 全等
+（`answer_rate` 0.9375、`source_hit` 0.9375、`refusal_accuracy` 1.000、`both_sides_hit` 0.714、
+引用两项 1.000、`evidence_hit@3` 0.75、`mrr@3` 0.635、`context_precision@3` 0.25、`n_errors` 0），
+两个 `off` 轮逐条行为没有翻动。唯一行为差别是 `xr04` 从 1 次工具变 2 次（它的问题指名的实体在目录里，
+门控多兜一次查询），仍然正确拒答。
+
+### 合入前复查（2026-11-26 凌晨，最终代码 + 文档定稿重建的 388 向量库，同 29 条，出厂设置）
+
+被测代码是最终提交的代码（`runtime.py` md5 `1098933f…`、`config.py` `39f56c6…`、HEAD `1a94bac`、
+`huggingface-hub` 0.36.2），语料是在 HEAD `1a94bac`（代码与文档都定稿）以后重建的库（388 个向量，
+比之前的 339 多，因为多了讲这两道门控的文档），`reranker=有`、单并发。
+这组读数写进本文与 ROADMAP 以后语料又长了一点，长出来的全是门控说明与读数表，不含任何样本的实体或
+应拒答样本的原问题，所以不影响这组读数的成立；要逐字节复现这组数字，按下面的命令再重建一次并重跑。29 条 = 数据侧 8 + 文档侧 9 + 应拒答 5 + 双侧 `mixed` 7，
+两道门控各跑三轮 `off → on → off`，一次进程。
+
+v8.9 `gate_side_tracking`：
+
+| 轮 | 设置 | answer_rate | source_hit | both_sides_hit | evidence_hit@3 | citation / validity | mrr@3 | context_precision@3 | 工具调用 / 步数 | 单条均耗时 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 第 1 轮 | `off` | 1.000（29/29） | 0.958 | 0.714 | 0.792 | 1.000 / 1.000 | 0.743 | 0.486 | 1.66 / 4.07 | 74.0s（冷启动，作废） |
+| 第 2 轮 | `on` | 1.000（29/29） | 0.958 | 0.714 | 0.792 | 1.000 / 1.000 | 0.743 | 0.486 | **1.45 / 3.62** | 32.1s |
+| 第 3 轮 | `off` | 0.958（28/29） | 1.000 | 0.714 | 0.833 | 1.000 / 1.000 | 0.785 | 0.500 | 1.72 / 4.14 | 38.9s |
+
+`on` 轮的九项指标与参照轮**全等**，逐条上只有 `xm01` `xm02` `xm03` `xm05` 四条翻动，形状和上面那轮一样：
+「`max_steps`、4 次工具、门控拦 2 次」→「`final`、2–3 次工具、门控拦 0–1 次」。但同设置的第 1 轮与第 3 轮
+这次**不再逐字相同**：`xm03` 在暖 `off` 轮拒答（参照轮作答，两轮都是 `max_steps`），`xm07` 与 `xr03` 各多一次
+工具，`xd06` 的停止原因从 `planner_unavailable` 变 `final`。所以这轮能归因的只有「不再把步数烧光」
+（平均工具调用 1.66 → 1.45，指标没有回归），作答率不算提升。
+
+v8.10 `kb_miss_sql_gate`（同 29 条、同三轮）：
+
+| 轮 | 设置 | answer_rate | source_hit | both_sides_hit | evidence_hit@3 | citation / validity | mrr@3 | context_precision@3 | 工具调用 / 步数 | 单条均耗时 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 第 1 轮 | `off` | 0.958（28/29） | 0.958 | 0.714 | 0.792 | 0.958 / 0.958 | 0.743 | 0.458 | 1.48 / 3.66 | 30.0s（冷启动，作废） |
+| 第 2 轮 | `on` | **1.000（29/29）** | 0.958 | 0.714 | 0.792 | **1.000 / 1.000** | 0.743 | 0.458 | 1.55 / 3.79 | 22.9s |
+| 第 3 轮 | `off` | 0.958（28/29） | 0.958 | 0.714 | 0.792 | 0.958 / 0.958 | 0.743 | 0.458 | 1.48 / 3.66 | 23.2s |
+
+同设置的第 1 轮与第 3 轮九项指标与逐条行为**逐字相同**（这批漂移为 0），所以 `on` 轮那两条翻动可以归因：
+`xd08` 从「拒答 / `insufficient_evidence` / 1 次工具」变成「作答 / `final` / 2 次工具」（门控兜一次，
+答案内容正确并引用了那一行 SQL），`xr04` 多花一次查询、仍然正确拒答。`source_hit` 没动，原因还是
+下面第一条那个 `@3` 窗口口径。原始报告以新名字存在 `eval/reports/`：`v8_9_gate_side_final_*`、
+`v8_10_kbmiss_final_*`。
+
+### 限制（引用这两轮数字时一并带上）
+
+- **`xd08` 兜住以后指标仍判 0**：答案内容正确、也引用了那一行 SQL，但那条 SQL 引用排在靠后的位置
+  （早几轮第 10 位、合入前复查那轮第 4 位），而 `source_hit` 与 `evidence_hit@3` 只看前 3 位。
+  这是口径（`@3` 窗口）不是又答错。
+- **上面 v8.9 / v8.10 两组原始读数测于中间状态**：v8.10 那两组测于 v8.9 之前（那时兜底门控的
+  「SQL 侧查过没有」还按标签文字认，等于从不跳过），v8.9 那组测于文档定稿前的 339 向量库。
+  最终代码 + 重建库的读数见上面的「合入前复查」，引用这两道门控的收益应以复查那两组为准。
+- **复查那轮 v8.9 的漂移不为 0**：29 条比当初的 12 条大，同设置两轮之间翻动 1 条作答，
+  所以那道改动只记「不再把步数烧光」这一条结构性收益，不记作答率。
+- **耗时不作收益依据**：v8.9 的 `on` 41.2s vs 暖 `off` 61.0s（复查那轮 32.1s vs 38.9s）、
+  v8.10 的 `on` 75.7s vs 暖 `off` 68.9s（复查那轮 22.9s vs 23.2s），方向都不一致
+  （一次是少调用、一次是多一次查询，还会互相抵），单次交替对照量不出耗时。
+- **单测抓不到这个 bug 的原因**：`TestMixedGate` 的替身把块标签写成含工具名，老逻辑在那种替身里成立，
+  所以旧单测全绿而真实链路一直误拦。新加的 `TestMixedGateSideTracking` 用生产链路的标签样子
+  （「SQL 查询（表 demo.products）」与文档标题），并留了一条断言说明关掉新依据时仍然误拦。
+
+## v8.11 边界题 11 条，与「全集 / 可比子集」两套口径（`eval/v8_agentic_edge.jsonl`）
 
 v8.7 把 agentic 集扩到「v7 29 + 新集 40 = 69 条」以后，单条样本对均值的影响从 ±3.4pt 降到 ±1.7pt，
 **读数分辨率够了，但类型还不够**：v7 与 v8 那 69 条里没有「历史里有一句错值」这类题（`coreference` 只考
@@ -1300,7 +1540,8 @@ v8.7 把 agentic 集扩到「v7 29 + 新集 40 = 69 条」以后，单条样本�
 ### 复现命令
 
 ```bash
-# 12. v8.9 合并跑 80 条（要打到本机 Ollama，单并发，一轮约 60 分钟）
+# 12. v8.11 合并跑 80 条（要打到本机 Ollama，单并发，一轮约 60 分钟；
+#     报告文件名与 run-note 里仍写 v8.9 —— 那是跑批当时的编号，见下面限制）
 python3 scripts/init_eval_db.py
 python3 scripts/prepare_eval_kb.py --recreate
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/evaluate.py \
@@ -1415,9 +1656,13 @@ insufficient_evidence 11 / context_budget 2`。68 条可回答样本里被拒答
   旧题的命中可能跟着变。复现这轮数字必须 `git checkout e0f2065` 再 `prepare_eval_kb.py --recreate`。
 - **自查工具报的 12 条警告全是 v7 既有重叠**（涉及 `xe` 的 0 条），所以「结构性问题 0 条」的含义是
   新题没撞任何既有证据，不代表整个数据集没有证据句互相包含。
+- **这一轮测于 PR #29（章节树索引）与 PR #34（两道门控）合入之前**：当时树索引默认关闭、两道门控还没合入，
+  这两件事都不改变这 11 条边界题的口径，但会让旧题的命中与步数变，所以与这两个改动之后的任何轮次比较
+  只能看方向。
+- **报告文件名与 run-note 里的 `v8_9` / 「v8.9 合并跑」是跑批当时的编号**（那时 PR #34 还没合进 `main`，
+  `v8.9` 还没被 mixed 门控占用）。本节编号已按「合进 `main` 的先后」改为 v8.11，文件名与 run-note 没改，
+  是为了与报告 JSON 里记录的 `run_note`、`git_commit` 保持一致。
 - **两种边界没做**，因为必须动语料或评估库才能成立：「两个事实分属两侧但其中一个在 SQL 里是 NULL」
   （评估库 12 行没有 NULL）、以及「文档侧与 SQL 侧说法冲突时以哪侧为准」（语料里没有互相矛盾的陈述，
   加一句会改变所有旧题的检索行为）。本轮用「查空集不许编造」（`xe09`）与「一侧查无此物」（`xe07`）
   当它们的近邻替身：能说明「查不到时会不会编」，说明不了「字段是 NULL 时会不会编」。
-
-

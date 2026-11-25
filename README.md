@@ -222,6 +222,8 @@ event: error      data: {"code":"generation_failed","message":"...","request_id"
 | `RAG_MAX_HISTORY_MESSAGE_CHARS` | 800 | 历史中单条消息截断长度 |
 | `RAG_DISABLE_RERANK` | 未设置 | 设为 `1/true/yes/on` 时跳过 reranker |
 | `RAG_DISABLE_AGENT_NONE_PROBE` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：路由判 `none` 就跳过检索直接拒答（默认先用原问题做一次验证检索） |
+| `RAG_DISABLE_AGENT_GATE_SIDE_TRACKING` | 未设置 | 设为 `1/true/yes/on` 时 mixed 门控退回旧行为：拿证据块的标签文字找工具名来认「这一侧查过没有」（真实证据块的标签里没有工具名，等于永远判一侧没查过，每条 mixed 都被反复逼到步数用尽） |
+| `RAG_DISABLE_AGENT_KB_MISS_SQL_GATE` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：意图判 `knowledge` 而文档侧查不到那项事实就直接按证据不足拒答（默认在拒答之前，若问题指名的实体出现在「库内数据」的取值里，先按该实体查一次业务表） |
 | `RAG_AGENT_PLANNER_MODE` | `json` | 设为 `function` 时路由/步进决策改走原生 function calling（同一提示词与预算，见 `ask_tool_json`）；非法值归一为 `json`。两条通道的对比读数见 `eval/reports/fc_comparison_report.md` |
 
 ## v4 自动评估（Ragas）
@@ -303,6 +305,8 @@ v5 处理两个问题：子块召回准，但 700 字符上下文容易丢前因
 - `top_k` 限制的是最终送入的父块数；`retrieved` 也按父块数计。
 - 旧库没有 `parent` 字段时自动回退子块，无需迁移；重新执行 ingest 后生效。
 - 父块文本随每个子块各存一份，Qdrant 与 BM25 体积约放大 2–3 倍；换来的是无需额外 docstore，也不会出现父子存储不一致。
+- 父块的边界是固定字符数，跟文档结构无关，所以会断在「这里有五个关键角色：」这种地方、列表掉进下一个父块。
+  v8.6 另有一条按标题层级还原上下文的并列通路，默认关闭，见下文「章节树索引（v8.6）」。
 
 | 环境变量 | 默认 | 说明 |
 |---|---:|---|
@@ -454,6 +458,13 @@ RAG_AGENT_SOURCES_CONFIG=config/sources.demo.yaml python3 scripts/serve.py --por
 
 `none` 不再是一张免检通行证：路由器判 `none` 只说明它「猜两侧都查不到」，而拒答的正当理由只有「查过了，证据里没有」。所以判成 `none` 时不再直接拒答，而是先用原问题做一次知识库验证检索——查到东西就照常作答，并把意图按实际作答依据报成 `knowledge`；查不到才返回拒答哨兵，`stop_reason` 记 `no_evidence`。代价是一条真正无关的问题多花一次 `kb_search`（仍受 `RAG_AGENT_MAX_STEPS` 约束）；`RAG_DISABLE_AGENT_NONE_PROBE=1` 退回「判 none 就直接拒答」的旧行为，知识库工具不可用时同样走旧行为。路由提示词同步收紧准入：`none` 只留给实时信息、天气、新闻、外部网站内容、主观偏好这类明确在本系统之外的事实，问到某条业务记录、某个字段或本系统自身的文档时一律先取证——字段里到底有没有，要查过才知道。v7 评估集 26 条复跑（`eval/reports/v7_2_nonegate_report.md`）：路由判 `none` 的样本从 1 条变成 0 条、`no_retrieval` 也从 1 条降到 0 条，4 条应拒答样本仍全部拒答（`refusal_accuracy` 1.000 持平），`citation_rate` 0.955→1.000，平均工具调用 1.31→1.42。
 
+拒答之前的最后一道兜底：意图被判成 `knowledge`、模型声明「证据不足」，而问题指名的实体出现在 `sql_query`
+描述那段「库内数据」的取值样例里时，不再直接拒答，先按那个实体查一次业务表再判——「字段里到底有没有」
+要查过才知道，而路由器只看得到工具描述、同一条提示词在温度 0 下也会翻动（读数见 `eval/README.md`）。
+实体认的是同一份目录，顺带拿到它所在的表与列，所以强制的那次查询按实体过滤而不是整表 `SELECT`，
+不会被行数与字符预算截掉靠后的记录。一条问题只兜一次，`sql_query` 已经跑过就不再兜；
+`RAG_DISABLE_AGENT_KB_MISS_SQL_GATE=1` 退回「文档侧缺那项事实就拒答」的原行为。
+
 决策走 JSON 模式，路由与步进两次调用共用 `RAG_AGENT_PLANNER_TOKENS`（默认 2000）输出预算。本机默认模型是推理型，会先输出一段不可见的思考内容：预算给小了（实跑时用的 400）模型只吐思考、正文为空，路由就会整段回退到关键词判断。轨迹里会写明回退原因，看到「模型输出中没有 JSON 对象」就先怀疑这个预算。
 同一份提示词也量过原生 function calling（2026-11-22，`scripts/compare_fc_decisions.py`，读数 `eval/reports/fc_comparison_report.md`）：默认模型 qwen3.8:27b-mlx 路由 12/12、步进 3/3 都返回了可用的 `tool_calls`，路由单条均耗时 18.8 秒（快于 JSON 模式的 27.0 秒），两通道意图一致率 0.75；对照组 qwen2.5:7b-instruct 只有 4/12 成功——提示词仍写着「只输出 JSON」，该模型多数情况直接吐 JSON 文本而不调工具，失败数含这个混淆，不能读成模型不支持工具调用。JSON 模式仍是默认：任何模型可用，切默认前需先跑 29 条评估确认无回归；`RAG_AGENT_PLANNER_MODE=function` 仅作实验开关。
 
@@ -531,7 +542,12 @@ python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent,ful
 python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --configs agent --no-agent-sql --skip-ragas
 ```
 
-`agent` 组的口径与固定链路不同义，报告的限制小节逐条写明：耗时是整条循环的墙钟时间（`avg_retrieval_ms` 只记工具执行耗时，其余归 `avg_generation_ms`）；`avg_tool_calls` / `avg_tool_steps` 只有 agentic 组有值；`evidence_hit` 取决于模型 SELECT 了哪些列（只取 `name`/`price` 时答案可以全对但证据判 0）；默认单轮，但带 `history` 字段的样本（v7.3 起 3 条指代消解样本）会把对话历史原样传给 agentic 链路，报告用 `history_turns` 标出哪几条走了多轮；v7.4 起混合样本可用 `expected_sources` 声明「文档侧 + SQL 侧」，新读数 `both_sides_hit` 要求声明的每一侧都被引用到（扫全量引用、不套 `@3` 窗口），旧指标定义未动。v7.4 首轮 29 条实跑里 6 条双侧样本两侧取证全中（`both_sides_hit` 1.000，含上一轮只查文档侧、没回查 SQL 的 c03，那轮的既有数据按新口径回算是 0.833），`source_hit` 0.960 与上轮同为 m04 一条未命中，`mrr@3` 的 -0.020 全部来自 k05 一条排位后移，单条平均 82.6 秒，报告 `eval/reports/v7_4_two_sided_report.md`。修法 A（提示词硬规则）已做：STEP_PROMPT 规则 1 限定 sufficient 只看「已收集的证据」（不含历史），新增规则 10 禁止 mixed 查询在任一侧无证据时选 final；FINAL_PROMPT 新增规则 7 要求历史里的事实必须先查证据，历史段渲染加上「不能作为事实依据」标注。A/B 重复采样 5×修法 A vs 5×无修法 A：修法 A 将 c03 的 SQL 回查率从 20%（1/5）提升到 100%（5/5），修法 A 有效。修法 C（运行时硬门禁）仍为未勾项，作为修法 A 不奏效时的兜底。读数出处复核（2026-11-21）：上面「6 条双侧样本两侧取证全中」测于 `2e912379f`，早于修法 A，不能当修法 A 的依据；A/B 两组记录的提交号同为 `d43b314`，区分不了两组提示词，而被验证的三条硬规则又曾在 `978a63f` 里被删掉、本分支已恢复并复采到 5/5，经过见 `docs/ROADMAP.md` 的「修法 A 的读数出处与一次提示词回退」。评估运行会设 `RAG_DISABLE_AGENT_TRACE=1`，不把评估样本写进演示轨迹。
+`agent` 组的口径与固定链路不同义，报告的限制小节逐条写明：耗时是整条循环的墙钟时间（`avg_retrieval_ms` 只记工具执行耗时，其余归 `avg_generation_ms`）；`avg_tool_calls` / `avg_tool_steps` 只有 agentic 组有值；`evidence_hit` 取决于模型 SELECT 了哪些列（只取 `name`/`price` 时答案可以全对但证据判 0）；默认单轮，但带 `history` 字段的样本（v7.3 起 3 条指代消解样本）会把对话历史原样传给 agentic 链路，报告用 `history_turns` 标出哪几条走了多轮；v7.4 起混合样本可用 `expected_sources` 声明「文档侧 + SQL 侧」，新读数 `both_sides_hit` 要求声明的每一侧都被引用到（扫全量引用、不套 `@3` 窗口），旧指标定义未动。v7.4 首轮 29 条实跑里 6 条双侧样本两侧取证全中（`both_sides_hit` 1.000，含上一轮只查文档侧、没回查 SQL 的 c03，那轮的既有数据按新口径回算是 0.833），`source_hit` 0.960 与上轮同为 m04 一条未命中，`mrr@3` 的 -0.020 全部来自 k05 一条排位后移，单条平均 82.6 秒，报告 `eval/reports/v7_4_two_sided_report.md`。修法 A（提示词硬规则）已做：STEP_PROMPT 规则 1 限定 sufficient 只看「已收集的证据」（不含历史），新增规则 10 禁止 mixed 查询在任一侧无证据时选 final；FINAL_PROMPT 新增规则 7 要求历史里的事实必须先查证据，历史段渲染加上「不能作为事实依据」标注。A/B 重复采样 5×修法 A vs 5×无修法 A：修法 A 将 c03 的 SQL 回查率从 20%（1/5）提升到 100%（5/5），修法 A 有效。修法 C（运行时硬门禁）已实现：`intent=mixed` 时代码级禁止在某一侧没查过的情况下选 `final`，
+`RAG_DISABLE_AGENT_MIXED_GATE=1` 可以关掉。它原来拿证据块的**标签文字**找工具名来认侧别，
+而真实证据块的标签是「SQL 查询（表 …）」与文档标题、里面没有工具名，等于永远判「一侧没查过」，
+每条 mixed 都被反复逼到步数用尽（旧报告里 mixed 样本 `tools=4`、`stop_reason=max_steps` 就是这个）；
+现在改看工具到底跑过没有，并规定每一侧最多逼一次、那一侧没挂工具就不逼。
+前后读数与噪声底见 `eval/README.md` 的「v8.9 / v8.10 两道门控的前后对比」。读数出处复核（2026-11-21）：上面「6 条双侧样本两侧取证全中」测于 `2e912379f`，早于修法 A，不能当修法 A 的依据；A/B 两组记录的提交号同为 `d43b314`，区分不了两组提示词，而被验证的三条硬规则又曾在 `978a63f` 里被删掉、本分支已恢复并复采到 5/5，经过见 `docs/ROADMAP.md` 的「修法 A 的读数出处与一次提示词回退」。评估运行会设 `RAG_DISABLE_AGENT_TRACE=1`，不把评估样本写进演示轨迹。
 
 **v7.3 指代消解实跑**（2026-11-20，29 条 = 25 可回答 + 4 应拒答，只跑确定性指标）：3 条带 `history` 的指代样本全部还原成功——c01 按上一轮的「精排」答对、c02 把「它」还原成橙子并走 `sql_query`、c03 判 `mixed`；同 26 条子集与上一轮比 `answer_rate`/`source_hit`/`refusal_accuracy` 持平，`evidence_hit@3` -0.045 与 `citation_rate` -0.045 各自都能落到单条样本上（`@3` 窗口与生成截断），逐条机制见 `eval/README.md`，报告 `eval/reports/v7_3_coreference_report.md`。
 
@@ -791,6 +807,72 @@ vLLM/SGLang 服务，本机 Apple Silicon 跑不了。
 首轮读数（2026-11-23）：解析层 docling 四页表格全对（`table_recall` 1.00 / `cell_accuracy` 1.00），自建与
 MinerU 同为 0.75，缺口都集中在无框线那一页；端到端新集自建 5/7 命中（0.571），docling 与 MinerU 都 7/7。
 **默认后端仍是 `selfbuilt`**，是否切换的结论与代价写在 ROADMAP 的 v8.5 与 eval/README 的「三侧读数」。
+
+## 章节树索引（v8.6）
+
+父块扩展解决的是「召回准但读得太少」，可它的边界是按字符数切出来的，跟文档本身的章节没关系：
+一段话正好断在「这里有五个关键角色：」后面，那五个角色就掉进下一个父块，模型读到的永远是半句话。
+这一路改成按**标题边界**给上下文——命中哪个块，就送它所在的那一节，并附上这节在文档里的位置。
+
+### 树是怎么建出来的
+
+块元数据里并没有「第几级标题」这种字段，标题只存在于块文本里，所以树是**重建**出来的：
+
+1. 把同一文档的父块按 `parent_index` 顺序拼回整篇正文（父块之间不重叠，拼起来就是原文的顺序）。
+2. 在拼回来的正文里扫 Markdown 标题行，切出互不重叠的章节片段：某级标题下面的正文，到下一个任意级
+   标题为止；子章节另成一节。
+3. 每个块归到**自己正文所在的最深一级**章节（归属前先确认能在该章节正文里找到这个块，找不到就退回
+   父块起点那一节，再找不到才落回文档根）。
+
+存放与 BM25 词法索引同一套做法：离线从已入库的 Qdrant payload 构建，落盘成一个独立文件。
+**不新建 Qdrant 集合，也不改块的写入格式**，已经入库的知识库不用重新入库。
+
+```bash
+python3 scripts/build_tree_index.py            # 演示库 -> storage/tree/tree.pkl
+python3 scripts/build_tree_index.py --eval     # 评估库，写到 storage/eval/tree/
+```
+
+### 检索时变成什么
+
+命中块换成「`章节路径: 文档 › 章 › 节`」这一行，加上以命中块为中心、在该章节内截出的一段正文。
+
+- 与父块扩展**共用同一个** `RAG_CONTEXT_MAX_CHARS` 预算，两路是并列关系，不会把上下文撑大。
+- 成功还原时不再做父块扩展（两次替换文本会互相覆盖）；章节放不下或在章节正文里定位不到这个块，
+  就退回父块/子块文本，回退口径与父块扩展一致。
+- 同一章节被多个块命中时只还原一次；后面那个块的内容如果已被这段覆盖就不再重复送。
+- 引用摘要仍是命中的子块原文，`[n]` 编号与引用口径不变。
+
+| 环境变量 | 默认 | 说明 |
+|---|---:|---|
+| `RAG_ENABLE_TREE_INDEX` | 关 | 打开这一路；默认关闭，现有检索行为不变 |
+| `RAG_TREE_INDEX_PATH` | `storage/tree/tree.pkl` | 索引文件位置；评估链路指向 `storage/eval/tree/` |
+| `RAG_TREE_SECTION_CHARS` | 2000 | 单个章节上下文的字符上限，默认与父块大小相同 |
+| `RAG_DISABLE_TREE_KNOWLEDGE_ONLY` | 关 | 打开它 = 任何意图都用这一路；默认只在路由判成纯知识的问题上用 |
+
+打开这一路以后，它**只作用在路由判成「纯知识」的问题上**（意图 `knowledge`，以及没有意图的
+经典链路）。原因是实跑读数里，混合问题读到一整节带路径的正文就判定证据够了、少查一次数据库
+（见 [docs/ROADMAP.md](docs/ROADMAP.md) 的 v8.6）。`database` / `mixed` / `none` 意图的检索仍走原来的父块扩展。
+
+开关在每次检索时读，不在启动时定死，所以同一个进程里可以开/关交替对照：
+
+```bash
+python3 scripts/measure_tree_index_ab.py --values off,on,off --keep-reports
+```
+
+### 已知限制
+
+- 章节正文是从父块拼回来的重建。切分器在入库时会丢弃代码块内容（只留围栏行），所以代码块不在树里，
+  这一路也读不到它们。
+- 标题下面如果没有子标题，整段长正文仍是一节；评估库实测有块的章节中位数只有 376 字符。
+- 实测两轮（2026-11-24，评估集 29 条 × agentic，同一进程开/关交替三轮，同一口径）：这一路**没有换来命中或引用的提升**。
+  第一轮任何意图都启用时，送进模型的文本按块算从 542 字符涨到 675 字符（每样本 1403 → 1700，但同轮块数
+  2.59 → 2.52，块数由模型的查询与步数决定，不是这一路直接控制的），并且 `both_sides_hit` 回退 1 条（`c03`）：
+  模型读到带路径的整节正文就判定证据够了，只调了一次 `kb_search` 就作答，**少查了数据库那一侧**——按代价记，
+  不是噪声。第二轮按意图收窄以后这条回退没了（三轮都是 1.000），代价堵住的同时收益也没出现：开档轮三项命中
+  指标与暖「关」轮逐字相同。耗时两轮都判不可判定——同一设置的两个「关」轮自己就差 17.9%～32.6%，
+  而且「变快最多」的几条都是数据库意图、这一路没作用于它们。所以默认档仍是关。
+  完整读数与成因见 [docs/ROADMAP.md](docs/ROADMAP.md) 的 v8.6。
+- 树索引是文件，跟 BM25 一样要在内容变化后重建：重新 ingest 以后需要再跑一次 `build_tree_index.py`。
 
 ## 只读公网演示（Render）
 

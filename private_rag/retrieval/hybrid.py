@@ -36,6 +36,8 @@ class RetrievedChunk:
     parent_index: Optional[int] = None
     # 命中的子块原文，用于引用摘要；展开父块后 text 会变成长文本。
     snippet_text: Optional[str] = None
+    # 树索引命中的章节节点；没有走树这一路时保持 None。
+    tree_node_id: Optional[str] = None
 
     @classmethod
     def from_payload(

@@ -85,6 +85,8 @@ STORAGE_DIR = _env_path("RAG_STORAGE_DIR", ROOT / "storage" / "qdrant_storage")
 LEXICAL_INDEX_PATH = _env_path(
     "RAG_LEXICAL_INDEX_PATH", ROOT / "storage" / "lexical" / "bm25.pkl"
 )
+# 树索引与 BM25 同一套做法：独立落盘文件，不进 Qdrant，也不改块的写入格式
+TREE_INDEX_PATH = _env_path("RAG_TREE_INDEX_PATH", ROOT / "storage" / "tree" / "tree.pkl")
 COLLECTION_NAME = os.getenv("RAG_COLLECTION_NAME", "").strip() or "rag_knowledge_base"
 DEFAULT_SOURCES_CONFIG = ROOT / "config" / "sources.yaml"
 # Google Drive 语料：下载目录（真实语料，已 gitignore，正文不进公开仓库）与默认 remote
@@ -106,6 +108,17 @@ RRF_K = 60
 TOP_K_RERANK = 3
 # 送入 LLM 的上下文总字符预算；父块超预算时回退到命中的子块。
 CONTEXT_MAX_CHARS = _env_int("RAG_CONTEXT_MAX_CHARS", 6000)
+
+# 树索引（v8 第 4 项）：默认关闭，打开后命中块的上下文换成「章节路径 + 章节正文」。
+# 用 ENABLE 而不是 DISABLE，是为了默认值保持现有行为不变。
+TREE_INDEX_ENABLED = _env_flag("RAG_ENABLE_TREE_INDEX")
+# 单个章节上下文的字符上限；默认与父块大小相同，这样 A/B 只差在边界语义
+# （标题边界 vs 固定窗口），块数与总预算都对得上。
+TREE_SECTION_CHARS = _env_int("RAG_TREE_SECTION_CHARS", PARENT_CHUNK_SIZE)
+# 打开这一路以后只在路由判成「纯知识」的问题上启用（默认开）。实测打开它会让混合问题
+# 提前收手、少查一次数据库（docs/ROADMAP.md 的 v8.5 的 c03），所以按意图收窄；
+# RAG_DISABLE_TREE_KNOWLEDGE_ONLY=1 退回「任何意图都启用」。
+TREE_KNOWLEDGE_ONLY = not _env_flag("RAG_DISABLE_TREE_KNOWLEDGE_ONLY")
 
 # 模型
 EMB_MODEL = "bge-m3"
@@ -158,6 +171,11 @@ AGENT_ROUTE_DATA_SIDE = not _env_flag("RAG_DISABLE_AGENT_ROUTE_DATA_SIDE")
 # 路由器判 none 时不再直接拒答：先做一次知识库检索验证，拒答必须建立在证据上。
 # 置 1 退回旧行为（判成 none 就跳过检索直接拒答）。
 AGENT_NONE_PROBE = not _env_flag("RAG_DISABLE_AGENT_NONE_PROBE")
+# 兜底门控：意图判成 knowledge、模型眼看要按「证据不足」拒答，而问题里的实体出现在
+# 「库内数据」的取值里时，拒答之前先按那个实体查一次业务表。路由器只看得到工具描述，
+# 同一条提示词在温度 0 下仍会翻动（v8.8 之后新集里剩的那条误判就是这个形状），
+# 靠措辞修不干净。置 1 退回「文档侧找不到那项事实就拒答」的原行为。
+AGENT_KB_MISS_SQL_GATE = not _env_flag("RAG_DISABLE_AGENT_KB_MISS_SQL_GATE")
 # 决策 JSON 的输出预算。推理型模型会先输出一段不可见的思考内容，
 # 预算给小了正文就是空的，路由会整段回退到关键词判断。
 AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)
@@ -220,6 +238,12 @@ AGENT_TRACE_ENABLED = not _env_flag("RAG_DISABLE_AGENT_TRACE")
 # 双侧查询门控：intent=mixed 时，代码级禁止在任一侧零证据的情况下选 final
 # 置 1 关掉门控（回退到仅靠提示词约束的修法 A）
 AGENT_MIXED_GATE = not _env_flag("RAG_DISABLE_AGENT_MIXED_GATE")
+# mixed 门控认「这一侧查过没有」的依据：默认看工具到底跑过没有（代码里记的执行标记）。
+# 改动前它是拿证据块的标签文字找工具名，而真实证据块的标签是「SQL 查询（表 …）」与文档标题，
+# 里面根本没有工具名，于是永远判「一侧零证据」，把每条 mixed 反复逼到步数用尽
+# （旧报告里 mixed 样本 tools=4 / gate=2、停止原因是 max_steps 就是这个）。
+# 置 1 退回按标签文字认的老行为，用来在同一进程里做前后对照。
+AGENT_GATE_SIDE_TRACKING = not _env_flag("RAG_DISABLE_AGENT_GATE_SIDE_TRACKING")
 AGENT_TRACE_PATH = _env_path("RAG_AGENT_TRACE_PATH", ROOT / "storage" / "traces" / "agent.jsonl")
 # 单条观察/理由写入轨迹的字符上限
 AGENT_TRACE_FIELD_CHARS = _env_int("RAG_AGENT_TRACE_FIELD_CHARS", 1200)

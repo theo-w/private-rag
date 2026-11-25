@@ -20,6 +20,9 @@ from private_rag.config import (
     LLM_MODEL,
     RERANK_ENABLED,
     TOP_K_RERANK,
+    TREE_INDEX_ENABLED,
+    TREE_INDEX_PATH,
+    TREE_KNOWLEDGE_ONLY,
 )
 from private_rag.generation import build_citations, generate_answer, stream_answer
 from private_rag.models import Citation
@@ -32,6 +35,7 @@ from private_rag.retrieval.hybrid import (
 from private_rag.retrieval.lexical import LexicalIndex
 from private_rag.retrieval.parent import context_chars as count_context_chars, expand_parents
 from private_rag.retrieval.rerank import Reranker, load_reranker
+from private_rag.retrieval.tree import TreeIndex, attach_tree_context
 from private_rag.store import close_client, count_points, open_client
 
 logger = logging.getLogger(__name__)
@@ -45,7 +49,27 @@ class RetrievalOptions:
     use_lexical: bool = True
     use_rerank: bool = True
     use_parent: bool = True
+    # None 表示「按 config.TREE_INDEX_ENABLED 决定」，在调用时读而不是构造时读，
+    # 这样同一个进程里可以在两轮之间打开/关闭树索引做 A/B。
+    use_tree: Optional[bool] = None
     query_rewrite: str = "off"
+    # 路由判出的意图（`knowledge` / `database` / `mixed` / `none`），只有树这一路的开关判定用得到；
+    # 空字符串表示「没有意图」——经典链路与固定检索就是这种，它们没有工具循环。
+    intent: str = ""
+
+
+def tree_enabled_for_intent(intent: str) -> bool:
+    """树这一路此刻要不要启用（每次检索时读配置，不是启动时定死）。
+
+    按意图收窄是因为实跑读数：打开这一路以后混合问题读到一整节带路径的正文就判定证据够了，
+    少查一次数据库，`both_sides_hit` 退一条（`docs/ROADMAP.md` 的 v8.5）。
+    没有意图也当知识处理：经典链路一次检索一次生成，不存在提前收手这回事。
+    """
+    if not TREE_INDEX_ENABLED:
+        return False
+    if not TREE_KNOWLEDGE_ONLY:
+        return True
+    return str(intent or "") in ("", "knowledge")
 
 
 @dataclass
@@ -62,6 +86,9 @@ class RetrievalTrace:
     context_chars: int
     rewrite_fallback: bool = False
     rewrite_reason: str = ""
+    # 树索引这一路：used_tree 表示上下文里真的出现过章节还原，tree_sections 是节数
+    used_tree: bool = False
+    tree_sections: int = 0
 
 
 @dataclass
@@ -75,6 +102,7 @@ class QaResult:
     query_rewrite: str = "off"
     query_count: int = 1
     context_chars: int = 0
+    used_tree: bool = False
 
 
 @dataclass
@@ -91,6 +119,7 @@ class QaEvent:
     query_rewrite: str = "off"
     query_count: int = 1
     context_chars: int = 0
+    used_tree: bool = False
 
 
 @dataclass
@@ -113,6 +142,7 @@ class RagEngine:
         embedding: Embeddings,
         lexical: Optional[LexicalIndex] = None,
         reranker: Optional[Reranker] = None,
+        tree: Optional[TreeIndex] = None,
         *,
         llm_model: str = LLM_MODEL,
     ):
@@ -120,6 +150,8 @@ class RagEngine:
         self.embedding = embedding
         self.lexical = lexical
         self.reranker = reranker
+        # 只要文件在就加载，开关只决定用不用，方便同进程 A/B 来回切
+        self.tree = tree
         self.llm_model = llm_model
         self._retrieval_lock = threading.Lock()
         self._rerank_lock = threading.Lock()
@@ -147,6 +179,9 @@ class RagEngine:
             warnings.append("BM25 索引缺失，将只使用向量检索")
         if self.reranker is None:
             warnings.append("重排模型未加载，将使用融合结果")
+        # 只在开关打开却没有索引时提醒：默认关闭的情况下没有索引是正常的，不该报警
+        if TREE_INDEX_ENABLED and self.tree is None:
+            warnings.append("树索引缺失，章节上下文这一路不可用")
 
         return Readiness(
             ready=not reasons,
@@ -194,15 +229,34 @@ class RagEngine:
         else:
             chunks = chunks[: options.top_k]
 
-        if options.use_parent:
-            chunks = expand_parents(chunks, max_chars=CONTEXT_MAX_CHARS)
-            used_parent = any(chunk.parent_id for chunk in chunks)
-        else:
-            chunks = [
-                replace(chunk, snippet_text=chunk.snippet_text or chunk.text)
-                for chunk in chunks
-            ]
-            used_parent = False
+        use_tree = (
+            options.use_tree if options.use_tree is not None
+            else tree_enabled_for_intent(options.intent)
+        )
+        used_tree = False
+        used_parent = False
+        tree_sections = 0
+
+        if use_tree and self.tree is not None:
+            tree_chunks = attach_tree_context(
+                chunks, self.tree, max_chars=CONTEXT_MAX_CHARS
+            )
+            tree_sections = sum(1 for chunk in tree_chunks if chunk.tree_node_id)
+            if tree_sections:
+                # 树这一路与父块扩展并列，成功还原时不再做父块扩展：
+                # 两次替换文本会互相覆盖，上下文口径也就说不清了
+                chunks = tree_chunks
+                used_tree = True
+
+        if not used_tree:
+            if options.use_parent:
+                chunks = expand_parents(chunks, max_chars=CONTEXT_MAX_CHARS)
+                used_parent = any(chunk.parent_id for chunk in chunks)
+            else:
+                chunks = [
+                    replace(chunk, snippet_text=chunk.snippet_text or chunk.text)
+                    for chunk in chunks
+                ]
 
         return RetrievalTrace(
             chunks=chunks,
@@ -215,6 +269,8 @@ class RagEngine:
             context_chars=count_context_chars(chunks),
             rewrite_fallback=rewrite.fallback,
             rewrite_reason=rewrite.reason,
+            used_tree=used_tree,
+            tree_sections=tree_sections,
         )
 
     def retrieve(
@@ -250,6 +306,7 @@ class RagEngine:
             query_rewrite=trace.query_rewrite,
             query_count=trace.query_count,
             context_chars=trace.context_chars,
+            used_tree=trace.used_tree,
         )
 
     def stream(
@@ -273,6 +330,7 @@ class RagEngine:
             query_rewrite=trace.query_rewrite,
             query_count=trace.query_count,
             context_chars=trace.context_chars,
+            used_tree=trace.used_tree,
         )
 
         parts: list[str] = []
@@ -295,6 +353,7 @@ class RagEngine:
             query_rewrite=trace.query_rewrite,
             query_count=trace.query_count,
             context_chars=trace.context_chars,
+            used_tree=trace.used_tree,
         )
 
     def close(self) -> None:
@@ -306,6 +365,7 @@ def build_engine(
     client: Optional[QdrantClient] = None,
     embedding: Optional[Embeddings] = None,
     lexical_path: Path = LEXICAL_INDEX_PATH,
+    tree_path: Path = TREE_INDEX_PATH,
     use_rerank: Optional[bool] = None,
 ) -> RagEngine:
     """加载 Qdrant、BM25 与 reranker；缺失的组件会降级而不是让服务启动失败。"""
@@ -314,7 +374,9 @@ def build_engine(
     if client is None:
         client = open_client()
     lexical = LexicalIndex.load(lexical_path)
+    # 树索引在开关关闭时也加载：开关在每次检索时读，同进程可以来回切
+    tree = TreeIndex.load(tree_path)
     if use_rerank is None:
         use_rerank = RERANK_ENABLED
     reranker = load_reranker() if use_rerank else None
-    return RagEngine(client, embedding, lexical, reranker)
+    return RagEngine(client, embedding, lexical, reranker, tree)
