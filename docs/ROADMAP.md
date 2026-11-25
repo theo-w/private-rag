@@ -21,6 +21,7 @@
 | v8 | `v8-mcp-kb-search-ask` | MCP 暴露：手写最小 stdio JSON-RPC server（零新增依赖），对外只读工具 `kb_search` / `ask`，`--allow-sql` 才加 `sql_query` | ✅ 本分支完成 | 529 测试通过（既有 430 + 新增 99，不打模型、不打开真实 Qdrant）；`--list-tools` 与 `tools/list` 能看到工具与 input/output schema 并声明只读；本机实跑 `tools/call kb_search` 返回带 `[n]` 编号的证据与含 `page` 的引用载荷、`ask` 返回带 `[1][2]` 的回答与 `meta`，`--allow-sql` 用演示库授权跑通 `sql_query`（3 行结果 + `source_type=sql` 引用）且 `UPDATE` 被护栏拒；同一 `storage/` 被别的进程占用时退出码 3 并给出可操作提示；不暴露入库/写库，运行时 SQL 要过 `--allow-sql` + `allow_runtime_query` + `sql_guard` 三重门（与 agentic 共用 `build_tool_registry`）；选型与代价见 `docs/adr/0004`，边界见 `docs/adr/0005` 与取代其 SQL 一条的 `docs/adr/0006` |
 | v8.5 | `v8-parse-baseline-ab` | 解析基准 A/B：扫描件解析后端可换（`RAG_SCAN_PARSER=selfbuilt\|docling\|mineru`），第三方走独立虚拟环境 + subprocess；四页新 fixture（带边框 / 合并单元格 / 无框线 / 六列）与 8 条评估集；解析层 golden 指标 | ✅ 本分支完成（读数已出，结论「不切换默认后端」） | 577 测试通过（既有 529 + 新增 48，全部打桩，CI 不装第三方解析器）；解析层三侧：docling 4/4 张表、`table_recall` 1.00 / `cell_accuracy` 1.00，selfbuilt 3/4、0.75 / 0.64，mineru（standard 档）3/4、0.75 / 0.75，自建与 MinerU 的缺口都在无框线那一页；端到端三侧同模型：新集 8 条 `evidence_hit@3` selfbuilt 0.571（未命中三条与解析层三个缺陷一一对应）vs docling 1.000 / mineru 1.000，v6 那 6 条三侧同分 1.000 / 0.500 / 0.900 与 v6.2 ON 侧逐字一致；结论与代价见下面的 v8.5 详细验收与 `eval/reports/v8_parse_*` |
 | 语料接入 | `corpus-gdrive-sync` | Google Drive 语料预下载：本机 CLI（rclone / gdrive）把 Drive 文件落到 gitignore 的本地目录，再复用 `type: file` 源入库；联网只在下载这一步，不引入 Google SDK，`source_type` 不扩张 | ✅ 本分支完成（未接真实 Google 账号，见下方详细验收的未完成项） | 456 测试通过（+26 mock 单测，不联网、不打模型）；下载命令拼装与失败信息可测（rclone 导出格式钉 `pdf`、`--mode sync`/`--include`/`--dry-run`、缺 CLI 给安装提示、gdrive 在下载目录里执行且拒绝 dry-run）；仓库内下载目录未被 gitignore 时拒绝同步（ADR 0002 边界，默认目录另有真实 `git check-ignore` 探测）；假下载产物走现有 `run_ingest` 得 `added=2`、BM25 建成、二次运行整批跳过，引用 `source_type=file` + `tags=["gdrive"]`；README 有可操作的授权与「下载 → 入库」步骤，决策见 `docs/adr/0003-google-drive-corpus-cli-prefetch.md` |
+| v8.7 | `v8-agentic-expanded` | 合成测试集扩展：评估专用 SQLite（`data/sql/demo_eval.db`，演示库的超集、沿用 `demo.products` 引用标签）+ agentic 评估集 29→40 条 + `--dataset` 逗号分隔可以把多份集合并成一次跑 | ✅ 本分支完成（基线读数待补） | 647 测试通过（既有 638 + 新增 9，不打模型、不碰数据库）；新集 40 条 = 35 可回答 + 5 应拒答，分布 `knowledge 9 / database 8 / mixed 7 / multi_step 6 / coreference 5 / refusal 5`，id 全 `x` 前缀；`--dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl` 合并 69 条且跨文件 id 与问题唯一，只有一份时 `dataset_sha256` 逐字节不变；评估库前 4 行与 `scripts/init_demo_db.py` 逐字段相等、新增 8 行的类别不含「水果」；CI 由「校验四份评估集」改为「校验五份评估集」并加合并校验；决策见 `docs/adr/0008`，限制见 `eval/README.md` |
 
 ## v2 详细验收（已完成）
 
@@ -406,7 +407,8 @@ v7.5 双侧门控打开以后 agentic 单条 88.1s，PR #24 给运行时挂上 `
       回退本地缓存继续跑，没有换模型也没换检索配置。
 - [x] 口径与限制，引用这组数字时一并带上：
       - **29 条样本只支撑方向**，不支撑百分比：±1 条就是 ±4 个百分点，`context_precision@3` 那种 -0.027
-        的量级也在噪声范围内；要说「稳定降到多少」需要更大的评估集。
+        的量级也在噪声范围内；要说「稳定降到多少」需要更大的评估集（测量能力已由 v8.7 补齐：新集 40 条、
+        与 v7 集合并一次跑 69 条；本节这组数字仍测于 29 条，照这条口径读）。
       - **`avg_latency_ms` 是端到端单条耗时**，含路由、每次步进决策、工具执行、双侧门控的重试与最终作答，
         不是纯模型时间；本轮 56.6s 里工具执行 1.0s，其余都是 LLM 调用。
       - **换机器、换模型、换精排就不可比**：这组数测于本机 Ollama 0.40.16 + `qwen3.8:27b-mlx` + `bge-m3`
@@ -451,6 +453,7 @@ v8.1 把决策调用的思考按环节关掉以后，单条 56.6 秒；这一轮
       `source_hit` 1.000 vs 0.960、`d02` 意图 `mixed` vs `database`。`temperature=0` 下 MLX 仍有
       非确定性，取证次数与拒答都会随之变，29 条样本上 ±3 条拒答可能就是噪声。要判这种量级的差异，
       需要更大的评估集或同配置重复轮——下一轮先解决这个，再谈继续压延迟（已做，见下面的 v8.3）。
+      「更大的评估集」到 v8.7 才落地，本节这组 29 条读数不受影响。
 - [x] 测试 7 条新增（默认 `keep` 不传 `reasoning`、`on`/`off` 显式传、显式参数优先于配置、
       流式路径共用开关、无证据不调用模型、取值归一含非法值回退），全量 `python3 -m pytest tests -q` = 543 passed。
 
@@ -622,6 +625,7 @@ v8.1 把决策调用的思考按环节关掉以后，单条 56.6 秒；这一轮
 - [x] 口径与限制，引用这组数字时一并带上：
       - **29 条只支撑方向**，百分比别当精确值；「加限长句」这一档只跑了一轮，同设置重复轮没做，
         所以四项门禁「不退」是硬的（三轮都一致），三项命中指标的改善只能当方向看。
+        （样本量已由 v8.7 扩到 40 条 / 与 v7 集合并 69 条，后续要坐实这三个指标可以用新集重测。）
       - **换机器、换模型、换后端就不可比**：测于本机 Ollama 0.40.16 + `qwen3.8:27b-mlx` + `bge-m3`
         + `BAAI/bge-reranker-v2-m3` + MLX 后端，串行单并发，评估链路钉死 `temperature=0`。
       - 三轮都在同一进程里交替跑并作废第一轮（v8.3 口径 2）；`measure_thinking_ab.py` 首轮打印的
@@ -707,6 +711,48 @@ CUDA 上的 vLLM/SGLang 服务，本机 Apple Silicon 跑不了，如实记为�
 - [x] 真机冒烟（2026-11-22，本机 Ollama）：假下载产物（2 个 md/txt + 1 个 xlsx）走 CLI 用真实 `bge-m3` 入库到隔离 collection（`RAG_COLLECTION_NAME` / `RAG_STORAGE_DIR` / `RAG_LEXICAL_INDEX_PATH` 指向 /tmp，演示库未被动）——`新增 2 / 写入 2 chunk`、xlsx 被清点为不支持、BM25 建成；二次运行 `新增 0 / 跳过 2`；「橙子有什么营养」的向量检索第一条是橙子，metadata 为 `source_type=file` + `tags=["gdrive"]`
 - [ ] 真实 Google 账号端到端（授权 → 下载 → 入库 → 提问）没有跑过：仓库里不存在任何真实账号凭据，这一步只能由使用者在自己机器上按 README 验证
 - [ ] Drive 侧的权限粒度没有测：只读 scope 能否覆盖共享盘（shared drive）需要 `rclone config` 时另行确认
+
+## v8.7 详细验收（合成测试集扩展：评估专用 SQLite 与多数据集合并）
+
+这一项补的是**测量能力**，不是新链路。v8.1 / v8.2 / v8.4 三处读数都写着同一句话：「29 条样本只支撑方向，
+不支撑百分比——±1 条就是 ±4 个百分点」。v8.3 修的是可复现性（钉温度、量噪声底），样本数没动，所以每次延迟
+收益都只能说方向。编号约定是「按合进 `main` 的先后编号」，`v8.6` 留给还没合进 `main` 的树索引分支（PR #29），
+本节排到 v8.7。
+
+- [x] 评估专用 SQLite `data/sql/demo_eval.db`（`scripts/init_eval_db.py`）：单表 `products` 12 行，比演示库多
+      `storage / supplier / stock` 三列。做成**超集**——前 4 行与 `scripts/init_demo_db.py` 逐字段相等（单测钉住），
+      新增 8 行的 `category` 一律不含「水果」二字；`scripts/init_demo_db.py` 与 `data/sql/demo.db` 一字未改，
+      v7 那几轮的读数仍然可复现
+- [x] 引用标签沿用 `demo.products`（新运行时配置 `config/sources.eval.agent.v8.yaml` 只把 DSN 指向新库），
+      不给新库单独起标签。原因是硬约束：`ToolRegistry` 按工具名登记，一份 sources 配置里两个 sql 源会互相覆盖
+      （`private_rag/agent/tools.py:283`），两个标签只能活一个，另一半样本的 `source_hit` 会恒为 0。
+      决策与被否方案见 [docs/adr/0008](adr/0008-eval-db-superset-shared-label.md)
+- [x] 新评估集 `eval/v8_agentic_expanded.jsonl`：40 条 = 35 可回答 + 5 应拒答，id 全部 `x` 前缀（与 v7 的
+      `k/d/m/s/c/r` 不撞车，合并跑才合法），分布 `knowledge 9 / database 8 / mixed 7 / multi_step 6 /
+      coreference 5 / refusal 5`——补的正是现有集最薄的几类（v7 集 `coreference` 3、`mixed` 5、`database` 6）
+- [x] `--dataset` 支持逗号分隔多份（新增 `parse_dataset_arg` / `load_multi_dataset` / `datasets_fingerprint`）：
+      每份文件内部的结构与证据校验完全不变，合并后跨文件检查 id 与问题唯一、报错带上撞车的两个文件名；
+      只有一份时指纹与 `dataset_fingerprint` 逐字节相同，历史报告里的 `dataset_sha256` 不受影响。
+      v7 集 + 新集合并 = 69 条，单条样本对均值的影响从 ±3.4pt 降到 ±1.4pt
+- [x] 两条标注口径进单测：evidence 必须是权威文件里的一段**连续**文本（`normalize_text` 只保留字母和数字，
+  `12.5, "2026-01-10"` 会粘成 `12520260110`，跨字段拼法永远校验不过，所以 SQL 侧证据只能取 `description` /
+  `storage` / `supplier` 里的连续句子）；证据句两两不得互为子串，否则一次检索命中能同时糊掉两条样本的判定
+- [x] 拒答样本的挑选规则：事实既不落在评估库语料（`README.md` + `docs/*.md`）里，也不落在 `products` 的任何列里。
+      `supplier` 取值会进工具目录的样例，所以「某供应商的结算条件是什么」这类问法正是我们要量的「证据不足」，
+      不会误命中。注意本节与 `eval/README.md` 不能把拒答样本的原问题写进来——`docs/*.md` 会被入库成评估语料，
+      引用了原问题就等于给那条拒答样本自己造了证据
+- [x] 新增 9 项单测（新集形状、证据不重叠、建库超集、数据集↔库一致、运行时配置指向、参数切分、合并顺序、
+      跨文件重复的两条负例、指纹向后兼容与顺序敏感），全量 `python3 -m pytest tests -q` = **647 passed**
+- [x] CI 从「校验四份评估集」改为「校验五份评估集」，并额外校验 v7 + 新集的合并跑（只验结构与跨文件唯一，
+      不碰模型也不碰数据库）
+- [x] 文档：`eval/README.md` 新小节（分布、证据权威、复现命令、限制）、README 的 `--dataset` 多份用法与目录结构、
+      `CONTEXT.md` 新增「评估专用 SQLite」「合并评估运行」两个术语、`docs/adr/0008`
+- [ ] 基线读数：新集 40 条 × `agent,full`（`eval/reports/v8_agentic_expanded_baseline.md`）与合并 69 条的
+      agentic 一轮（`eval/reports/v8_agentic_merged_v7_baseline.md`）——<待填：两条链路的逐条指标与单条耗时>
+- [ ] **读数支持百分比结论**仍然不勾：这一项只把 n 从 29 做到 69，前后对比还要按 v8.3 的噪声底口径
+      （同进程交替跑、指标变化 ≥1 条才当真、耗时作废第一轮）另测；新集基线的首轮耗时含冷启动，不能当对比依据
+- [ ] 新库让工具目录变长（12 行样例进 `_data_catalog`），所以新集基线与 v7 各轮**不做跨轮均值比较**；
+      合并跑里要逐条盯 v7 的 `d03` / `s01`（依赖「这四种水果」语义）有没有翻转
 
 ## 分支与提交约定
 

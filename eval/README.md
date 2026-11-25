@@ -970,3 +970,85 @@ evidence 写成**整行连续短语**（如 `恒达 键盘 50 15天`），不写
 - **PaddleOCR-VL 未测**：要 CUDA 上的 vLLM/SGLang 服务，本机 Apple Silicon 跑不了，不要写成「三侧齐了」。
 - **换机器要重装**：`.venv-parse/` 不入库，模型权重首次解析才下载（MinerU 的 standard 档要 `mineru-kit models
   download --tier standard`，basic 档实测 863 MB）；第三方与本机 3.9 完全隔离。
+
+## v8.7 扩充集（`v8_agentic_expanded.jsonl`）与合并运行
+
+v8.1 / v8.2 / v8.4 三处读数都写着「29 条样本只支撑方向，不支撑百分比——±1 条就是 ±4 个百分点」。
+这一项不动链路，只把 n 做大：新集 40 条，并让 `--dataset` 能吃逗号分隔的多份集合并成一次跑，
+v7 的 29 条 + 新集 40 条 = 69 条，单条样本对均值的影响降到 ±1.4pt。
+
+### 评估专用 SQLite
+
+`scripts/init_eval_db.py` 生成 `data/sql/demo_eval.db`：单表 `products` 12 行，比演示库多
+`storage / supplier / stock` 三列。它是演示库的**超集**——前 4 行与 `scripts/init_demo_db.py` 逐字段相等
+（单测钉住这条），新增 8 行的 `category` 用 `浆果 / 热带果品 / 坚果 / 干货 / 海鲜 / 乳制品`，一律不含「水果」二字。
+演示库 `data/sql/demo.db` 与 `scripts/init_demo_db.py` 一字未改，v7 那几轮仍然可以原样复现。
+
+agentic 组挂这份库用 `config/sources.eval.agent.v8.yaml`，它与 `config/sources.eval.agent.yaml` 的差别只有 DSN。
+引用标签仍写 `demo.products`，不给新库单独起标签：`ToolRegistry` 按工具名登记工具，一份 sources 配置里两个
+sql 源会互相覆盖（`private_rag/agent/tools.py:283`），实际只有一个 `sql_query` 工具——两个标签只能活一个，
+另一半样本的 `source_hit` 会恒为 0。取舍见 [docs/adr/0008](../docs/adr/0008-eval-db-superset-shared-label.md)。
+
+### 分布（40 条 = 35 可回答 + 5 应拒答）
+
+| 类别 | 条数 | 证据权威文件 | 关键字段 |
+|---|---|---|---|
+| `knowledge` | 9 | `README.md`、`docs/beginner-guide.md`、`docs/v7.4-history-as-evidence.md` | `expected_source` 空 |
+| `database` | 8 | `scripts/init_eval_db.py`（`description` 列） | `expected_source: demo.products` |
+| `mixed` | 7 | SQL 侧取 `supplier`，文档侧另给一句 | `expected_sources: [demo.products, 文档路径]` |
+| `multi_step` | 6 | `scripts/init_eval_db.py` | `expected_source: demo.products`，不声明双侧 |
+| `coreference` | 5 | 文档 2 条 + SQL 2 条 + 双侧 1 条 | 全部带 `history`（2 条为两轮以上） |
+| `refusal` | 5 | 全空 | `answerable: false` |
+
+id 一律 `x` 前缀（`xk/xd/xm/xs/xc/xr`），与 v7 集的 `k/d/m/s/c/r` 不撞车，合并跑才合法。
+
+### 两条标注口径
+
+- **evidence 必须是权威文件里的一段连续文本。** `normalize_text` 只做 NFKC + 小写并丢掉标点空白，相邻字段会被粘在一起：
+  `12.5, "2026-01-10"` 规范化成 `12520260110`，所以「12.5 元」这类跨字段拼法永远校验不过。SQL 侧证据只能取
+  `description` / `storage` / `supplier` 里的连续句子。
+- **证据句两两不得互为子串**（单测断言）。否则一次检索命中能同时满足两条样本的判定，命中率会虚高。
+- `history` 里不得出现本条样本 evidence 规范化后的原文，指代样本的前置轮次要换措辞。
+- 拒答样本的挑选规则：事实既不落在评估库语料（`README.md` + `docs/*.md`）里，也不落在 `products` 的任何列里。
+  `supplier` 的取值会进工具目录的样例，所以「绿源鲜达的付款账期是多少天」正是要量的「证据不足」，不会误命中。
+
+### 复现命令
+
+```bash
+# 10. v8.7 扩充集：先建评估专用库，再重建评估知识库（语料是 README + docs/*.md，文档改过就必须重建）
+python3 scripts/init_eval_db.py
+python3 scripts/prepare_eval_kb.py --recreate
+
+# 只校验（不碰模型也不碰数据库，CI 里跑的就是这两条）
+python3 scripts/evaluate.py --dataset eval/v8_agentic_expanded.jsonl --validate-only
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl --validate-only
+
+# 新集基线：agentic 用新库，同时跑固定链路做对照
+python3 scripts/evaluate.py --dataset eval/v8_agentic_expanded.jsonl \
+  --agent-sources config/sources.eval.agent.v8.yaml --configs agent,full --skip-ragas \
+  --run-note "v8.7 新集基线；HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1" \
+  --output eval/reports/v8_agentic_expanded_baseline.md \
+  --json-output eval/reports/v8_agentic_expanded_baseline.json
+
+# 合并 69 条跑一轮 agentic：用来量「大 n 能测多大的差异」
+python3 scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl \
+  --agent-sources config/sources.eval.agent.v8.yaml --configs agent --skip-ragas \
+  --run-note "v8.7 合并跑（69 条）；HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1" \
+  --output eval/reports/v8_agentic_merged_v7_baseline.md \
+  --json-output eval/reports/v8_agentic_merged_v7_baseline.json
+```
+
+合并以后 `--limit` / `--ids` 仍按合并顺序生效；报告头的 `dataset` 是逗号连接的多份路径，另给 `datasets` 与
+`datasets_sha256` 两个字段逐份留痕。只有一份时 `dataset_sha256` 与改动前逐字节相同，历史报告的指纹不受影响。
+
+### 限制（引用这轮数字时一并带上）
+
+- **只有一份 `sql_query` 工具**：合并跑里 v7 那 29 条与新集那 40 条查的是同一份超集库，引用标签共用
+  `demo.products`。想给新库独立标签就得先让 `ToolRegistry` 按来源分名，代价是合并跑的 agentic 组失效。
+- **新库让工具目录变长**（12 行样例进 `_data_catalog`，长度有上限会被截断），所以新集基线与 v7 各轮
+  **不做跨轮均值比较**；要比较就在新集上做同进程交替的 A/B。
+- **合并跑里 v7 的 `d03` / `s01` 要逐条盯**：它们的参考答案依赖「这四种水果」，新增 8 行虽然类别不含「水果」，
+  但 `SELECT *` 这类写法会把 12 行都带回来。
+- **首轮耗时不作对比依据**：第一轮含精排模型冷启动（v8.3 实测慢 41~43%），耗时只在同进程交替轮之间比。
+- **这一项只补齐测量能力**，没有让任何既有结论变成「支持百分比」：前后对比仍按 v8.3 的噪声底口径
+  （同设置交替跑、指标变化 ≥1 条才当真、措辞变化不算证据）另测。
