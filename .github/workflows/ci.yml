@@ -56,16 +56,25 @@ jobs:
       # 评估集的 evidence 逐字校验不需要模型，跑模型之前先兜住标注漂移
       # （v8 解析基准集的证据校验只读 eval/fixtures/v8_parse_bench.md 底稿，
       #   不需要装第三方解析器，所以 CI 里也能验）
-      - name: 校验五份评估集
+      - name: 校验六份评估集
         run: |
           python scripts/evaluate.py --validate-only
           python scripts/evaluate.py --dataset eval/v5_paraphrase_qa.jsonl --validate-only
           python scripts/evaluate.py --dataset eval/v7_agent_qa.jsonl --validate-only
           python scripts/evaluate.py --dataset eval/v8_parse_bench.jsonl --validate-only
           python scripts/evaluate.py --dataset eval/v8_agentic_expanded.jsonl --validate-only
+          python scripts/evaluate.py --dataset eval/v8_agentic_edge.jsonl --validate-only
           # 合并跑只验结构与跨文件 id/问题唯一，不碰模型也不碰数据库
           python scripts/evaluate.py \
             --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl --validate-only
+          python scripts/evaluate.py \
+            --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl,eval/v8_agentic_edge.jsonl \
+            --validate-only
+
+      # 自查工具：逐条报证据能否在其 source 里逐字找到、类别配比、双侧声明条数、
+      # 可回答/应拒答配比；纯离线，不打模型、不联网、不开 Qdrant
+      - name: 评估集自查
+        run: python scripts/check_eval_dataset.py
 
   readonly:
     name: 只读演示依赖清单
