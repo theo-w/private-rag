@@ -1196,6 +1196,39 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/evaluate.py \
 `citation_rate` 0.762（四处相同）；唯一低于交替轮的是 `both_sides_hit` 5/7 对 6/7，1 条正好在噪声底量级
 （同设置的两个 `off` 轮之间本来就翻过一条 `xm03`）。
 
+### 对 v7 那 29 条的影响（同一进程 `off → on → off`，2026-11-25）
+
+上面那轮只测了新集 40 条，所以补跑 v7 的 29 条。用的是 v7 原本那份演示库（`scripts/init_demo_db.py` →
+`data/sql/demo.db`，4 条记录），**不是**新集的超集库——超集库多出来的 8 行对 v7 的影响是另一件事，
+在 v8.7 里按跨轮量过（只能当方向），这里只量代码改动本身。知识库是定稿文档重建的 339 个向量那份，三轮同一份。
+
+```bash
+python3 scripts/init_demo_db.py
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting data_side_routing --dataset eval/v7_agent_qa.jsonl \
+  --values off,on,off --prefix /tmp/ab_v7_route
+```
+
+| 轮 | 设置 | evidence_hit@3 | mrr@3 | context_precision@3 | source / answer / refusal / citation / both_sides | 上下文字符 | 工具调用 / 步数 | 单条均耗时 |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `off` | 0.800（20/25） | 0.753 | 0.533 | 全 1.000 | 1574 | 1.83 / 4.24 | 24.0s（冷启动，作废） |
+| 2 | `on` | 0.800（20/25） | 0.700 | 0.533 | 全 1.000 | 1512 | 1.83 / 4.24 | 23.7s |
+| 3 | `off` | 0.840（21/25） | 0.793 | 0.573 | 全 1.000 | 1476 | 1.76 / 4.17 | 22.4s |
+
+**结论：没有可见影响。** `source_hit`、`answer_rate`、`refusal_accuracy`、`citation_rate`、`both_sides_hit`
+三轮都是 1.000——v7 这 29 条本来就在天花板上，所以这一轮只能测「有没有变差」，测不出收益。会动的三项
+（`evidence_hit@3`、`mrr@3`、`context_precision@3`）里，`on` 相对暖 `off`（第 3 轮）差 1 条证据
+（25 条可答样本里 ±1 条 = ±4pt），而同设置的第 1 轮与第 3 轮自己就差了 1 条证据、`mrr@3` 差 0.040，
+方向还相反（第 3 轮反而比第 1 轮高）。**1 条正好等于漂移量级，判不可判定**，不能写成「涨/跌了 4 个百分点」。
+
+逐条行为只有一处与改动有关：应拒答的 `r01`（「橙子的产地和供应商联系方式是什么？」）在 `on` 轮意图从
+`knowledge` 变 `database`——目录列全以后路由器认得出「橙子」在库里，但它查完仍然拒答，
+`refusal_accuracy` 三轮都是 4/4。唯一另一处翻动是 `d05` 在第 3 轮把工具调用从 3 次降到 1 次（答案相同），
+而它发生在两个 `off` 轮之间，属漂移。
+
+出处：三轮都记 `git_commit = 1712aea`、`git_dirty = False`（改动已在 `main` 里，脚本在运行时关掉那一半）。
+原始报告在 `eval/reports/v8_route_data_side_v7_ab_{1_off,2_on,3_off}.{md,json}`。
+
 ### 限制（引用这轮数字时一并带上）
 
 - **交替那轮的护栏测于改动前的语料**：`knowledge` 与 `refusal` 类别的数字来自按 `638a5de` 文档建的库。新增的文档
@@ -1207,5 +1240,6 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/evaluate.py \
 - **仍有 1 条数据侧样本判 `knowledge`**：模型把它当成食品安全判断而不是某条记录的字段内容。没有为了让数字好看
   去改标注，也没把那条问法写进提示词或文档。
 - **目录扫描有界**：每列只扫前 `RAG_AGENT_CATALOG_SCAN_ROWS` 行（默认 40），更大的库里排在后面的实体仍然看不见。
-- **只测了新集 40 条**：对 v7 那 29 条的影响要单独跑合并交替才能量，本轮不声称「v7 也没变差」。
+- **交替那轮只测了新集 40 条**：对 v7 那 29 条的影响在上面的「对 v7 那 29 条的影响」一节单独量了，结论是没有
+  可见影响（差异等于漂移量级，判不可判定）；那一轮用的是 v7 原本的演示库，不涉及超集库多出来的 8 行。
 
