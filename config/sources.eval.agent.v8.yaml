@@ -1,0 +1,22 @@
+# v8.7 扩充集专用：给 agentic 评估组挂上评估专用 SQLite（data/sql/demo_eval.db）。
+#
+# 与 config/sources.eval.agent.yaml 的差别只有一处：DSN 指向超集库。
+# 引用标签仍写 demo.products——`ToolRegistry` 按工具名登记，一份配置里两个 sql 源会
+# 互相覆盖（private_rag/agent/tools.py:283），换标签就只能保住一半样本；
+# 沿用同一标签以后，v7 的 29 条与新集的 40 条都能查同一份库，`--dataset` 合并一次跑
+# 才成立。决策与代价见 docs/adr/0008。
+#
+# 先运行：python3 scripts/init_eval_db.py（生成 data/sql/demo_eval.db）
+sources:
+  - type: sql
+    dsn: sqlite:///data/sql/demo_eval.db
+    query: SELECT id, name, category, description, storage, supplier, stock, price, updated_at FROM products ORDER BY id
+    id_column: id
+    title_column: name
+    content_columns: [name, category, description, price]
+    updated_at_column: updated_at
+    label: demo.products
+    tags: [eval, agent]
+    # 评估库是本机 SQLite，只读查询直接开；换成真库请改用只读数据库账号
+    allow_runtime_query: true
+    runtime_tables: [products]
