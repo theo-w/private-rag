@@ -20,6 +20,7 @@ from private_rag.config import (
     AGENT_LLM_MODEL,
     AGENT_PLANNER_THINKING_STAGES,
     AGENT_PLANNER_TOKENS,
+    AGENT_ROUTE_DATA_SIDE,
     AGENT_THINKING_BRIEF,
     MAX_QUESTION_CHARS,
 )
@@ -81,7 +82,7 @@ ROUTER_PROMPT = """你是检索路由器。判断下面这个问题该用哪个�
 7. action 必须是上面列出的工具之一，参数按该工具示例填写；检索类查询保留问题里的关键实体与限定条件；选 sql_query 时给出一条可执行的单条 SELECT。
 8. intent 为 none 时 action 留空对象 {{}}。
 9. reason 用一句中文说明判断依据，不要复述问题。
-
+{data_side_rule}
 判断示例（下面出现的表与实体都是虚构的，只用来示范判断方法）：
 问题：这批订单里的加急件都发货了吗？
 {{"intent": "database", "reason": "问的是订单记录自身的状态字段，与文档无关", "action": {{"tool": "sql_query", "args": {{"sql": "SELECT id, status FROM orders WHERE level = '加急' LIMIT 20"}}}}}}
@@ -237,6 +238,19 @@ def ask_json(
         raise PlannerError(f"{type(exc).__name__}: {exc}") from exc
 
 
+# 第 10 条：实体在「库内数据」的取值里出现时，那条记录就是问题所指的对象。
+# 目录把实体名列全以后，路由器仍然会把「拆开以后敞着放会出什么问题」当成食品常识去文档侧找
+# （v8.7 的 8 条数据侧样本里，目录修好后还剩两条这么判）。规则 1 与规则 2 已经蕴含这件事，
+# 但「先怀疑」不够硬，补一条把「记录自己的字段内容」与「通用常识」划开。
+# 置 RAG_DISABLE_AGENT_ROUTE_DATA_SIDE=1 退回没有这条规则的提示词。
+DATA_SIDE_RULE = (
+    "10. 实体出现在「库内数据」的取值里时，那条记录就是问题所指的对象：问它的保存方式、储存条件、"
+    "开封或拆开以后怎么办、还能不能继续用，问的都是这条记录自己的字段内容，按第 1 条选 database，"
+    "不要当成通用常识去文档里找；只有问题另外还问了一个与该记录无关的子问题，才按第 3 条选 mixed。"
+    "问题问的是本系统自己的行为（这类数据怎么入库、怎么检索、字段从哪来）时，仍按第 6 条走文档侧。"
+)
+
+
 # 要求模型把思考写短的一句话。路由开着思考，而思考长度管不住：同一条路由提示词实测
 # 输出 60~1215 个 token，决策 JSON 本身只要几十个字。这台 Ollama 的 reasoning 档位
 # （low/minimal）实测压不住长度，提示词里加这句实测有效（同一条提示词两遍：
@@ -254,6 +268,7 @@ def build_route_prompt(
         tool_specs=tool_specs,
         history_section=_history_section(history),
         question=question[:MAX_QUESTION_CHARS],
+        data_side_rule=DATA_SIDE_RULE if AGENT_ROUTE_DATA_SIDE else "",
     )
     return prompt + THINKING_BRIEF_NOTE if AGENT_THINKING_BRIEF else prompt
 

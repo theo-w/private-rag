@@ -431,6 +431,26 @@ class TestHeuristicCatalogHints:
         assert action["tool"] == "kb_search"
 
 
+class TestDataSideRoutingRule:
+    """「拆开以后怎么放」问的是那条记录自己的字段内容，不该被当成通用常识送去文档侧。"""
+
+    def test_router_prompt_keeps_record_attributes_on_the_sql_side(self):
+        prompt = build_route_prompt("腰果拆开以后一直敞着放，会出什么问题？", "工具清单", None)
+
+        assert "那条记录就是问题所指的对象" in prompt
+        assert "不要当成通用常识去文档里找" in prompt
+        # 系统自身的行为仍然归文档侧，否则这次改动会把 v7 那批文档样本带偏
+        assert "仍按第 6 条走文档侧" in prompt
+
+    def test_disable_flag_restores_the_prompt_without_the_rule(self, monkeypatch):
+        monkeypatch.setattr(prompts_module, "AGENT_ROUTE_DATA_SIDE", False)
+
+        prompt = build_route_prompt("腰果拆开以后一直敞着放，会出什么问题？", "工具清单", None)
+
+        assert "那条记录就是问题所指的对象" not in prompt
+        assert "9. reason 用一句中文说明判断依据" in prompt
+
+
 class TestCoreferenceResolution:
     """「本项目/本系统」被当成缺少对话上下文，是 v7.2 那轮 m01 文档那一半没取证的直接成因。"""
 

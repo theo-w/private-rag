@@ -141,11 +141,20 @@ AGENT_TOOL_CHARS = _env_int("RAG_AGENT_TOOL_CHARS", 3000)
 AGENT_CONTEXT_CHARS = _env_int("RAG_AGENT_CONTEXT_CHARS", 7000)
 # 运行时 SQL 最多返回多少行
 AGENT_SQL_ROWS = _env_int("RAG_AGENT_SQL_ROWS", 20)
-# 写进工具描述的「库内数据目录」字符上限：列名加少量样例值，路由器靠它判断事实是否在表里
+# 写进工具描述的「库内数据目录」字符上限：取值样例靠它判断事实是否在表里
 AGENT_CATALOG_CHARS = _env_int("RAG_AGENT_CATALOG_CHARS", 420)
-# 每个文本列最多取几个样例值；0 表示只列列名不取样例（换成大表时用它关掉取样）
-AGENT_CATALOG_SAMPLES = _env_int("RAG_AGENT_CATALOG_SAMPLES", 4)
+# 每个文本列最多展示几个取值；0 表示只列列名不取样例（换成大表时用它关掉取样）
+AGENT_CATALOG_SAMPLES = _env_int("RAG_AGENT_CATALOG_SAMPLES", 12)
+# 每个文本列最多扫多少行来找取值。只展示前若干条不等于只看前若干行：
+# 实体名在后面的行里时，扫 4 行的目录永远看不到它（v8.7 的 8 条数据侧样本正是这么漏掉的）
+AGENT_CATALOG_SCAN_ROWS = _env_int("RAG_AGENT_CATALOG_SCAN_ROWS", 40)
+# 目录按「短取值把实体名列全、长文本只给一个例子」来组织，并跳过大数字与日期时间。
+# 置 1 退回旧行为（每列取前 4 个值、长文本也照抄、数字日期也进目录）。
+AGENT_CATALOG_ENUM = not _env_flag("RAG_DISABLE_AGENT_CATALOG_ENUM")
 
+# 路由提示词里的第 10 条：实体出现在库内取值里时，该记录自己的字段内容算 database。
+# 置 1 退回没有这条规则的提示词（口语化的「拆开以后怎么放」会被当成通用常识判成 knowledge）。
+AGENT_ROUTE_DATA_SIDE = not _env_flag("RAG_DISABLE_AGENT_ROUTE_DATA_SIDE")
 # 路由器判 none 时不再直接拒答：先做一次知识库检索验证，拒答必须建立在证据上。
 # 置 1 退回旧行为（判成 none 就跳过检索直接拒答）。
 AGENT_NONE_PROBE = not _env_flag("RAG_DISABLE_AGENT_NONE_PROBE")
