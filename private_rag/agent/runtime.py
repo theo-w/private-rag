@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -34,7 +35,9 @@ from private_rag.agent.tools import (
 from private_rag.agent.trace import AgentStep, AgentTrace, new_trace_id
 from private_rag.config import (
     AGENT_CATALOG_CHARS,
+    AGENT_CATALOG_ENUM,
     AGENT_CATALOG_SAMPLES,
+    AGENT_CATALOG_SCAN_ROWS,
     AGENT_CONTEXT_CHARS,
     AGENT_LLM_MODEL,
     AGENT_MAX_STEPS,
@@ -120,6 +123,23 @@ def _refusal_text(missing: str = "") -> str:
 CATALOG_VALUE_CHARS = 60
 CATALOG_TERM_MAX_CHARS = 24
 CATALOG_TERMS_MAX = 40
+# 长文本列在目录里只留这么多个例子：路由器需要知道「这一列存说明文字」，不需要读完整段落
+CATALOG_LONG_VALUE_EXAMPLES = 1
+# 旧行为每列只看前 4 行——改默认值之前就是这个数，退回旧行为时要连这个一起退，
+# 否则「旧行为」其实只退了组织方式，取值条数还是新的
+LEGACY_CATALOG_ROWS = 4
+# 纯数字与日期时间不进目录也不进回退线索：问题不会用「2026-01-10」指认一条记录，
+# 而它们会把目录的字符预算和线索名额占掉
+_NUMBERISH_RE = re.compile(r"[\d\s.,:%+-]+")
+
+
+def _is_numberish(value: str) -> bool:
+    return bool(_NUMBERISH_RE.fullmatch(str(value or "")))
+
+
+def _add_term(terms: list[str], term: str) -> None:
+    if term and term not in terms:
+        terms.append(term)
 
 
 def _is_textual_column(column: dict) -> bool:
@@ -148,19 +168,99 @@ def _sample_values(connection: Any, table: str, column: str, limit: int) -> list
     return values
 
 
+def _catalog_lines_for_table(
+    connection: Any,
+    table: str,
+    columns: Sequence[dict],
+    *,
+    max_samples: int,
+    scan_rows: int,
+    enumerate_values: bool,
+) -> tuple[list[str], list[str]]:
+    """一张表的目录行与回退线索短词。
+
+    两种组织方式：
+    - 枚举（默认）：短取值（实体名、类别、储存方式这类）尽量列全，长文本列只留一个例子，
+      数字与日期时间整列跳过。路由靠的就是「问题里的名词在不在库内取值里」，
+      列全实体名比多抄一段说明文字有用得多。
+    - 旧行为（``RAG_DISABLE_AGENT_CATALOG_ENUM=1``）：每列取前 ``max_samples`` 个值照抄，
+      长文本也抄、数字日期也进目录。保留它是为了让前后对照能在同一进程里交替跑，
+      也给换成大表时留一个退路。
+    """
+    lines: list[str] = []
+    prose_lines: list[str] = []
+    terms: list[str] = []
+    for column in columns:
+        name = str(column.get("name"))
+        if not name or not _is_textual_column(column):
+            continue
+        values = _sample_values(
+            connection,
+            table,
+            name,
+            scan_rows if enumerate_values else min(max_samples, LEGACY_CATALOG_ROWS),
+        )
+        if not values:
+            continue
+        if not enumerate_values:
+            shown = [
+                value if len(value) <= CATALOG_VALUE_CHARS else value[:CATALOG_VALUE_CHARS] + "…"
+                for value in values
+            ]
+            lines.append(f"{table}.{name} 取值：{' / '.join(shown)}")
+            for value in values:
+                if len(value) <= CATALOG_TERM_MAX_CHARS:
+                    _add_term(terms, value)
+            continue
+        short = [
+            value
+            for value in values
+            if len(value) <= CATALOG_TERM_MAX_CHARS and not _is_numberish(value)
+        ]
+        if short:
+            shown = short[:max_samples]
+            lines.append(f"{table}.{name} 取值样例：{' / '.join(shown)}")
+            terms.extend(shown)
+        long_values = [value for value in values if len(value) > CATALOG_TERM_MAX_CHARS]
+        if long_values:
+            example = long_values[0][:CATALOG_VALUE_CHARS]
+            prose_lines.append(f"{table}.{name} 存长文本，例：{example}")
+    # 长文本例子排在最后：字符预算不够时先牺牲它，实体名单要保住
+    return lines + prose_lines[:CATALOG_LONG_VALUE_EXAMPLES], terms
+
+
 def _data_catalog(
     dsn: str,
     tables: Sequence[str],
     *,
-    max_samples: int = AGENT_CATALOG_SAMPLES,
-    max_chars: int = AGENT_CATALOG_CHARS,
+    max_samples: Optional[int] = None,
+    max_chars: Optional[int] = None,
+    scan_rows: Optional[int] = None,
+    enumerate_values: Optional[bool] = None,
 ) -> tuple[str, list[str]]:
-    """探测白名单表的列名与少量样例值，用于回答「问题要的事实到底在文档还是在表里」。
+    """探测白名单表的列名与库内取值，用于回答「问题要的事实到底在文档还是在表里」。
 
     返回值同时给两处用：目录文本进工具描述（模型看得到），短词列表进回退路由
     （模型不可用时，口语化问题也能靠库内实体名落到 sql_query）。
     探测失败就返回空，装配不该因为一个源库连不上而整体失败。
+
+    预算是「扫多少行」而不是「取多少个值」：只扫前几行的话，实体名在后面行里的记录
+    永远进不了目录，路由器会按第 2 条把这类问题判成 knowledge（v8.7 扩充集 8 条数据侧
+    样本全部误判，路由器当时的理由就是「name 取值不含蓝莓」）。
+    仍然有上限：每列只扫前 ``scan_rows`` 行，更大的表里这些行以外的实体看不到，
+    那种情形要靠路由提示词里的「拿不准就选 mixed」兜底，不是靠目录列全。
     """
+    # 默认值在调用时读模块属性，而不是写进参数默认值：参数默认值在导入时就定死了，
+    # 同一进程里换设置（前后对照脚本要这么干）不会生效。
+    if max_samples is None:
+        max_samples = AGENT_CATALOG_SAMPLES
+    if max_chars is None:
+        max_chars = AGENT_CATALOG_CHARS
+    if scan_rows is None:
+        scan_rows = AGENT_CATALOG_SCAN_ROWS
+    if enumerate_values is None:
+        enumerate_values = AGENT_CATALOG_ENUM
+
     try:
         engine = create_engine(dsn)
     except Exception:
@@ -180,27 +280,25 @@ def _data_catalog(
                 names = [str(column.get("name")) for column in columns][:14]
                 if not names:
                     continue
-                parts.append(f"{table} 列({', '.join(names)})")
                 for name in names:
-                    if name not in terms:
-                        terms.append(name)
+                    _add_term(terms, name)
                 if max_samples <= 0:
                     continue
-                for column in columns:
-                    name = str(column.get("name"))
-                    if not name or not _is_textual_column(column):
-                        continue
-                    values = _sample_values(connection, table, name, max_samples)
-                    if not values:
-                        continue
-                    shown = [
-                        value if len(value) <= CATALOG_VALUE_CHARS else value[:CATALOG_VALUE_CHARS] + "…"
-                        for value in values
-                    ]
-                    parts.append(f"{table}.{name} 取值：{' / '.join(shown)}")
-                    for value in values:
-                        if len(value) <= CATALOG_TERM_MAX_CHARS and value not in terms:
-                            terms.append(value)
+                if not enumerate_values:
+                    # 旧行为把列名再抄一遍（当时没有「取值样例」这层信息，靠它说明表结构）
+                    parts.append(f"{table} 列({', '.join(names)})")
+                # 枚举模式下不再重复列名：工具描述里的「可查列」已经写了同一张表的列
+                lines, table_terms = _catalog_lines_for_table(
+                    connection,
+                    table,
+                    columns,
+                    max_samples=max_samples,
+                    scan_rows=scan_rows,
+                    enumerate_values=enumerate_values,
+                )
+                parts.extend(lines)
+                for term in table_terms:
+                    _add_term(terms, term)
                 if len(";".join(parts)) >= max_chars:
                     break
     except Exception:
