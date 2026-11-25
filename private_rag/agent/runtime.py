@@ -40,6 +40,7 @@ from private_rag.config import (
     AGENT_CATALOG_SCAN_ROWS,
     AGENT_CONTEXT_CHARS,
     AGENT_GATE_SIDE_TRACKING,
+    AGENT_KB_MISS_SQL_GATE,
     AGENT_LLM_MODEL,
     AGENT_MAX_STEPS,
     AGENT_MIXED_GATE,
@@ -315,6 +316,33 @@ def _data_catalog(
     return "；".join(kept), terms[:CATALOG_TERMS_MAX]
 
 
+# 目录里的「products.name 取值样例：橙子 / 苹果」这一行就是路由器看到的实体清单。
+# 兜底门控按同一份清单认实体，顺带拿到实体所在的表与列：强制的那次查询按实体过滤，
+# 比整表 SELECT * 省字符，也不会被行数与字符预算截掉靠后的记录。
+_CATALOG_ENTITY_LINE_RE = re.compile(r"([A-Za-z0-9_.]+)\.([A-Za-z0-9_]+) 取值样例：([^；]+)")
+
+
+def _catalog_entities(catalog_text: str) -> list[tuple[str, str, str]]:
+    """目录文本里的 (实体, 表, 列)，顺序与目录展示一致。
+
+    只认「取值样例」行：长文本例子那一行（`存长文本，例：…`）里的句子不是实体，
+    拿它去匹配问题会让门控在无关问题上触发。
+    """
+    found: list[tuple[str, str, str]] = []
+    for table, column, segment in _CATALOG_ENTITY_LINE_RE.findall(str(catalog_text or "")):
+        for raw in segment.split(" / "):
+            value = raw.strip()
+            if len(value) >= 2:
+                found.append((value, table, column))
+    return found
+
+
+def _entity_lookup_sql(table: str, column: str, entity: str) -> str:
+    """按实体过滤的一次查询：单引号按 SQL 惯例翻倍转义，行数上限与只读校验由 sql_guard 负责。"""
+    literal = entity.replace("'", "''")
+    return f"SELECT * FROM {table} WHERE {column} LIKE '%{literal}%' LIMIT 5"
+
+
 class AgentRuntime:
     """检索-行动循环的编排者。工具与决策器都可注入，便于测试与替换模型。"""
 
@@ -330,6 +358,7 @@ class AgentRuntime:
         none_probe: bool = AGENT_NONE_PROBE,
         intent: str = "",
         mixed_gate: bool = AGENT_MIXED_GATE,
+        kb_miss_sql_gate: Optional[bool] = None,
         gate_side_tracking: Optional[bool] = None,
     ):
         self.registry = registry
@@ -343,6 +372,11 @@ class AgentRuntime:
         # 修法 C：双侧查询门控——mixed 意图下代码级禁止一侧零证据就选 final
         self.intent = str(intent or "")
         self.mixed_gate = bool(mixed_gate)
+        # 兜底门控在调用时才读模块设置：参数默认值在导入时就定死了，同一进程里换设置
+        # 不会生效（前后对照脚本要这么干，见 `_data_catalog` 里的同一处理）
+        self.kb_miss_sql_gate = (
+            AGENT_KB_MISS_SQL_GATE if kb_miss_sql_gate is None else bool(kb_miss_sql_gate)
+        )
         # mixed 门控认侧别的依据，同上：在装配时才读模块设置，同一进程里换设置才生效
         self.gate_side_tracking = (
             AGENT_GATE_SIDE_TRACKING if gate_side_tracking is None else bool(gate_side_tracking)
@@ -379,6 +413,22 @@ class AgentRuntime:
             if label in (block.label or "") or label in (block.text or ""):
                 return True
         return False
+
+    def _kb_miss_sql_target(
+        self, registry: ToolRegistry, question: str
+    ) -> Optional[tuple[str, str]]:
+        """问题指名的实体在库内取值里时，给出 (实体, 按该实体查一次的 SQL)。
+
+        库里没有这个实体、没挂 sql_query、或目录探测失败（没有取值样例）时返回 None。
+        """
+        sql_tool = registry.get(SqlQueryTool.name)
+        if sql_tool is None:
+            return None
+        text = str(question or "")
+        for entity, table, column in _catalog_entities(getattr(sql_tool, "catalog", "")):
+            if entity in text:
+                return entity, _entity_lookup_sql(table, column, entity)
+        return None
 
     def _none_probe(
         self, registry: ToolRegistry, question: str, intent: str
@@ -474,6 +524,8 @@ class AgentRuntime:
         intent = route.intent
         self.intent = intent  # 修法 C：门控需要
         gate_intercepts = 0
+        # 兜底门控一条问题只兜一次：查完库里还是缺那项事实，就照原样拒答，别反复查
+        kb_miss_forced = False
         # 两侧各查过没有——两道门控都看这两个标记，而不是 `_has_evidence_for`：
         # 真实证据块的标签是「SQL 查询（表 …）」与文档标题，里面没有工具名，
         # 按标签认等于「两侧永远零证据」，那个判断只对测试替身成立
@@ -561,6 +613,37 @@ class AgentRuntime:
                                 intent=self.intent,
                                 action={"tool": missing_tool, "args": {}},
                                 reason=f"修法 C 门控：{missing_tool} 侧没查过，强制取证",
+                            )
+                            continue
+
+                    # 兜底门控：意图判成 knowledge、模型要说「证据不足」，而问题里的实体
+                    # 就在库内取值里——拒答之前先按该实体查一次业务表。提示词第 10 条能把它
+                    # 拉回数据侧，但那是措辞，同一条提示词在这台后端仍会翻动，单条样本证不了稳。
+                    if (
+                        self.kb_miss_sql_gate
+                        and self.intent == "knowledge"
+                        and not decision.sufficient
+                        and not kb_miss_forced
+                        and not sql_ran
+                    ):
+                        hit = self._kb_miss_sql_target(registry, question)
+                        if hit is not None:
+                            entity, forced_sql = hit
+                            kb_miss_forced = True
+                            gate_intercepts += 1
+                            observations.append(
+                                f"步骤{step_index + 1}：门控拦截 final——要的那项事实不在文档证据里，"
+                                f"但「{entity}」是库内取值，先查一次业务表再判"
+                            )
+                            add_step(
+                                kind="gate",
+                                reason=f"门控拦截：文档侧缺那项事实，库内有实体「{entity}」",
+                                observation=f"intent=knowledge，按「{entity}」查一次 sql_query",
+                            )
+                            pending = RouteDecision(
+                                intent=self.intent,
+                                action={"tool": SqlQueryTool.name, "args": {"sql": forced_sql}},
+                                reason=f"拒答之前先按库内实体「{entity}」查一次",
                             )
                             continue
 
@@ -780,6 +863,8 @@ class AgentRuntime:
         intent = route.intent
         self.intent = intent  # 修法 C：门控需要
         gate_intercepts = 0
+        # 兜底门控一条问题只兜一次：查完库里还是缺那项事实，就照原样拒答，别反复查
+        kb_miss_forced = False
         # 两侧各查过没有——两道门控都看这两个标记，而不是 `_has_evidence_for`：
         # 真实证据块的标签是「SQL 查询（表 …）」与文档标题，里面没有工具名，
         # 按标签认等于「两侧永远零证据」，那个判断只对测试替身成立
@@ -870,6 +955,37 @@ class AgentRuntime:
                                 intent=self.intent,
                                 action={"tool": missing_tool, "args": {}},
                                 reason=f"修法 C 门控：{missing_tool} 侧没查过，强制取证",
+                            )
+                            continue
+
+                    # 兜底门控：意图判成 knowledge、模型要说「证据不足」，而问题里的实体
+                    # 就在库内取值里——拒答之前先按该实体查一次业务表。提示词第 10 条能把它
+                    # 拉回数据侧，但那是措辞，同一条提示词在这台后端仍会翻动，单条样本证不了稳。
+                    if (
+                        self.kb_miss_sql_gate
+                        and self.intent == "knowledge"
+                        and not decision.sufficient
+                        and not kb_miss_forced
+                        and not sql_ran
+                    ):
+                        hit = self._kb_miss_sql_target(registry, question)
+                        if hit is not None:
+                            entity, forced_sql = hit
+                            kb_miss_forced = True
+                            gate_intercepts += 1
+                            observations.append(
+                                f"步骤{step_index + 1}：门控拦截 final——要的那项事实不在文档证据里，"
+                                f"但「{entity}」是库内取值，先查一次业务表再判"
+                            )
+                            add_step(
+                                kind="gate",
+                                reason=f"门控拦截：文档侧缺那项事实，库内有实体「{entity}」",
+                                observation=f"intent=knowledge，按「{entity}」查一次 sql_query",
+                            )
+                            pending = RouteDecision(
+                                intent=self.intent,
+                                action={"tool": SqlQueryTool.name, "args": {"sql": forced_sql}},
+                                reason=f"拒答之前先按库内实体「{entity}」查一次",
                             )
                             continue
 

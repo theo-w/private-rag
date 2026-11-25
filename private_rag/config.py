@@ -158,6 +158,11 @@ AGENT_ROUTE_DATA_SIDE = not _env_flag("RAG_DISABLE_AGENT_ROUTE_DATA_SIDE")
 # 路由器判 none 时不再直接拒答：先做一次知识库检索验证，拒答必须建立在证据上。
 # 置 1 退回旧行为（判成 none 就跳过检索直接拒答）。
 AGENT_NONE_PROBE = not _env_flag("RAG_DISABLE_AGENT_NONE_PROBE")
+# 兜底门控：意图判成 knowledge、模型眼看要按「证据不足」拒答，而问题里的实体出现在
+# 「库内数据」的取值里时，拒答之前先按那个实体查一次业务表。路由器只看得到工具描述，
+# 同一条提示词在温度 0 下仍会翻动（v8.8 之后新集里剩的那条误判就是这个形状），
+# 靠措辞修不干净。置 1 退回「文档侧找不到那项事实就拒答」的原行为。
+AGENT_KB_MISS_SQL_GATE = not _env_flag("RAG_DISABLE_AGENT_KB_MISS_SQL_GATE")
 # 决策 JSON 的输出预算。推理型模型会先输出一段不可见的思考内容，
 # 预算给小了正文就是空的，路由会整段回退到关键词判断。
 AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)
