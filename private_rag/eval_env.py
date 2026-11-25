@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 EVAL_COLLECTION_NAME = "rag_eval_kb"
 EVAL_STORAGE_DIR = ROOT / "storage" / "eval" / "qdrant_storage"
 EVAL_LEXICAL_INDEX_PATH = ROOT / "storage" / "eval" / "lexical" / "bm25.pkl"
+EVAL_TREE_INDEX_PATH = ROOT / "storage" / "eval" / "tree" / "tree.pkl"
 EVAL_CACHE_DIR = ROOT / "storage" / "eval_cache"
 # agentic 评估组的运行时数据源：只挂只读 SQL 工具，不入库，与入库配置分开维护
 EVAL_AGENT_SOURCES_CONFIG = ROOT / "config" / "sources.eval.agent.yaml"
@@ -21,6 +22,8 @@ def configure_eval_env() -> None:
         "RAG_COLLECTION_NAME": EVAL_COLLECTION_NAME,
         "RAG_STORAGE_DIR": str(EVAL_STORAGE_DIR),
         "RAG_LEXICAL_INDEX_PATH": str(EVAL_LEXICAL_INDEX_PATH),
+        # 树索引同样落在评估目录里，不与演示库的 storage/tree 共用
+        "RAG_TREE_INDEX_PATH": str(EVAL_TREE_INDEX_PATH),
         # 评估跑的是样本，不是真实问答；不写进演示轨迹文件，避免污染 storage/traces
         "RAG_DISABLE_AGENT_TRACE": "1",
         # 评估要的是可复现的前后对比，不是采样多样性：钉死两条链路的生成温度与全局 seed。
