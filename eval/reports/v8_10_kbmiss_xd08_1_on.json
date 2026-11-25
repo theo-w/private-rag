@@ -1,0 +1,200 @@
+{
+  "meta": {
+    "report_title": "# private-rag 检索策略评估报告：v8_agentic_expanded",
+    "generated_at": "2026-11-25T21:24:17+08:00",
+    "dataset": "eval/v8_agentic_expanded.jsonl",
+    "dataset_sha256": "a99e2ca3fa7784eb9bb6c6bc853497751c60125932ff32a50a152e208d58f634",
+    "datasets": [
+      "eval/v8_agentic_expanded.jsonl"
+    ],
+    "datasets_sha256": [
+      "a99e2ca3fa7784eb9bb6c6bc853497751c60125932ff32a50a152e208d58f634"
+    ],
+    "dataset_total": 40,
+    "samples_total": 1,
+    "samples_answerable": 1,
+    "samples_refusal": 0,
+    "sample_ids": [
+      "xd08"
+    ],
+    "categories": {
+      "database": 1
+    },
+    "configs": [
+      "agent"
+    ],
+    "agent": {
+      "enabled": true,
+      "configs": [
+        "agent"
+      ],
+      "sources": "config/sources.eval.agent.v8.yaml",
+      "tools": [
+        "kb_search",
+        "sql_query"
+      ],
+      "max_steps": 4,
+      "allow_sql": true,
+      "sql_rows": 20,
+      "trace_enabled": false
+    },
+    "dataset_is_default": false,
+    "output_markdown": "ab_kbmiss_xd08_1_on.md",
+    "output_json": "ab_kbmiss_xd08_1_on.json",
+    "llm_model": "qwen3.8:27b-mlx",
+    "judge_model": "qwen3.8:27b-mlx",
+    "embed_model": "bge-m3",
+    "ragas": {
+      "enabled": false,
+      "configs": [],
+      "limit": null,
+      "metrics": [
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall"
+      ],
+      "strictness": 3,
+      "max_workers": 1,
+      "cache": true,
+      "cache_dir": "storage/eval_cache"
+    },
+    "ragas_errors": {},
+    "duration_seconds": 40.44,
+    "git_commit": "a207ba4e376db0871c66672e01a761052a1fdc7e",
+    "git_dirty": true,
+    "run_note": "同一进程交替对照 第1轮 kb_miss_sql_gate=on"
+  },
+  "samples_meta": [
+    {
+      "id": "xd08",
+      "question": "酸奶胀包了还能喝吗？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    }
+  ],
+  "configs": {
+    "agent": {
+      "spec": {
+        "name": "agent",
+        "label": "Agentic：意图路由 + 工具循环（kb_search + 运行时只读 SQL）",
+        "use_lexical": true,
+        "use_rerank": true,
+        "top_k": 3,
+        "use_parent": true,
+        "query_rewrite": "off",
+        "context_max_chars": 6000,
+        "is_agent": true
+      },
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "both_sides_hit": null,
+        "answer_rate": 1.0,
+        "refusal_accuracy": null,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "avg_latency_ms": 40425.0,
+        "avg_retrieval_ms": 3.0,
+        "avg_generation_ms": 40422.0,
+        "generation_cache_hits": 0,
+        "avg_retrieved": 1.0,
+        "avg_context_chars": 105.0,
+        "avg_query_count": 1.0,
+        "avg_tool_calls": 1.0,
+        "avg_tool_steps": 3.0,
+        "avg_tool_calls_knowledge": null,
+        "avg_tool_calls_database": 1.0,
+        "avg_tool_calls_mixed": null,
+        "dual_tool_rate": 0.0,
+        "dual_tool_rate_knowledge": null,
+        "dual_tool_rate_database": 0.0,
+        "dual_tool_rate_mixed": null,
+        "gate_intercept_rate": 0.0,
+        "used_parent_rate": 1.0,
+        "rewrite_fallbacks": 0,
+        "n_answerable": 1,
+        "n_refusal": 0,
+        "n_errors": 0
+      },
+      "ragas": null,
+      "n_results": 1
+    }
+  },
+  "samples": [
+    {
+      "id": "xd08",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "酸奶胀包了还能喝吗？",
+      "reference": "胀包就直接扔掉；过期一天但没拆封的一般还能喝。",
+      "evidence": [
+        "胀包就直接扔掉"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "酸奶胀包了不能喝，应直接扔掉。根据资料，酸奶需全程冷藏（2-6℃），若出现胀包现象，说明已变质，必须丢弃 [1]。",
+      "contexts": [
+        "name | description | storage\n酸奶 | 酸奶全程冷藏，过期一天未拆封一般还能喝，胀包就直接扔掉。 | 全程冷藏 2-6℃"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | description | storage；首行：酸奶 | 酸奶全程冷藏，过期一天未拆封一般还能喝，胀包就直接扔掉。 | 全程冷藏 2-6℃",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 105,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "tool_names": [
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "ca1ca3fc8810",
+      "history_turns": 0,
+      "retrieval_ms": 3.0,
+      "generation_ms": 40422.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    }
+  ]
+}

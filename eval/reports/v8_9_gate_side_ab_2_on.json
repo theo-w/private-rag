@@ -1,0 +1,1610 @@
+{
+  "meta": {
+    "report_title": "# private-rag 检索策略评估报告：mixed_gate_set",
+    "generated_at": "2026-11-25T23:48:26+08:00",
+    "dataset": "mixed_gate_set.jsonl",
+    "dataset_sha256": "786ae6bfd4e2d485bdeb2b96a19c38909db88e9e128b73efbd885f889162f672",
+    "datasets": [
+      "mixed_gate_set.jsonl"
+    ],
+    "datasets_sha256": [
+      "786ae6bfd4e2d485bdeb2b96a19c38909db88e9e128b73efbd885f889162f672"
+    ],
+    "dataset_total": 12,
+    "samples_total": 12,
+    "samples_answerable": 12,
+    "samples_refusal": 0,
+    "sample_ids": [
+      "xm01",
+      "xm02",
+      "xm03",
+      "xm04",
+      "xm05",
+      "xm06",
+      "xm07",
+      "m01",
+      "m02",
+      "m03",
+      "m04",
+      "m05"
+    ],
+    "categories": {
+      "mixed": 12
+    },
+    "configs": [
+      "agent"
+    ],
+    "agent": {
+      "enabled": true,
+      "configs": [
+        "agent"
+      ],
+      "sources": "config/sources.eval.agent.v8.yaml",
+      "tools": [
+        "kb_search",
+        "sql_query"
+      ],
+      "max_steps": 4,
+      "allow_sql": true,
+      "sql_rows": 20,
+      "trace_enabled": false
+    },
+    "dataset_is_default": false,
+    "output_markdown": "ab_gateside_2_on.md",
+    "output_json": "ab_gateside_2_on.json",
+    "llm_model": "qwen3.8:27b-mlx",
+    "judge_model": "qwen3.8:27b-mlx",
+    "embed_model": "bge-m3",
+    "ragas": {
+      "enabled": false,
+      "configs": [],
+      "limit": null,
+      "metrics": [
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall"
+      ],
+      "strictness": 3,
+      "max_workers": 1,
+      "cache": true,
+      "cache_dir": "storage/eval_cache"
+    },
+    "ragas_errors": {},
+    "duration_seconds": 494.74,
+    "git_commit": "a207ba4e376db0871c66672e01a761052a1fdc7e",
+    "git_dirty": true,
+    "run_note": "同一进程交替对照 第2轮 gate_side_tracking=on"
+  },
+  "samples_meta": [
+    {
+      "id": "xm01",
+      "question": "蓝莓是哪家供应商供的货？另外，回答里的引用编号是按什么规则编出来的？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "xm02",
+      "question": "牛油果的供应商是谁？系统是按什么标准判断一个问题该查文档还是查库？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "xm03",
+      "question": "芒果的供应商是哪家？改写出来的那些查询文本会不会被写进最终提示词？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "xm04",
+      "question": "核桃是哪家供的？护栏改写过的 SQL 会不会留下记录？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "xm05",
+      "question": "桂圆干的供应商是哪家？查询改写没成功时会怎么办？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "xm06",
+      "question": "鳕鱼的供应商是哪家？agentic 的轨迹里都记了些什么？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "xm07",
+      "question": "酸奶是哪家供的？查库结果那几条的引用是复用哪个字段来的？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "m01",
+      "question": "香蕉能不能放冰箱？另外这个项目的引用列表是从哪儿来的？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "m02",
+      "question": "橙子多少钱？这个项目的 embedding 和向量存储分别由什么负责？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "m03",
+      "question": "最便宜的水果是什么、单价多少？精排后最终给大模型几条资料？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "m04",
+      "question": "苹果适合怎么保存？v7 的 agentic 问答支持哪几种意图？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "history_turns": 0
+    },
+    {
+      "id": "m05",
+      "question": "橙子的单价是多少？扫描件 PDF 入库时每页 OCR 大概多花时间？",
+      "category": "mixed",
+      "answerable": true,
+      "expected_source": "scripts/init_demo_db.py",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "history_turns": 0
+    }
+  ],
+  "configs": {
+    "agent": {
+      "spec": {
+        "name": "agent",
+        "label": "Agentic：意图路由 + 工具循环（kb_search + 运行时只读 SQL）",
+        "use_lexical": true,
+        "use_rerank": true,
+        "top_k": 3,
+        "use_parent": true,
+        "query_rewrite": "off",
+        "context_max_chars": 6000,
+        "is_agent": true
+      },
+      "metrics": {
+        "evidence_hit@3": 0.6666666666666666,
+        "evidence_recall@3": 0.6666666666666666,
+        "context_precision@3": 0.2222222222222222,
+        "mrr@3": 0.6666666666666666,
+        "source_hit": 0.9166666666666666,
+        "both_sides_hit": 0.8333333333333334,
+        "answer_rate": 1.0,
+        "refusal_accuracy": null,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "avg_latency_ms": 41227.0,
+        "avg_retrieval_ms": 1119.1666666666667,
+        "avg_generation_ms": 40107.833333333336,
+        "generation_cache_hits": 0,
+        "avg_retrieved": 4.25,
+        "avg_context_chars": 2208.9166666666665,
+        "avg_query_count": 1.5833333333333333,
+        "avg_tool_calls": 2.5833333333333335,
+        "avg_tool_steps": 5.083333333333333,
+        "avg_tool_calls_knowledge": null,
+        "avg_tool_calls_database": null,
+        "avg_tool_calls_mixed": 2.5833333333333335,
+        "dual_tool_rate": 1.0,
+        "dual_tool_rate_knowledge": null,
+        "dual_tool_rate_database": null,
+        "dual_tool_rate_mixed": 1.0,
+        "gate_intercept_rate": 0.5,
+        "used_parent_rate": 1.0,
+        "rewrite_fallbacks": 0,
+        "n_answerable": 12,
+        "n_refusal": 0,
+        "n_errors": 0
+      },
+      "ragas": null,
+      "n_results": 12
+    }
+  },
+  "samples": [
+    {
+      "id": "xm01",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "蓝莓是哪家供应商供的货？另外，回答里的引用编号是按什么规则编出来的？",
+      "reference": "蓝莓由绿源鲜达供货；引用编号只给带引用的证据块编，没引用的块不参与编号。",
+      "evidence": [
+        "绿源鲜达"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "answer": "蓝莓的供应商是绿源鲜达 [1]。回答里的引用编号规则是：只有带引用的证据块参与编号，编号与 CLI、HTTP 口径一致，引用列表中的 page/table 可回溯到页或行 [3]。",
+      "contexts": [
+        "name | supplier\n蓝莓 | 绿源鲜达",
+        "历史直接裸贴在规则块与证据块之间，**没有小标题、没有编号、没有「这不是事实来源」的标注**，\n看起来就像规则的第 7 款或者一条匿名证据。而固定链路的 `generation.py:97` 反而写了完整措辞：\n「对话历史（仅用于理解当前问题的指代，不能作为事实依据）」。\n`FINAL_PROMPT` 第 1 条「证据之外的事实一句都不要写」字面上覆盖这种情况，但被这样渲染出来，实际约束不住。\n\n`agent/tools.py` 的 `render_evidence()` 只给工具产出的块编号，历史永远不进引用列表，\n所以抄历史得到的那半句在引用列表里没有对应条目——用户看不见它的出处。",
+        "三个工具都同时给两种结果：`content[0].text` 是给人和模型读的文本（证据带 `[n]` 与来源行、末尾有引用列表），\n`structuredContent` 是结构化载荷（`evidence` / `citations` / `retrieved` / `used_rerank` / `context_chars`，\n`ask` 另有 `answer` / `no_evidence` / `meta.elapsed_ms`，`sql_query` 另有 `sql` / `row_count` / `columns` /\n`truncated` / `warnings`）。引用编号与 `[n]` 的口径与 CLI、HTTP 完全一致：只有带引用的块参与编号，\n`citations` 里的 `page` / `table` 能回溯到页或行。参数越界或写了不认识的参数会以 `isError` 返回一句中文原因\n（不是协议错误），客户端能直接把原因读给用户。",
+        "- [x] m01 的文档那一半与指代消解已覆盖（`v7.3-coreference`）：机制侧写死三处提示词规则——「这个项目」「本系统」指本系统自身、\n      它的说明文档就在知识库里；没有对话历史绝不是选 `none` 的理由；指代词在历史里找不到先行词时按本系统自身的行为与文档理解，\n      不得以「缺少上下文」「无法确定所指」为由停止取证。评估侧补上真正的多轮——`EvalSample.history`（成对 `[role, content]` 严格\n      校验，可回答样本禁止 history 含 evidence 原文）由 `collect_agent_results` 传给 `agent.run(..., history=...)`，评估集加 3 条\n      `coreference` 样本（c01 文档侧指代、c02 库侧指代、c03 混合），报告用 `history_turns` 标出走了多轮的条目。\n      29 条复跑（`eval/reports/v7_3_coreference_report.md`，`n_errors` 0）：c02 把「它」还原成橙子并走 `sql_query`（检索五项全 1.000）、\n      c01 按上一轮的精排答对（决策 JSON 解析失败走关键词回退，答案仍正确）、c03 判 `mixed`；m01 这轮 SQL 证据排到第 1 块，\n      上一轮被 `@3` 判掉的五项全部回到 1.000；同 26 条子集 `answer_rate`/`source_hit`/`refusal_accuracy` 与上一轮持平\n- [x] v7.4 评估口径改双侧：混合问题「查了几侧」现在量得到（诊断见 `docs/v7.4-history-as-evidence.md`\n      第三节，本条是它的修法 B）。评估集加可选字段 `expected_sources`（声明「文档侧 + SQL 侧」两侧\n      应取证来源），新确定性读数 `both_sides_hit` 要求声明的每一侧都在**全量**引用列表里出现才判 1，\n      只统计声明了双侧的 6 条（m01–m05 + c03），其余条目记 `None` 不进均值。两处口径与 `source_hit`\n      刻意不同：扫全量引用不套 `@3` 窗口（m04 的 SQL 引用常排在第 4 条），按声明的来源标签匹配而不是\n      按 `#sql_query` 片段判侧（这样文档侧也能成为声明的一侧）。**`source_hit`/`evidence_hit@3`/\n      `citation_rate` 的定义与逐条取值一字未改**，v7 / v7.2 / v7.3 三轮报告仍可比；`both_sid…"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | supplier；首行：蓝莓 | 绿源鲜达",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "v7.4-history-as-evidence.md",
+          "source_type": "file",
+          "source_uri": "docs/v7.4-history-as-evidence.md",
+          "snippet": "历史直接裸贴在规则块与证据块之间，**没有小标题、没有编号、没有「这不是事实来源」的标注**， 看起来就像规则的第 7 款或者一条匿名证据。而固定链路的 `generation.py:97` 反而写了完整措辞： 「对话历史（仅用于理解当前问…",
+          "page": null,
+          "table": null,
+          "score": -0.299072265625
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "三个工具都同时给两种结果：`content[0].text` 是给人和模型读的文本（证据带 `[n]` 与来源行、末尾有引用列表）， `structuredContent` 是结构化载荷（`evidence` / `citations` /…",
+          "page": null,
+          "table": null,
+          "score": -2.150390625
+        },
+        {
+          "index": 4,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "`citation_rate` 的定义与逐条取值一字未改**，v7 / v7.2 / v7.3 三轮报告仍可比；`both_sides_hit` = 0.0 的双侧样本会单独进「失败与关注案例」，现象写「只取到一侧证据」，不再因为 `evi…",
+          "page": null,
+          "table": null,
+          "score": -2.21484375
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "docs/v7.4-history-as-evidence.md",
+        "README.md",
+        "docs/ROADMAP.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 2,
+      "context_chars": 2149,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 3,
+      "tool_steps": 6,
+      "tool_names": [
+        "kb_search",
+        "sql_query"
+      ],
+      "gate_intercepts": 1,
+      "trace_id": "3ad095577f87",
+      "history_turns": 0,
+      "retrieval_ms": 1193.0,
+      "generation_ms": 37681.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "xm02",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "牛油果的供应商是谁？系统是按什么标准判断一个问题该查文档还是查库？",
+      "reference": "牛油果由南美果品供货；判意图的标准是回答所需的事实住在哪一侧。",
+      "evidence": [
+        "南美果品"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "answer": "牛油果的供应商是南美果品 [1]。系统判断一个问题该查文档还是查库，主要依靠路由器对工具描述的理解：装配 sql_query 时会先给白名单表做有界采样（列名加少量样例值）写入描述，使模型能识别问题指向数据库记录；同时模型在作答时声明证据充分性，若问题所需事实不在已收集证据中则拒答，且当模型判定与库无关时，系统会先检索一次文档再决定，确保“查了再说” [2][3]。",
+      "contexts": [
+        "name | supplier\n牛油果 | 南美果品",
+        "三条边界防止跑飞：工具调用次数（`AGENT_MAX_STEPS`）、证据字符预算（`AGENT_CONTEXT_CHARS`）、\nSQL 返回行数（`AGENT_SQL_ROWS`）。模型不可用时不会整体失败：路由退回关键词判断，工具没给 SQL 就退化成\n列出白名单表前几行，最终回答仍基于已收集的证据生成，一条证据都没有就按原来的约定返回拒答文本。\n\n判准「该查文档还是查库」靠两件小事：路由器只看得懂工具的 `description`，所以装配 `sql_query` 时会先给\n白名单表做一次**有界采样**（列名 + 每个文本列少量样例值）写进描述，「香蕉到底能不能放冰箱」这种问法才有机会\n被认成「问的是 `products.description` 里那条记录」；采样出来的词同时喂给关键词回退路由。另一件是答不答由模型\n在宣布作答时一并声明充分性（`sufficient` / `missing`），问题要的那项事实不在证据里就直接返回拒答哨兵并写明\n缺哪一项——「资料里没提到」不等于「不存在」，宁可拒答也不要拿通用常识补出一段看着像的答案。\n\n还有一点容易被忽略：模型判「这问题跟我们库无关」（`none`）时，代码不会直接相信它。判 `none` 只说明模型猜查不到，而拒答的正当理由只有「查过了、证据里没有」，所以会先拿原问题检索一次——查到就照常作答，查不到才返回拒答文本。换句话说，「没查就问」不允许，「查了再说」才是正路。\n\n只读护栏（`agent/sql_guard.py`）只做四件事：只允许单条 `SELECT`/`WITH`、出现写操作关键字就拒绝、\n表必须在白名单内、强制一个不超过上限的 `LIMIT`。它是纵深防御的一层，不是沙箱——\n给这个 DSN 用的仍然应该是只读数据库账号。",
+        "### 7. v7：先判断「该查文档还是查库」，看完结果再决定要不要继续查\n\n前面几版的流程是固定的：不管问什么都先走一遍召回、精排、生成。v7 在它上面加了一个会做决定的循环——\n模型先看问题决定用哪个工具，看完返回的结果再决定要不要接着查，最后才作答。",
+        "- [x] **目录把「扫多少行」与「展示几个值」拆开**，并按路由器真正需要的信息来组织：短取值（实体名、类别、\n      储存方式这类）尽量列全，长文本列只留一个例子（路由器要知道「这一列存说明文字」，不需要读完整段落），\n      纯数字与日期时间整列跳过（问题不会用 `2026-01-10` 指认一条记录，它们只会占掉字符预算与回退线索名额）。\n      新增 `AGENT_CATALOG_SCAN_ROWS` 单独控制扫描行数（默认 40），`AGENT_CATALOG_SAMPLES` 回到它本来的含义\n      （展示条数，默认 12）。同一份评估库的目录文本从 398 字符变成 393 字符，但 12 个实体名与 8 个储存方式\n      全部可见，回退路由的线索词从 24 个到 40 个（上限）——模型不可用时靠关键词兜底的那条路一起受益\n- [x] **路由提示词补第 10 条**（`private_rag/agent/prompts.py` 的 `DATA_SIDE_RULE`）：光把实体列全还不够，\n      目录修好后重测，8 条里仍剩 2 条判 `knowledge`，理由是把「拆开以后敞着放会出什么问题」当成食品常识去文档侧找。\n      规则 1 与规则 2 已经蕴含「记录自身的字段算 database」，但「先怀疑」不够硬，所以补一条把「那条记录自己的\n      字段内容」与「通用常识」明确划开。这条同时守住两侧：问的是**本系统自己的行为**（这类数据怎么入库、怎么检索）\n      时仍按第 6 条走文档侧，避免把 v7 那批文档样本带偏；真有两个子问题的仍按第 3 条选 `mixed`\n- [x] 两个开关各管一半、可单独退回，且**退回逐字等于改动前**：`RAG_DISABLE_AGENT_CATALOG_ENUM=1` 退回旧目录\n      （每列只看前 4 行、长文本照抄、数字日期进目录、连列名头一行也一起回来，退完目录文本与改动前逐字节相同），\n      `RAG_DISABLE_AGENT_ROUTE_DATA_SIDE=1` 退回没有第 10 条的提示词。旧行为连「只看前 4 行」一起退\n      （`LEGACY_CATALOG_ROWS`），否则「旧行为」只退了组织方式、取值条数还是新的\n- [x] `_data_catalog` 的四个参数默认值改成 `None` 并在调用时读模块属性：写成默认参数会在导入时抓快照，\n      同一进程里换设置（交替对照脚本正是这么换的）不会生效——与 `prompts.py` 的同一处坑\n- [x] `scripts/measure_thinking_ab.py` 新增 `--setting data_side_routing`（两半一起开…"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | supplier；首行：牛油果 | 南美果品",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "三条边界防止跑飞：工具调用次数（`AGENT_MAX_STEPS`）、证据字符预算（`AGENT_CONTEXT_CHARS`）、 SQL 返回行数（`AGENT_SQL_ROWS`）。模型不可用时不会整体失败：路由退回关键词判断，工具没给…",
+          "page": null,
+          "table": null,
+          "score": 1.6787109375
+        },
+        {
+          "index": 3,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "### 7. v7：先判断「该查文档还是查库」，看完结果再决定要不要继续查 前面几版的流程是固定的：不管问什么都先走一遍召回、精排、生成。v7 在它上面加了一个会做决定的循环—— 模型先看问题决定用哪个工具，看完返回的结果再决定要不要接着查…",
+          "page": null,
+          "table": null,
+          "score": 1.5263671875
+        },
+        {
+          "index": 4,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [x] **目录把「扫多少行」与「展示几个值」拆开**，并按路由器真正需要的信息来组织：短取值（实体名、类别、 储存方式这类）尽量列全，长文本列只留一个例子（路由器要知道「这一列存说明文字」，不需要读完整段落）， 纯数字与日期时间整列跳…",
+          "page": null,
+          "table": null,
+          "score": -0.14111328125
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "docs/beginner-guide.md",
+        "docs/beginner-guide.md",
+        "docs/ROADMAP.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 2307,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "tool_names": [
+        "kb_search",
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "ce162c71acf7",
+      "history_turns": 0,
+      "retrieval_ms": 1063.0,
+      "generation_ms": 42975.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 0.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "xm03",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "芒果的供应商是哪家？改写出来的那些查询文本会不会被写进最终提示词？",
+      "reference": "芒果由海南果园供货；改写变体和假想文档都只参与检索，不会进入最终提示词。",
+      "evidence": [
+        "海南果园"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "answer": "芒果的供应商是海南果园 [1]。关于改写查询文本是否写入最终提示词，现有证据未明确说明该行为，无法确认 [2][3][4]。",
+      "contexts": [
+        "name | supplier\n芒果 | 海南果园",
+        "查询改写则是“多找几条路，最后仍按原问题选”：",
+        "`agent` 组的口径与固定链路不同义，报告的限制小节逐条写明：耗时是整条循环的墙钟时间（`avg_retrieval_ms` 只记工具执行耗时，其余归 `avg_generation_ms`）；`avg_tool_calls` / `avg_tool_steps` 只有 agentic 组有值；`evidence_hit` 取决于模型 SELECT 了哪些列（只取 `name`/`price` 时答案可以全对但证据判 0）；默认单轮，但带 `history` 字段的样本（v7.3 起 3 条指代消解样本）会把对话历史原样传给 agentic 链路，报告用 `history_turns` 标出哪几条走了多轮；v7.4 起混合样本可用 `expected_sources` 声明「文档侧 + SQL 侧」，新读数 `both_sides_hit` 要求声明的每一侧都被引用到（扫全量引用、不套 `@3` 窗口），旧指标定义未动。v7.4 首轮 29 条实跑里 6 条双侧样本两侧取证全中（`both_sides_hit` 1.000，含上一轮只查文档侧、没回查 SQL 的 c03，那轮的既有数据按新口径回算是 0.833），`source_hit` 0.960 与上轮同为 m04 一条未命中，`mrr@3` 的 -0.020 全部来自 k05 一条排位后移，单条平均 82.6 秒，报告 `eval/reports/v7_4_two_sided_report.md`。修法 A（提示词硬规则）已做：STEP_PROMPT 规则 1 限定 sufficient 只看「已收集的证据」（不含历史），新增规则 10 禁止 mixed 查询在任一侧无证据时选 final；FINAL_PROMPT 新增规则 7 要求历史里的事实必须先查证据，历史段渲染加上「不能作为事实依据」标注。A/B 重复采样 5×修法 A vs 5×无修法 A：修法 A 将 c03 的 SQL 回查率从 20%（1/5）提升到 100%（5/5），修法 A 有效。修法 C（运行时硬门禁）仍为未勾项，作为修法 A 不奏效时的兜底。读数出处复核（2026-11-21）：上面「6 条双侧样本两侧取证全中」测于 `2e912379f`，早于修法 A，不能当修法 A 的依据；A/B 两组记录的提交号同为 `d43b314`，区分不了两组提示词，而被验证的三条硬规则又曾在 `978a63f` 里被删掉、本分支已恢复并复采到 5/5，经过见 `docs/ROADMAP.md` 的「修法 A 的读数出处与一次提示词回退」。评估运行会设 `RAG_DISABLE_AGENT_TRACE=1`，不把评估样本写进演示轨迹。\n\n**v7.3 指代消解实跑**（2026-11-20，29 条 = 25 可回答 + 4 应拒答，只跑确…",
+        "- 所有查询最终仍用**原问题**做 reranker 精排，避免改写文本把答案带偏。\n- 改写失败（JSON 非法、模型不可用、没有可用变体）自动回退原问题，`meta.query_count` 为 1；错误信息最多 200 字符且不包含问题正文。\n- 改写温度固定 0、`num_predict=512`，每个变体 ≤300 字符，HyDE ≤400 字符。\n\nAPI 示例："
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | supplier；首行：芒果 | 海南果园",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "查询改写则是“多找几条路，最后仍按原问题选”：",
+          "page": null,
+          "table": null,
+          "score": 1.435546875
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "。修法 A（提示词硬规则）已做：STEP_PROMPT 规则 1 限定 sufficient 只看「已收集的证据」（不含历史），新增规则 10 禁止 mixed 查询在任一侧无证据时选 final；FINAL_PROMPT 新增规则 7 要…",
+          "page": null,
+          "table": null,
+          "score": 0.64306640625
+        },
+        {
+          "index": 4,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "- 所有查询最终仍用**原问题**做 reranker 精排，避免改写文本把答案带偏。 - 改写失败（JSON 非法、模型不可用、没有可用变体）自动回退原问题，`meta.query_count` 为 1；错误信息最多 200 字符且不包含…",
+          "page": null,
+          "table": null,
+          "score": 0.6298828125
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "docs/beginner-guide.md",
+        "README.md",
+        "README.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 2,
+      "context_chars": 1599,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 3,
+      "tool_steps": 6,
+      "tool_names": [
+        "kb_search",
+        "sql_query"
+      ],
+      "gate_intercepts": 1,
+      "trace_id": "28ce38457917",
+      "history_turns": 0,
+      "retrieval_ms": 904.0,
+      "generation_ms": 42155.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "xm04",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "核桃是哪家供的？护栏改写过的 SQL 会不会留下记录？",
+      "reference": "核桃由西北山货供货；护栏改写后的 SQL 与实际行数都会写进轨迹。",
+      "evidence": [
+        "西北山货"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "answer": "核桃由西北山货供应 [1]。护栏改写后的 SQL 会留下记录，具体会写入轨迹中 [2]。",
+      "contexts": [
+        "name | supplier\n核桃 | 西北山货",
+        "只用文档知识库的用法本来就不需要这份配置，忽略这条提示即可（服务照常起、`/health` 仍可探活，不会因此启动失败）；如果显式指定的配置路径不存在、或配置存在但写坏了，则记 ERROR 并打出路径。\n\n`sql_query` 执行前先过只读护栏（`private_rag/agent/sql_guard.py`）：只允许单条 `SELECT`/`WITH`，出现写操作或元数据关键字直接拒绝，表必须在白名单内（`WITH` 定义的临时视图名不算表），并强制一个不超过 `AGENT_SQL_ROWS` 的 `LIMIT`；护栏改写后的 SQL 与实际行数都会写进轨迹。**护栏是纵深防御的一层，不是沙箱**：这个 DSN 仍然应该使用只读数据库账号，`allow_runtime_query` 默认关闭也是这个原因。\n\n意图分成 `knowledge` / `database` / `mixed` / `none` 四类。`none` 表示与知识库无关，直接按既有约定返回拒答文本，不做任何检索。\n\n路由器只看得到工具的 `description`，所以库里存着什么必须写进描述才可能判准意图：装配 `sql_query` 时会对白名单表做一次**有界采样**（列名 + 每个文本列少量样例值，总长受 `RAG_AGENT_CATALOG_CHARS` 限制，`RAG_AGENT_CATALOG_SAMPLES=0` 则只列列名不取样例），采样出的词同时作为关键词回退的补充线索。判意图的标准是「回答所需的事实住在哪一侧」，不是问法像不像技术查询：问一条业务记录自身的描述、备注、状态、时间，即使一个数字词都没有也算 `database`；只要有一侧被漏掉就选 `mixed`。代价是**样例值会进入 prompt**：业务数据敏感的库请把 `RAG_AGENT_CATALOG_SAMPLES` 设为 0，只让路由器看列名。\n\n证据够不够用由步进决策自己声明（`sufficient` / `missing`），不额外加一次判断调用：判不足时不进生成，直接返回拒答哨兵并写明缺少的信息，`stop_reason` 为 `insufficient_evidence`。生成侧同样写死「资料里没提到不等于不存在」，禁止用通用常识补全有据无据都行的事实；确实有缺口时回答第一行必须是拒答哨兵，好让「没查到」不被读成「不存在」。\n\n`none` 不再是一张免检通行证：路由器判 `none` 只说明它「猜两侧都查不到」，而拒答的正当理由只有「查过了，证据里没有」。所以判成 `none` 时不再直接拒答，而是先用原问题做一次知识库验证检索——查到东西就照常作答，并把意图按实际作答依据报成 `knowledge`；查不到才返回拒答哨兵，`stop_reason` 记 `no_evidence`。代…",
+        "# MCP 工具面加回 `sql_query`，但要过三重门\n\n取代 [ADR 0005](0005-mcp-tools-read-only-no-sql.md) 里「不暴露运行时 SQL」这一条：MCP 工具面从两个\n工具变成三个——`kb_search`、`ask`、`sql_query`（业务库只读查询）。入库/写库仍然不暴露。\n\n`sql_query` 包的是 agentic 那颗运行时查询工具，装配也共用 `private_rag/agent/runtime.py` 的\n`build_tool_registry`：授权判定、表白名单、有界采样、缺配置降级这几套语义只有一处实现，两个入口\n（`/chat/agent` 与 MCP）不会各写一套然后漂移。护栏照旧——`sql_guard` 的单条 `SELECT`、表白名单、\n强制 `LIMIT`，返回的是护栏改写后真正执行的那条 SQL。\n\nADR 0005 的顾虑没有被推翻，只是加了一道门来兜它：外部客户端读业务库这件事，不该由「装了这份代码」\n就默认成立，而要由人在启动命令行上显式开。三重门，缺一门 `sql_query` 就不出现在 `tools/list`：\n\n1. `scripts/serve_mcp.py --allow-sql`：默认关。谁来启动进程，谁决定这次会话能不能读业务库。\n2. `sources.yaml` 里对应 sql 源带 `allow_runtime_query: true`：与 agentic 完全同一个授权位。\n3. `sql_guard` 的只读护栏：单条 `SELECT`、表白名单、强制行数上限。",
+        "`sql_query` 要过三重门，缺一门就不出现在 `tools/list`，理由见\n[docs/adr/0006](docs/adr/0006-mcp-sql-query-behind-three-gates.md)（它取代 0005 的「不暴露 SQL」一条）：\n\n1. 启动命令显式带 `--allow-sql`——默认关，由启动这个进程的人决定这次能不能读业务库；\n2. `sources.yaml` 里对应 sql 源带 `allow_runtime_query: true`——与 `/chat/agent` 同一个授权位；\n3. `sql_guard` 的只读护栏照旧——单条 `SELECT`、表白名单、强制行数上限，返回的是护栏改写后执行的那条 SQL。\n\n装配也共用 `private_rag/agent/runtime.py` 的 `build_tool_registry`，两个入口的授权语义不会各写一套再漂移。\n开了 `--allow-sql` 但配置没授权、或业务库连不上，服务照样起、只暴露两个知识库工具，并在 stderr 说清原因\n（不静默降级）。不带 `--allow-sql` 时外部客户端读到的仍是「已入库的内容」：`source_type: sql` 能选到的\n只是入库时生成的行级文档，不是当场查业务库。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | supplier；首行：核桃 | 西北山货",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "只用文档知识库的用法本来就不需要这份配置，忽略这条提示即可（服务照常起、`/health` 仍可探活，不会因此启动失败）；如果显式指定的配置路径不存在、或配置存在但写坏了，则记 ERROR 并打出路径。 `sql_query` 执行前先过只…",
+          "page": null,
+          "table": null,
+          "score": 1.501953125
+        },
+        {
+          "index": 3,
+          "title": "0006-mcp-sql-query-behind-three-gates.md",
+          "source_type": "file",
+          "source_uri": "docs/adr/0006-mcp-sql-query-behind-three-gates.md",
+          "snippet": "# MCP 工具面加回 `sql_query`，但要过三重门 取代 [ADR 0005](0005-mcp-tools-read-only-no-sql.md) 里「不暴露运行时 SQL」这一条：MCP 工具面从两个 工具变成三个——`kb…",
+          "page": null,
+          "table": null,
+          "score": 1.2431640625
+        },
+        {
+          "index": 4,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "`sql_query` 要过三重门，缺一门就不出现在 `tools/list`，理由见 [docs/adr/0006](docs/adr/0006-mcp-sql-query-behind-three-gates.md)（它取代 0005 …",
+          "page": null,
+          "table": null,
+          "score": 0.2978515625
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "README.md",
+        "docs/adr/0006-mcp-sql-query-behind-three-gates.md",
+        "README.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 2,
+      "context_chars": 2719,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 3,
+      "tool_steps": 6,
+      "tool_names": [
+        "kb_search",
+        "sql_query"
+      ],
+      "gate_intercepts": 1,
+      "trace_id": "4a1bac0fd5a7",
+      "history_turns": 0,
+      "retrieval_ms": 1113.0,
+      "generation_ms": 43923.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "xm05",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "桂圆干的供应商是哪家？查询改写没成功时会怎么办？",
+      "reference": "桂圆干由华南干货供货；改写失败就退回原问题继续检索。",
+      "evidence": [
+        "华南干货"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "answer": "桂圆干的供应商是华南干货[1]；查询改写没成功时会自动回退到原问题，meta.query_count 为 1，且错误信息最多 200 字符、不包含问题正文[2]。",
+      "contexts": [
+        "name | supplier\n桂圆干 | 华南干货",
+        "- 所有查询最终仍用**原问题**做 reranker 精排，避免改写文本把答案带偏。\n- 改写失败（JSON 非法、模型不可用、没有可用变体）自动回退原问题，`meta.query_count` 为 1；错误信息最多 200 字符且不包含问题正文。\n- 改写温度固定 0、`num_predict=512`，每个变体 ≤300 字符，HyDE ≤400 字符。\n\nAPI 示例：",
+        "- **修法 C（运行时硬门禁）**：合入 PR #19（`worktree-fix-c-runtime-gate` 分支）。\n  - `config.py` 新增 `AGENT_MIXED_GATE = not _env_flag(\"RAG_DISABLE_AGENT_MIXED_GATE\")`\n  - `runtime.py` 新增 `_has_evidence_for(blocks, tool_name)` 辅助方法 + `run()`/`run_stream()` 中的门控逻辑\n  - mixed 意图下 `decision.action == \"final\"` 时检查两侧证据，任一侧零证据则拒绝 final、设置 pending 强制下一次循环\n  - 6 个修法 C 单测通过（`TestMixedGate` 类：拒绝/允许/禁用/非 mixed/流式）\n  - 三层防御体系完成：修法 B（可观测）→ 修法 A（软约束）→ 修法 C（硬约束）\n- **修法 A 的读数出处与一次提示词回退**（复核于 2026-11-21，本分支只改了 `private_rag/agent/prompts.py` 一个文件）：\n  - **规则被回退过**：上一条那三条硬规则在 `978a63f`（标题是「A/B 重复采样验证修法 A 效果」）里被删掉了——该提交\n        往仓库加了 20 个 `eval/reports/c03_[ab]_run*.{json,md}` 文件，同时把 `prompts.py` 改回 `d43b314` 父提交的\n        逐字节相同内容，即 STEP 规则 1 的「对话历史不算事实依据」、整条规则 10、FINAL 规则 7、历史段那句\n        「不能作为事实依据」标注。该状态下 `tests/test_agent_planner.py::TestCoreferenceResolution` 四条单测失败、\n        全量 353 通过（本表 v7.4 那行写的「357 测试通过（+4 修法 A 单测）」当时不成立）。已用\n        `git checkout d43b314 -- private_rag/agent/prompts.py` 恢复，恢复后全量 357 通过。\n  - **独立复现**：误删状态复采 c03 五次得 1/5（`tool_calls` 全为 1），恢复后复采五次得 5/5（`tool_calls` 全为 2），\n        与已提交的 A/B 两组一致，修法 A 的方向与幅度复现了。但每边只有 5 次，且下面第三条说明无规则时测出过\n        满分，所以这条读数只能读成「缺口有无受这三条规则影响很大」，不能读成稳定速率。\n  - **出处记不清**：A/B 十个…",
+        "## v5 详细验收（本分支）\n\n- [x] 父子块切分：父块 2000/0，父块内子块 700/100；向量与 BM25 只索引子块\n- [x] 子块 payload / BM25 documents 携带父块 `id/index/count/text`，父块 ID 确定性生成\n- [x] 命中后按父块去重扩展，`RAG_CONTEXT_MAX_CHARS` 默认 6000；超预算回退子块并保留命中片段\n- [x] 旧库没有 `parent` 字段时自动回退子块，无需迁移\n- [x] 查询改写 `off` / `multi` / `hyde`：多查询最多 2 个变体、HyDE ≤400 字符；失败回退原问题且不泄露问题正文\n- [x] 多查询各自 dense + BM25 后按子块做跨查询 RRF，rerank 始终使用原问题\n- [x] API / SSE / 演示页可开关父块与改写，并展示 `used_parent / query_rewrite / query_count / context_chars`\n- [x] 生成缓存 key 含配置名、上下文哈希与模型，避免跨配置/跨父块复用错误答案\n- [x] 新增 v5 18 条口语化/复杂问题集（15 可答 + 3 拒答），证据逐字校验；v4 40 条回归\n- [x] 四组配置前后对比；Ragas 子集 12 条并标注样本数；失败案例与限制写入报告\n- [x] 父子块、预算、跨查询融合、改写回退、API 元数据与旧数据兼容的单测覆盖\n- [x] README、beginner-guide、eval/README 说明参数、数据流、命令与局限"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | supplier；首行：桂圆干 | 华南干货",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "- 所有查询最终仍用**原问题**做 reranker 精排，避免改写文本把答案带偏。 - 改写失败（JSON 非法、模型不可用、没有可用变体）自动回退原问题，`meta.query_count` 为 1；错误信息最多 200 字符且不包含…",
+          "page": null,
+          "table": null,
+          "score": 1.66796875
+        },
+        {
+          "index": 3,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "只要召回不变，改完提示词重跑会直接命中缓存里的旧答案，A/B 会得出「改了没效果」的假结论。提示词类 A/B 一律带 `--no-cache`，并把两组各自的提交号与提示词摘要写进 `run_note`，`git_commit` 另加一条 …",
+          "page": null,
+          "table": null,
+          "score": -0.2314453125
+        },
+        {
+          "index": 4,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "- [x] 父子块切分：父块 2000/0，父块内子块 700/100；向量与 BM25 只索引子块 - [x] 子块 payload / BM25 documents 携带父块 `id/index/count/text`，父块 ID 确定…",
+          "page": null,
+          "table": null,
+          "score": -0.7578125
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "README.md",
+        "docs/ROADMAP.md",
+        "docs/ROADMAP.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 2280,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "tool_names": [
+        "kb_search",
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "b118a23b370b",
+      "history_turns": 0,
+      "retrieval_ms": 1095.0,
+      "generation_ms": 29658.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 0.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "xm06",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "鳕鱼的供应商是哪家？agentic 的轨迹里都记了些什么？",
+      "reference": "鳕鱼由渤海渔港供货；轨迹记录意图、每步的工具与参数、观察、返回行数与耗时。",
+      "evidence": [
+        "渤海渔港"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "answer": "鳕鱼的供应商是渤海渔港 [1]。关于 agentic 轨迹记录的内容，根据文档，每一次 agentic 问答会追加一行 JSON 到 `storage/traces/agent.jsonl` [2]；此外，响应中的 `meta` 字段包含 `intent`、`stop_reason`、`tool_calls`、`steps`、`evidence_blocks`、`context_chars`、`history_turns` 和 `trace_id` 等信息，而 `trace` 字段则包含完整的步骤 [2]。",
+      "contexts": [
+        "name | supplier\n鳕鱼 | 渤海渔港",
+        "响应在 `/chat` 的 `session_id / answer / citations / meta / request_id` 之外多一个 `trace`（完整步骤）；`meta` 里给出 `intent / stop_reason / tool_calls / steps / evidence_blocks / context_chars / history_turns / trace_id`。`citations` 与回答里的 `[n]` 仍是一一对应，SQL 结果的引用复用 `table` 字段。`stop_reason` 取值：`final`（模型认为证据够了）、`max_steps`（步数用尽）、`context_budget`（证据字符预算用完）、`no_retrieval`（判定与两侧都无关且没做验证检索，只在知识库工具不可用或显式关掉探测时出现）、`no_evidence`（检索过但没有可用证据，含路由判 `none` 后验证检索仍空手）、`insufficient_evidence`（判定证据不足，直接拒答）、`generation_failed`（生成失败）。\n\n降级行为（任何一层挂掉都不会让整个请求 500）：\n\n- 决策模型不可用 → 路由退回关键词判断，循环按启发式继续。\n- 工具执行失败（含被护栏拒绝） → 失败原因作为观察回灌给模型，它可以换个 SQL 或改用知识库。\n- 一条证据都没收集到 → 返回既有拒答文本，不编造答案。\n- agentic 运行时装配失败（例如 `sources.yaml` 写坏了、或 SQL 源连不上）→ 只有 `/api/v1/chat/agent` 返回 503 `agent_unavailable`，`/chat` 与 `/chat/stream` 不受影响。连不上库时日志会先记一条 ERROR，写明是哪个源、缺哪个 SQLite 文件；演示库 `data/sql/demo.db` 被 gitignore 掉了，新克隆与新 worktree 要先跑 `python3 scripts/init_demo_db.py`——否则 `data/sql/` 目录已存在时 sqlite 会静默建出 0 字节空库，`sql_query` 看着注册成功但表一张都没有，运行时只报 `no such table`，日志同样会在连库前点破。\n- `sources.yaml` 不存在（新克隆默认就没有）→ agentic 只注册 `kb_search`，启动日志给出缺失路径与修复命令（默认路径缺失记 WARNING，显式指定的路径不存在记 ERROR），服务不会因此起不来；查库类问题会答不出来。\n\n每一次 agentic 问答追加一行 JSON 到 `storage/traces/agent.jsonl`（已 g…",
+        "### 端点\n\n| 方法 | 路径 | 说明 |\n|---|---|---|\n| GET | `/health` | 存活检查，200 |\n| GET | `/ready` | 知识库/BM25/reranker 就绪状态，不就绪返回 503 |\n| POST | `/api/v1/sessions` | 创建会话，201；可选 `{\"title\": \"...\"}` |\n| GET | `/api/v1/sessions/{id}` | 会话详情与历史消息 |\n| DELETE | `/api/v1/sessions/{id}` | 删除会话，204 |\n| POST | `/api/v1/chat` | 同步问答，JSON |\n| POST | `/api/v1/chat/stream` | SSE 流式问答 |\n| POST | `/api/v1/chat/agent` | agentic 问答：意图路由 + 工具调用，返回回答与决策轨迹 |\n| GET | `/api/v1/traces` | 最近的 agentic 决策轨迹索引 |\n| GET | `/api/v1/traces/{trace_id}` | 回放一条决策轨迹（结构化 + 可读文本） |",
+        "- [x] Agentic SSE 流式端点：`POST /api/v1/chat/agent/stream`，事件顺序 `session → route → step → citations → token → done`\n- [x] `AgentRuntime.run_stream()` 返回事件流，与 `run()` 逻辑一致\n- [x] `stream_final_answer()` 使用 `ChatOllama.stream()` 逐 token yield\n- [x] demo.html 新增 Agentic 模式按钮，Agentic 示例芯片自动切换模式\n- [x] 修复流式端点漏写会话历史：`/chat/agent/stream` 原先只读历史不写回，同一 session 的 Agentic\n      多轮追问看不到上一轮；现在 `done` 后按非流式 `/chat/agent` 的口径写入，引用从 `citations` 事件还原成\n      `Citation`（`done` 事件的 `citations` 可能为空），异常那一轮不写\n- [x] demo.html Agentic 模式展示 max_steps / allow_sql 参数，意图/工具调用/决策步数/证据块等 meta\n- [x] SSE 端点测试：`/chat/agent/stream` 覆盖完整事件流、会话写回、下一轮历史透传、异常轮不写历史共 4 条\n      （先前只写了 `FakeRuntime.run_stream()`，没有任何测试真的请求这个端点，这条勾当时是虚的）\n- [x] 列表/表格感知切分：`_split_by_markdown_structure()` 将列表/表格/代码块视为原子单元\n- [x] 切分测试：`test_list_preserved_as_unit`、`test_table_preserved_as_unit`、`test_heading_forces_boundary`\n- [x] v7 agentic 评估集 `eval/v7_agent_qa.jsonl` 26 条（knowledge 7 / database 6 / mixed 5 / multi_step 4 / refusal 4；v7.3 起 29 条，新增 `coreference` 3 条带对话历史的指代样本），\n      evidence 逐字校验；按“需要哪个工具”分类，而不是按文档章节分类\n- [x] 评估框架接入 agentic 配置组：`ConfigSpec.is_agent` + `CONFIGS[\"agent\"]` + `collect_agent_results`，\n      agentic 与固定链路共用同一套确定性指标；`Samp…"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | supplier；首行：鳕鱼 | 渤海渔港",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "每一次 agentic 问答追加一行 JSON 到 `storage/traces/agent.jsonl`（已 gitignore），记录意图、每步的工具与参数、观察、返回行数与耗时，以及最终引用。`trace_id` 同时出现在 `me…",
+          "page": null,
+          "table": null,
+          "score": 2.36328125
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### 端点 | 方法 | 路径 | 说明 | |---|---|---| | GET | `/health` | 存活检查，200 | | GET | `/ready` | 知识库/BM25/reranker 就绪状态，不就绪返回 503…",
+          "page": null,
+          "table": null,
+          "score": 0.390869140625
+        },
+        {
+          "index": 4,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "agentic 与固定链路共用同一套确定性指标；`SampleResult` 增加 `intent/stop_reason/tool_calls/tool_steps/trace_id` - [x] 新增可选字段 `expected_sou…",
+          "page": null,
+          "table": null,
+          "score": -0.61328125
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "README.md",
+        "README.md",
+        "docs/ROADMAP.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 2,
+      "context_chars": 3111,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 3,
+      "tool_steps": 6,
+      "tool_names": [
+        "kb_search",
+        "sql_query"
+      ],
+      "gate_intercepts": 1,
+      "trace_id": "ccdc8fd07062",
+      "history_turns": 0,
+      "retrieval_ms": 1040.0,
+      "generation_ms": 41781.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "xm07",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "酸奶是哪家供的？查库结果那几条的引用是复用哪个字段来的？",
+      "reference": "酸奶由北方牧场供货；SQL 结果的引用复用 table 字段来标来源。",
+      "evidence": [
+        "北方牧场"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "answer": "酸奶由北方牧场供应 [4]；SQL 查询结果的引用复用 `table` 字段 [1]。",
+      "contexts": [
+        "响应在 `/chat` 的 `session_id / answer / citations / meta / request_id` 之外多一个 `trace`（完整步骤）；`meta` 里给出 `intent / stop_reason / tool_calls / steps / evidence_blocks / context_chars / history_turns / trace_id`。`citations` 与回答里的 `[n]` 仍是一一对应，SQL 结果的引用复用 `table` 字段。`stop_reason` 取值：`final`（模型认为证据够了）、`max_steps`（步数用尽）、`context_budget`（证据字符预算用完）、`no_retrieval`（判定与两侧都无关且没做验证检索，只在知识库工具不可用或显式关掉探测时出现）、`no_evidence`（检索过但没有可用证据，含路由判 `none` 后验证检索仍空手）、`insufficient_evidence`（判定证据不足，直接拒答）、`generation_failed`（生成失败）。\n\n降级行为（任何一层挂掉都不会让整个请求 500）：\n\n- 决策模型不可用 → 路由退回关键词判断，循环按启发式继续。\n- 工具执行失败（含被护栏拒绝） → 失败原因作为观察回灌给模型，它可以换个 SQL 或改用知识库。\n- 一条证据都没收集到 → 返回既有拒答文本，不编造答案。\n- agentic 运行时装配失败（例如 `sources.yaml` 写坏了、或 SQL 源连不上）→ 只有 `/api/v1/chat/agent` 返回 503 `agent_unavailable`，`/chat` 与 `/chat/stream` 不受影响。连不上库时日志会先记一条 ERROR，写明是哪个源、缺哪个 SQLite 文件；演示库 `data/sql/demo.db` 被 gitignore 掉了，新克隆与新 worktree 要先跑 `python3 scripts/init_demo_db.py`——否则 `data/sql/` 目录已存在时 sqlite 会静默建出 0 字节空库，`sql_query` 看着注册成功但表一张都没有，运行时只报 `no such table`，日志同样会在连库前点破。\n- `sources.yaml` 不存在（新克隆默认就没有）→ agentic 只注册 `kb_search`，启动日志给出缺失路径与修复命令（默认路径缺失记 WARNING，显式指定的路径不存在记 ERROR），服务不会因此起不来；查库类问题会答不出来。\n\n每一次 agentic 问答追加一行 JSON 到 `storage/traces/agent.jsonl`（已 g…",
+        "### v8.7 评估集扩充与多集合并（把 n 从 29 做到 69）\n\n前面几轮读数反复带着同一句话：「29 条样本只支撑方向，不支撑百分比——±1 条就是 ±4 个百分点」。\n这一项不动链路，只做两件事：\n\n- **新评估集 `eval/v8_agentic_expanded.jsonl`（40 条 = 35 可回答 + 5 应拒答）**，补的正是现有集最薄的几类\n  （`knowledge 9 / database 8 / mixed 7 / multi_step 6 / coreference 5 / refusal 5`，其中 5 条指代样本全部带\n  `history`）。id 一律 `x` 前缀，与 v7 集的 `k/d/m/s/c/r` 不撞车。\n- **`--dataset` 可以逗号分隔多份**，合并成一次跑：v7 的 29 条 + 新集的 40 条 = 69 条，单条样本对均值的影响\n  从 ±3.4pt 降到 ±1.4pt（`evidence_hit@3` 这类指标的分母是可答样本，69 条跑里是 60，所以是 ±1.7pt）。\n  每份文件内部的校验口径完全不变，合并后再检查 id 与问题跨文件唯一；只有一份时\n  报告里的 `dataset_sha256` 与改动前逐字节相同，历史报告的指纹不受影响。\n\nSQL 侧用一份**评估专用** SQLite（`scripts/init_eval_db.py` → `data/sql/demo_eval.db`，演示库的超集：前 4 行逐字段\n相同，另加 8 行）；`data/sql/demo.db` 与 `scripts/init_demo_db.py` 一字未改，v7 那几轮仍可原样复现。引用标签沿用\n`demo.products`——一份 sources 配置里两个 sql 源会互相覆盖，只能有一个 `sql_query` 工具，取舍见\n`docs/adr/0008`。",
+        "# 评估专用 SQL 库做成演示库的超集并沿用 `demo.products` 标签\n\nv8.7 要把 agentic 评估集从 29 条做到 40 条，其中 24 条的得分侧依赖运行时 SQL。演示库只有 4 行（四种水果），\n给每条样本一段互不相同的证据就必须加行；直接往演示库加行会让 v7 那几条依赖「这四种水果」的参考答案失效，\n已经落盘的几轮读数也对不上。我们决定新建一份评估专用 SQLite（`scripts/init_eval_db.py` → `data/sql/demo_eval.db`），\n做成演示库的**超集**：前 4 行与 `scripts/init_demo_db.py` 逐字段相等（单测钉住这条），再加 8 行新货与\n`storage / supplier / stock` 三列；`scripts/init_demo_db.py` 与 `data/sql/demo.db` 一字不改。\n\n引用标签沿用 `demo.products`，不给新库单独起标签。原因是一条实现上的硬约束：`ToolRegistry.register` 以工具名为\n字典键（`private_rag/agent/tools.py:283`），而 `SqlQueryTool.name` 是类常量——同一份 sources 配置里挂两个 sql 源会\n互相覆盖，实际只有一个 `sql_query` 工具。如果新集用 `demo_eval.products`，v7 + 新集合并一次跑时 agentic 组只能查到\n一侧的库，另一半样本的 `source_hit` 恒为 0，而合并跑正是这一项的主要用途。",
+        "name | supplier\n酸奶 | 北方牧场"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "响应在 `/chat` 的 `session_id / answer / citations / meta / request_id` 之外多一个 `trace`（完整步骤）；`meta` 里给出 `intent / stop_reason…",
+          "page": null,
+          "table": null,
+          "score": 0.63720703125
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "SQL 侧用一份**评估专用** SQLite（`scripts/init_eval_db.py` → `data/sql/demo_eval.db`，演示库的超集：前 4 行逐字段 相同，另加 8 行）；`data/sql/demo.db…",
+          "page": null,
+          "table": null,
+          "score": -1.00390625
+        },
+        {
+          "index": 3,
+          "title": "0008-eval-db-superset-shared-label.md",
+          "source_type": "file",
+          "source_uri": "docs/adr/0008-eval-db-superset-shared-label.md",
+          "snippet": "引用标签沿用 `demo.products`，不给新库单独起标签。原因是一条实现上的硬约束：`ToolRegistry.register` 以工具名为 字典键（`private_rag/agent/tools.py:283`），而 `Sql…",
+          "page": null,
+          "table": null,
+          "score": -1.369140625
+        },
+        {
+          "index": 4,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | supplier；首行：酸奶 | 北方牧场",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "README.md",
+        "README.md",
+        "docs/adr/0008-eval-db-superset-shared-label.md",
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 2975,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "tool_names": [
+        "kb_search",
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "8ba051c830f5",
+      "history_turns": 0,
+      "retrieval_ms": 887.0,
+      "generation_ms": 55498.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 0.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "m01",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "香蕉能不能放冰箱？另外这个项目的引用列表是从哪儿来的？",
+      "reference": "香蕉不适合放冰箱，低温会让表皮变黑、口感变差，建议常温阴凉处保存；引用列表不是模型编的，而是卡片入库时自带的 source_type / title / source_uri / page / table 等身份信息整理而成。",
+      "evidence": [
+        "香蕉不适合放冰箱，低温会让表皮变黑、口感变差"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "answer": "香蕉不能放冰箱，低温会导致其表皮变黑、口感变差，建议存放在常温阴凉处 [1]。关于引用列表的来源，每张卡片在入库时就已携带 source_type、title、source_uri、page、table 等身份信息，系统在返回答案时直接将这些元数据整理成引用列表，模型仅负责在答案中标注对应的编号 [2]。",
+      "contexts": [
+        "name | storage | description\n香蕉 | 常温阴凉 | 香蕉不适合放冰箱，低温会让表皮变黑、口感变差；建议常温阴凉处保存。",
+        "值得记住的一点：**引用不是模型编的**。每张卡片入库时就带着 `source_type / title / source_uri / page / table` 这些身份信息；返回答案时，系统直接把这些元数据整理成引用列表，模型只负责在答案里标 `[1]`、`[2]`。",
+        "三个工具都同时给两种结果：`content[0].text` 是给人和模型读的文本（证据带 `[n]` 与来源行、末尾有引用列表），\n`structuredContent` 是结构化载荷（`evidence` / `citations` / `retrieved` / `used_rerank` / `context_chars`，\n`ask` 另有 `answer` / `no_evidence` / `meta.elapsed_ms`，`sql_query` 另有 `sql` / `row_count` / `columns` /\n`truncated` / `warnings`）。引用编号与 `[n]` 的口径与 CLI、HTTP 完全一致：只有带引用的块参与编号，\n`citations` 里的 `page` / `table` 能回溯到页或行。参数越界或写了不认识的参数会以 `isError` 返回一句中文原因\n（不是协议错误），客户端能直接把原因读给用户。",
+        "`sources.yaml` 支持三类来源："
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：香蕉 | 常温阴凉 | 香蕉不适合放冰箱，低温会让表皮变黑、口感变差；建议常温阴凉处保存。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "值得记住的一点：**引用不是模型编的**。每张卡片入库时就带着 `source_type / title / source_uri / page / table` 这些身份信息；返回答案时，系统直接把这些元数据整理成引用列表，模型只负责在答…",
+          "page": null,
+          "table": null,
+          "score": -1.1572265625
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "三个工具都同时给两种结果：`content[0].text` 是给人和模型读的文本（证据带 `[n]` 与来源行、末尾有引用列表）， `structuredContent` 是结构化载荷（`evidence` / `citations` /…",
+          "page": null,
+          "table": null,
+          "score": -2.375
+        },
+        {
+          "index": 4,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "`sources.yaml` 支持三类来源：",
+          "page": null,
+          "table": null,
+          "score": -2.380859375
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "docs/beginner-guide.md",
+        "README.md",
+        "README.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 2,
+      "context_chars": 831,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 3,
+      "tool_steps": 6,
+      "tool_names": [
+        "kb_search",
+        "sql_query"
+      ],
+      "gate_intercepts": 1,
+      "trace_id": "daa55f0118e5",
+      "history_turns": 0,
+      "retrieval_ms": 1005.0,
+      "generation_ms": 35783.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "m02",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "橙子多少钱？这个项目的 embedding 和向量存储分别由什么负责？",
+      "reference": "橙子单价 12.5 元；Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储。",
+      "evidence": [
+        "橙子富含维生素 C，适合日常补充维 C"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "answer": "橙子价格为 12.5 元 [1]。在本项目中，embedding 由 Ollama 负责，向量存储由 Qdrant（本地磁盘模式）负责 [2]。",
+      "contexts": [
+        "name | price\n橙子 | 12.5",
+        "# private-rag\n\n完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Parent-Document 父子块上下文**与**查询改写（多查询 / HyDE）**：子块负责召回，父块负责给模型完整上下文。Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储。v7 起额外提供 **agentic 问答**：模型按问题意图在知识库检索与只读 SQL 之间自动选择，边看结果边决定要不要继续查，并把每条决策写成可回放的 trace。",
+        "## 增量与更新语义\n\n- **幂等**：`doc_id + content_hash` 未变化时跳过，不重复调用 embedding。\n- **稳定 ID**：`uuid5(doc_id + content_hash + chunk_index)`，重复写入是覆盖而不是新增。\n- **更新**：内容变化时先删除该 `doc_id` 的旧向量，再写入新版本；PDF 按页、SQL 按行、网页按 URL 独立更新。\n- **prune**：`--prune` 删除本次没有再次出现的文件/页面/行。若某个 source 在加载阶段有错误（如网页暂时失败），跳过该 source 的 prune，避免误删。\n- **词法索引**：每次入库结束重建 `storage/lexical/bm25.pkl`；问答时缺失会自动降级为纯向量检索并提示。",
+        "### 5. v5：小块负责找，大段负责读\n\nParent-Document RAG 的核心就一句话：**检索用子块，送模型用父块**。下面把建库和问答各拆成两段。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price；首行：橙子 | 12.5",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "# private-rag 完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Par…",
+          "page": null,
+          "table": null,
+          "score": -0.76904296875
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "## 增量与更新语义 - **幂等**：`doc_id + content_hash` 未变化时跳过，不重复调用 embedding。 - **稳定 ID**：`uuid5(doc_id + content_hash + chunk_ind…",
+          "page": null,
+          "table": null,
+          "score": -4.09375
+        },
+        {
+          "index": 4,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "### 5. v5：小块负责找，大段负责读 Parent-Document RAG 的核心就一句话：**检索用子块，送模型用父块**。下面把建库和问答各拆成两段。",
+          "page": null,
+          "table": null,
+          "score": -4.41796875
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "README.md",
+        "README.md",
+        "docs/beginner-guide.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 947,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "tool_names": [
+        "kb_search",
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "3b8658d39bf9",
+      "history_turns": 0,
+      "retrieval_ms": 1145.0,
+      "generation_ms": 34825.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "m03",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "最便宜的水果是什么、单价多少？精排后最终给大模型几条资料？",
+      "reference": "最便宜的是香蕉，6.5 元；精排后最终只给大模型 3 条（TOP_K_RERANK=3）。",
+      "evidence": [
+        "香蕉不适合放冰箱，低温会让表皮变黑"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "answer": "最便宜的水果是香蕉，单价为 6.5 元 [1]；精排后最终给大模型 3 条资料 [2]。",
+      "contexts": [
+        "name | price\n香蕉 | 6.5",
+        "## 关键变量\n\n| 变量 | 默认值 | 用大白话说 |\n|---|---:|---|\n| `CHUNK_SIZE` | 700 | 子块最多约 700 个字符，用来检索 |\n| `CHUNK_OVERLAP` | 100 | 相邻子块重叠 100 字符，避免一句话被切断 |\n| `PARENT_CHUNK_SIZE` | 2000 | 父块最多约 2000 字符，命中后整段送模型 |\n| `CONTEXT_MAX_CHARS` | 6000 | 所有父块加起来的字符预算，超了回退子块 |\n| `MAX_VARIANTS` | 2 | 多查询最多生成 2 个改写查询 |\n| `MAX_VARIANT_CHARS` | 300 | 每个改写查询最长 300 字符 |\n| `MAX_HYDE_CHARS` | 400 | HyDE 假想文档最长 400 字符 |\n| `DENSE_TOP_K` | 20 | 语义检索先捞 20 条候选 |\n| `LEXICAL_TOP_K` | 20 | 关键词检索也捞 20 条 |\n| `FUSION_TOP_K` | 10 | 两路合并后留 10 条给下一关 |\n| `TOP_K_RERANK` | 3 | 精读后最终只给大模型 3 条 |\n| `RRF_K` | 60 | 名次折算积分的平滑系数，越大名次差距越平缓 |\n| `SESSION_TTL_SECONDS` | 1800 | 会话闲置 30 分钟就自动清理 |\n| `MAX_HISTORY_TURNS` | 6 | 每次最多带最近 6 轮对话给模型 |\n| `MAX_HISTORY_CHARS` | 3000 | 历史总长度预算，超了就从旧到新裁掉 |\n| `AGENT_MAX_STEPS` | 4 | 一次提问最多让模型调 4 次工具，防止停不下来 |\n| `AGENT_CONTEXT_CHARS` | 7000 | 已收集证据超过 7000 字符就停止取料，直接作答 |\n| `AGENT_TOOL_CHARS` | 3000 | 单个工具返回的证据最多占 3000 字符，按工具数分摊 |\n| `AGENT_SQL_ROWS` | 20 | 运行时 SQL 最多返回 20 行，同时是 `LIMIT` 的上限 |\n| `AGENT_PLANNER_TOKENS` | 2000 | 决策 JSON 的输出预算；推理型模型会先吐思考内容，预算小了正文就空了 |\n| `AGENT_TRACE_PATH` | storage/traces/agent.jsonl | 决策轨迹落盘位置，一次问答追加一行 |",
+        "## 最需要看懂的七处\n\n1. **建库和问答是两条时间线**：建库慢，负责把资料整理好；问答快，只做查找和生成。两者通过 Qdrant 和 BM25 索引交接。\n2. **两份索引各管一种“相关性”**：向量管“意思像不像”，BM25 管“词对不对得上”，RRF 负责把两个排行榜合成一个。\n3. **reranker 是质量闸门**：它把候选从 10 条压到 3 条，大模型看到的资料越干净，越不容易胡编。\n4. **引用来自元数据，不是模型自由发挥**：每张卡片入库时就带着来源、页码、表名，返回时直接组装成引用。\n5. **会话只是“理解指代的记事本”**：历史帮助模型知道“它”指橙子，但提示词明确规定历史不能当事实依据；会话在内存里，服务重启就清空。\n6. **v5 是两级阅读**：子块负责找得准，父块负责读得全；查询改写只是多找几条路，最后仍按原问题精排，失败就退回原问题。\n7. **v7 把“查什么”交给模型，把“能跑多远”留给人**：模型只能在 `kb_search` 与只读 `sql_query` 之间选，步数、证据字符、SQL 行数都是硬上限；每一步决策写进 trace，事后能逐条回放它当时为什么这么选。\n\n当前版本还有两个使用边界：服务默认只监听本机、没有鉴权，不要直接暴露公网；Qdrant 用本地磁盘模式，所以 `serve.py` 固定单进程单 worker，需要横向扩展时要换 Qdrant server 模式并把会话搬到 Redis 之类的外部存储。",
+        "## 一句话总结\n\n这个项目像一位“只回答你资料里内容的私人图书管理员”：先把你的文件、网页、数据库整理成两层卡片——小卡片用来快速查找，大卡片保留完整段落；你提问时，它先用两套目录找出候选小卡片，精读筛出最相关的 3 张，再把它们所属的大卡片整段交给本地大模型，只照着这些资料回答，并告诉你答案来自哪一页、哪个网址或哪条记录。\n\n这就是 RAG（检索增强生成），可以理解成“开卷考试”：模型不许凭记忆答题，必须先翻你的资料。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price；首行：香蕉 | 6.5",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "| 变量 | 默认值 | 用大白话说 | |---|---:|---| | `CHUNK_SIZE` | 700 | 子块最多约 700 个字符，用来检索 | | `CHUNK_OVERLAP` | 100 | 相邻子块重叠 100 字符，…",
+          "page": null,
+          "table": null,
+          "score": 1.9267578125
+        },
+        {
+          "index": 3,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "## 最需要看懂的七处 1. **建库和问答是两条时间线**：建库慢，负责把资料整理好；问答快，只做查找和生成。两者通过 Qdrant 和 BM25 索引交接。 2. **两份索引各管一种“相关性”**：向量管“意思像不像”，BM25 管“…",
+          "page": null,
+          "table": null,
+          "score": 0.454345703125
+        },
+        {
+          "index": 4,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "## 一句话总结 这个项目像一位“只回答你资料里内容的私人图书管理员”：先把你的文件、网页、数据库整理成两层卡片——小卡片用来快速查找，大卡片保留完整段落；你提问时，它先用两套目录找出候选小卡片，精读筛出最相关的 3 张，再把它们所属的大卡…",
+          "page": null,
+          "table": null,
+          "score": 0.1417236328125
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "docs/beginner-guide.md",
+        "docs/beginner-guide.md",
+        "docs/beginner-guide.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 2,
+      "context_chars": 2198,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 3,
+      "tool_steps": 6,
+      "tool_names": [
+        "kb_search",
+        "sql_query"
+      ],
+      "gate_intercepts": 1,
+      "trace_id": "f748dc14f5cd",
+      "history_turns": 0,
+      "retrieval_ms": 1141.0,
+      "generation_ms": 40606.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "m04",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "苹果适合怎么保存？v7 的 agentic 问答支持哪几种意图？",
+      "reference": "苹果适合冷藏保存以延长保鲜时间；v7 的意图路由支持 knowledge / database / mixed / none 四种意图。",
+      "evidence": [
+        "苹果适合冷藏保存，可以延长保鲜时间"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "README.md"
+      ],
+      "answer": "苹果适合冷藏保存，建议存放在 0-4℃ 的环境中以延长保鲜时间，切开后容易氧化，建议尽快食用 [1]。v7 的 agentic 问答支持 knowledge、database、mixed、none 四种意图 [6]。",
+      "contexts": [
+        "name | storage | description\n苹果 | 冷藏 0-4℃ | 苹果适合冷藏保存，可以延长保鲜时间；切开后容易氧化，建议尽快食用。",
+        "# private-rag\n\n完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Parent-Document 父子块上下文**与**查询改写（多查询 / HyDE）**：子块负责召回，父块负责给模型完整上下文。Ollama 负责 embedding 与生成，Qdrant 本地磁盘模式负责向量存储。v7 起额外提供 **agentic 问答**：模型按问题意图在知识库检索与只读 SQL 之间自动选择，边看结果边决定要不要继续查，并把每条决策写成可回放的 trace。",
+        "## v7 Agentic RAG（意图路由 + 工具调用 + 决策轨迹）\n\n前面几版的流程是固定的：任何问题都先召回、精排、再生成。v7 在它上面加一层循环——模型先看问题决定用哪个工具，读完返回结果再决定要不要继续查，最后仍基于统一编号的证据生成带引用回答。",
+        "### 端点\n\n| 方法 | 路径 | 说明 |\n|---|---|---|\n| GET | `/health` | 存活检查，200 |\n| GET | `/ready` | 知识库/BM25/reranker 就绪状态，不就绪返回 503 |\n| POST | `/api/v1/sessions` | 创建会话，201；可选 `{\"title\": \"...\"}` |\n| GET | `/api/v1/sessions/{id}` | 会话详情与历史消息 |\n| DELETE | `/api/v1/sessions/{id}` | 删除会话，204 |\n| POST | `/api/v1/chat` | 同步问答，JSON |\n| POST | `/api/v1/chat/stream` | SSE 流式问答 |\n| POST | `/api/v1/chat/agent` | agentic 问答：意图路由 + 工具调用，返回回答与决策轨迹 |\n| GET | `/api/v1/traces` | 最近的 agentic 决策轨迹索引 |\n| GET | `/api/v1/traces/{trace_id}` | 回放一条决策轨迹（结构化 + 可读文本） |",
+        "| v7.1 | `v7.1` | SSE 流式 Agentic 输出、演示页 Agentic 开关、列表/表格感知切分、v7 评估集与量化对比 | ✅ 本分支完成 | 311 测试通过；SSE 端点可流式输出 agentic 轨迹并写回会话历史；demo.html 支持 Agentic 模式；列表/表格切分测试通过；v7 agentic 评估集 26 条 + `agent`/`full` 对比报告（agentic `answer_rate` 0.909 vs 0.318、`source_hit` 0.591 vs 0.318、单条耗时 71.2s vs 17.0s），Ragas 子集 6 条另见 `eval/reports/v7_agent_ragas_report.md` |\n| v7.2 | `v7.2` | 意图路由与拒答策略：数据可得性驱动路由、证据充分性拒答 | ✅ 本分支完成 | 343 测试通过（同日收紧 `none` 判据后）；`sql_query` 工具描述带上库内数据目录（列名 + 有界样例值，`RAG_AGENT_CATALOG_CHARS` / `RAG_AGENT_CATALOG_SAMPLES` 可关），路由判据改为「回答所需的事实住在哪一侧」；证据充分性由步进决策声明，判不足直接拒答并给 `stop_reason=insufficient_evidence`；v7 评估集 26 条复跑 `refusal_accuracy` 0.250→1.000、`source_hit` 0.591→1.000、`evidence_hit@3` 0.409→0.864、单条耗时 71.2s→51.9s，`knowledge` 类 7 条持平无回归，报告 `eval/reports/v7_2_agent_report.md`；同日在同一条线上收紧 `none` 判据（分支 `v7.2-none-gate`：判 `none` 先做一次验证检索，拒答必须建立在证据上，`RAG_DISABLE_AGENT_NONE_PROBE` 可关），复跑 26 条 `none`/`no_retrieval` 双双归零、`refusal_accuracy` 1.000 持平、`citation_rate` 0.955→1.000，报告 `eval/reports/v7_2_nonegate_report.md`；指代消解见下一行 v7.3 |\n| v7.3 | `v7.3-coreference` | 指代消解：提示词写死「本项目/本系统」的消解规则，评估补上真正带对话历史的多轮样本 | ✅ 本分支完成 | 350 测试通过；`ROUTER_PROMPT`/`STEP_PROMPT`/`FINAL_PROMPT` 三处写死「『这个项目』『本系统』指本系统自身、它的…",
+        "只用文档知识库的用法本来就不需要这份配置，忽略这条提示即可（服务照常起、`/health` 仍可探活，不会因此启动失败）；如果显式指定的配置路径不存在、或配置存在但写坏了，则记 ERROR 并打出路径。\n\n`sql_query` 执行前先过只读护栏（`private_rag/agent/sql_guard.py`）：只允许单条 `SELECT`/`WITH`，出现写操作或元数据关键字直接拒绝，表必须在白名单内（`WITH` 定义的临时视图名不算表），并强制一个不超过 `AGENT_SQL_ROWS` 的 `LIMIT`；护栏改写后的 SQL 与实际行数都会写进轨迹。**护栏是纵深防御的一层，不是沙箱**：这个 DSN 仍然应该使用只读数据库账号，`allow_runtime_query` 默认关闭也是这个原因。\n\n意图分成 `knowledge` / `database` / `mixed` / `none` 四类。`none` 表示与知识库无关，直接按既有约定返回拒答文本，不做任何检索。\n\n路由器只看得到工具的 `description`，所以库里存着什么必须写进描述才可能判准意图：装配 `sql_query` 时会对白名单表做一次**有界采样**（列名 + 每个文本列少量样例值，总长受 `RAG_AGENT_CATALOG_CHARS` 限制，`RAG_AGENT_CATALOG_SAMPLES=0` 则只列列名不取样例），采样出的词同时作为关键词回退的补充线索。判意图的标准是「回答所需的事实住在哪一侧」，不是问法像不像技术查询：问一条业务记录自身的描述、备注、状态、时间，即使一个数字词都没有也算 `database`；只要有一侧被漏掉就选 `mixed`。代价是**样例值会进入 prompt**：业务数据敏感的库请把 `RAG_AGENT_CATALOG_SAMPLES` 设为 0，只让路由器看列名。\n\n证据够不够用由步进决策自己声明（`sufficient` / `missing`），不额外加一次判断调用：判不足时不进生成，直接返回拒答哨兵并写明缺少的信息，`stop_reason` 为 `insufficient_evidence`。生成侧同样写死「资料里没提到不等于不存在」，禁止用通用常识补全有据无据都行的事实；确实有缺口时回答第一行必须是拒答哨兵，好让「没查到」不被读成「不存在」。\n\n`none` 不再是一张免检通行证：路由器判 `none` 只说明它「猜两侧都查不到」，而拒答的正当理由只有「查过了，证据里没有」。所以判成 `none` 时不再直接拒答，而是先用原问题做一次知识库验证检索——查到东西就照常作答，并把意图按实际作答依据报成 `knowledge`；查不到才返回拒答哨兵，`stop_reason` 记 `no_evidence`。代…",
+        "## v7 Agentic RAG（意图路由 + 工具调用 + 决策轨迹）\n\n前面几版的流程是固定的：任何问题都先召回、精排、再生成。v7 在它上面加一层循环——模型先看问题决定用哪个工具，读完返回结果再决定要不要继续查，最后仍基于统一编号的证据生成带引用回答。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：苹果 | 冷藏 0-4℃ | 苹果适合冷藏保存，可以延长保鲜时间；切开后容易氧化，建议尽快食用。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "# private-rag 完全本地离线的中文 RAG：支持**文件 / 网页 / 数据库**多源知识库，使用**向量 + BM25 混合召回、RRF 融合、bge-reranker 精排**，回答带**引用溯源**。v5 增加 **Par…",
+          "page": null,
+          "table": null,
+          "score": 2.48828125
+        },
+        {
+          "index": 3,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "## v7 Agentic RAG（意图路由 + 工具调用 + 决策轨迹） 前面几版的流程是固定的：任何问题都先召回、精排、再生成。v7 在它上面加一层循环——模型先看问题决定用哪个工具，读完返回结果再决定要不要继续查，最后仍基于统一编号的…",
+          "page": null,
+          "table": null,
+          "score": 1.869140625
+        },
+        {
+          "index": 4,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "### 端点 | 方法 | 路径 | 说明 | |---|---|---| | GET | `/health` | 存活检查，200 | | GET | `/ready` | 知识库/BM25/reranker 就绪状态，不就绪返回 503…",
+          "page": null,
+          "table": null,
+          "score": 1.7099609375
+        },
+        {
+          "index": 5,
+          "title": "ROADMAP.md",
+          "source_type": "file",
+          "source_uri": "docs/ROADMAP.md",
+          "snippet": "| v7.2 | `v7.2` | 意图路由与拒答策略：数据可得性驱动路由、证据充分性拒答 | ✅ 本分支完成 | 343 测试通过（同日收紧 `none` 判据后）；`sql_query` 工具描述带上库内数据目录（列名 + 有界样例值，…",
+          "page": null,
+          "table": null,
+          "score": 1.45703125
+        },
+        {
+          "index": 6,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "意图分成 `knowledge` / `database` / `mixed` / `none` 四类。`none` 表示与知识库无关，直接按既有约定返回拒答文本，不做任何检索。 路由器只看得到工具的 `description`，所以库里存…",
+          "page": null,
+          "table": null,
+          "score": 1.2451171875
+        },
+        {
+          "index": 7,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "## v7 Agentic RAG（意图路由 + 工具调用 + 决策轨迹） 前面几版的流程是固定的：任何问题都先召回、精排、再生成。v7 在它上面加一层循环——模型先看问题决定用哪个工具，读完返回结果再决定要不要继续查，最后仍基于统一编号的…",
+          "page": null,
+          "table": null,
+          "score": 1.10546875
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "README.md",
+        "README.md",
+        "README.md",
+        "docs/ROADMAP.md",
+        "README.md",
+        "README.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 2,
+      "context_chars": 3846,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 7,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 3,
+      "tool_steps": 5,
+      "tool_names": [
+        "kb_search",
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "2202aa2c1163",
+      "history_turns": 0,
+      "retrieval_ms": 2122.0,
+      "generation_ms": 49173.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 0.3333333333333333,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    },
+    {
+      "id": "m05",
+      "config": "agent",
+      "category": "mixed",
+      "answerable": true,
+      "question": "橙子的单价是多少？扫描件 PDF 入库时每页 OCR 大概多花时间？",
+      "reference": "橙子单价 12.5 元；扫描件 PDF 每页会多花 1–5 秒做 OCR 推理，是入库时一次性消耗，问答不受影响。",
+      "evidence": [
+        "橙子富含维生素 C，适合日常补充维 C"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [
+        "demo.products",
+        "docs/beginner-guide.md"
+      ],
+      "answer": "橙子的单价是 12.5 元 [1]。扫描件 PDF 入库时，每页会多花 1–5 秒做 OCR 推理（该耗时在入库时一次性消耗，不影响后续问答）[2]。",
+      "contexts": [
+        "name | price\n橙子 | 12.5",
+        "安装后，扫描件 PDF 每页会多花 1–5 秒做 OCR 推理（入库时一次性消耗，问答不受影响）。如果不安装这些依赖，扫描件页面会被跳过，文本型 PDF 仍然正常工作。识别前会把页面放大到 200 dpi 再喂给 OCR——用默认分辨率识别时中文容易认错，比如\"产品库存\"被读成\"产品本存\"。\n\n**文字型 PDF** 里带边框线的表格会被单独提取成一份文档入库，引用中会显示表名和页码（例如\"第 1 页 / 表 商品库存表_table_1\"）。扫描件做不到这一步：那一页对程序来说只是一张图片，没有\"表格线\"和\"单元格文字\"可取，只能把整页文字连表格一起读出来。纯靠文字对齐排版、没有边框线的表格同理提不出结构，但内容仍会随整页正文被检索到。",
+        "### PDF 入库：文本型 vs 扫描件\n\nPDF 有两种”长相”，入库时处理方式不同：\n\n- **文本型 PDF**：文字是真正的文本数据，可以直接提取。速度很快，和 txt/md 一样逐页切分。\n- **扫描件 PDF**：本质是一堆图片拼在一起，页面没有真正的文字。入库时会先检测——如果某页提取到的文本为空或中文比例极低，就判定为扫描件，调用 OCR（光学字符识别）把图片中的文字”读”出来。\n\nOCR 需要额外安装依赖：",
+        "### 原理\n\n- 入库时优先使用 `pdfplumber` 打开 PDF：\n  - **文本型 PDF**：直接提取页面文本与表格（`extract_text` / `extract_tables`），速度同 v5。\n  - **扫描件 PDF**：页面文本为空或没有实质字符（汉字/拉丁字母）时，判定为扫描件，自动渲染页面 → OCR 识别文字。\n- OCR 渲染固定 **200 dpi**（`OCR_RENDER_RESOLUTION`）：`pdfplumber` 默认 72 dpi，实测中文会认错（\"产品库存\" → \"产品本存\"，置信度 0.79），200 dpi 下整句正确、置信度约 0.98。\n- 表格作为独立的 `SourceDocument` 入库，获得独立的向量与 BM25 索引；引用中显示表名与页码。\n- **扫描件上的表格**走版面识别（`private_rag/ingestion/table_layout.py`）：OpenCV 形态学（横/纵结构线开运算）在位图上检测网格线、定位表格矩形；裁剪后的区域先白色补齐成方形再交给 `rapid-table`（SLANet-Plus ONNX，避免引擎 488×488 非等比拉伸扭曲结构）；整页 RapidOCR 文本框按表格区域裁剪、平移到 crop 坐标后以 `ocr_results` 传给引擎拼带文本的 HTML（引擎不跑内部 OCR），含 rowspan/colspan 的单元格由解析展开。正文侧用 `filter_ocr_result` 丢弃中心落在表格矩形内的 OCR 框，避免表格内容在正文里重复一份。总开关 `RAG_DISABLE_SCAN_TABLE`，模型路径可用 `RAG_SCAN_TABLE_MODEL` 预置（离线）。\n- 父子块切分对 OCR 与表格透明：正文与表格各自走相同的父子块流程。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | price；首行：橙子 | 12.5",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        },
+        {
+          "index": 2,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "安装后，扫描件 PDF 每页会多花 1–5 秒做 OCR 推理（入库时一次性消耗，问答不受影响）。如果不安装这些依赖，扫描件页面会被跳过，文本型 PDF 仍然正常工作。识别前会把页面放大到 200 dpi 再喂给 OCR——用默认分辨率识别…",
+          "page": null,
+          "table": null,
+          "score": 4.6328125
+        },
+        {
+          "index": 3,
+          "title": "beginner-guide.md",
+          "source_type": "file",
+          "source_uri": "docs/beginner-guide.md",
+          "snippet": "### PDF 入库：文本型 vs 扫描件 PDF 有两种”长相”，入库时处理方式不同： - **文本型 PDF**：文字是真正的文本数据，可以直接提取。速度很快，和 txt/md 一样逐页切分。 - **扫描件 PDF**：本质是一堆图片…",
+          "page": null,
+          "table": null,
+          "score": -0.9619140625
+        },
+        {
+          "index": 4,
+          "title": "README.md",
+          "source_type": "file",
+          "source_uri": "README.md",
+          "snippet": "- 入库时优先使用 `pdfplumber` 打开 PDF： - **文本型 PDF**：直接提取页面文本与表格（`extract_text` / `extract_tables`），速度同 v5。 - **扫描件 PDF**：页面文本为空…",
+          "page": null,
+          "table": null,
+          "score": -1.7236328125
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query",
+        "docs/beginner-guide.md",
+        "docs/beginner-guide.md",
+        "README.md"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 1545,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 4,
+      "refusal": false,
+      "intent": "mixed",
+      "stop_reason": "final",
+      "tool_calls": 2,
+      "tool_steps": 4,
+      "tool_names": [
+        "kb_search",
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "79c399be3854",
+      "history_turns": 0,
+      "retrieval_ms": 722.0,
+      "generation_ms": 27236.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 0.0,
+        "evidence_recall@3": 0.0,
+        "context_precision@3": 0.0,
+        "mrr@3": 0.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": 1.0
+      },
+      "ragas": null
+    }
+  ]
+}

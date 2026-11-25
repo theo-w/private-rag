@@ -1336,3 +1336,96 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
 - **交替那轮只测了新集 40 条**：对 v7 那 29 条的影响在上面的「对 v7 那 29 条的影响」一节单独量了，结论是没有
   可见影响（差异等于漂移量级，判不可判定）；那一轮用的是 v7 原本的演示库，不涉及超集库多出来的 8 行。
 
+## v8.9 / v8.10 两道门控的前后对比（`gate_side_tracking`、`kb_miss_sql_gate`）
+
+同一个分支上的两处改动，各自有开关、各自有读数：
+
+- **v8.9 `gate_side_tracking`**：mixed 双侧门控原来拿证据块的**标签文字**找工具名来认「这一侧查过没有」。
+  真实链路的标签是「SQL 查询（表 …）」与文档标题，里面没有工具名，等于永远判「一侧零证据」，
+  每条 `mixed` 都被反复逼到步数用尽。改成看工具到底跑过没有（`kb_ran` / `sql_ran`），
+  并规定每一侧最多逼一次、那一侧没挂工具就不逼。
+  `RAG_DISABLE_AGENT_GATE_SIDE_TRACKING=1` 逐字退回老行为。
+- **v8.10 `kb_miss_sql_gate`**：意图判成 `knowledge`、模型要说「证据不足」，而问题指名的实体在
+  「库内数据」的取值样例里时，拒答之前先按那个实体查一次业务表（一条问题只兜一次）。
+  `RAG_DISABLE_AGENT_KB_MISS_SQL_GATE=1` 退回原行为。
+
+### 复现命令
+
+```bash
+# v8.9：12 条双侧 mixed（新集 xm01–xm07 + v7 的 m01–m05），一轮约 10–13 分钟，三轮约半小时
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting gate_side_tracking --values off,on,off \
+  --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl \
+  --ids xm01,xm02,xm03,xm04,xm05,xm06,xm07,m01,m02,m03,m04,m05 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_gateside
+
+# v8.10 的收益侧：把路由提示词第 10 条一起关掉，模拟「路由判错」这道兜底要兜的情形
+RAG_DISABLE_AGENT_ROUTE_DATA_SIDE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+python3 scripts/measure_thinking_ab.py --setting kb_miss_sql_gate --values off,on,off \
+  --dataset eval/v8_agentic_expanded.jsonl \
+  --ids xd01,xd02,xd03,xd04,xd05,xd06,xd07,xd08 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_kbmiss_data
+
+# v8.10 的护栏侧：knowledge 9 条 + 应拒答 5 条 + mixed 7 条，出厂设置
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting kb_miss_sql_gate --values off,on,off --dataset eval/v8_agentic_expanded.jsonl \
+  --ids xk01,xk02,xk03,xk04,xk05,xk06,xk07,xk08,xk09,xr01,xr02,xr03,xr04,xr05,xm01,xm02,xm03,xm04,xm05,xm06,xm07 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_kbmiss_guard
+```
+
+`--ids` 只在这几轮里用（它们是「只看这一类样本」的读数）；与整轮对照时不要加，样本数变了指标均值不可比。
+跑前确认日志里有 `reranker=有`、单条耗时是秒级——精排静默失效时每条只花 50 毫秒，报告照样出数。
+调试一律 `--output /tmp`，不动 `eval/reports/` 里已跟踪的历史报告；下面这两组读数的原始报告以新名字存在
+`eval/reports/`：`v8_9_gate_side_ab_*`、`v8_10_kbmiss_data_ab_*`、`v8_10_kbmiss_guard_ab_*`、
+`v8_10_kbmiss_xd08_*`（每轮 `.md` 与 `.json` 各一份）。
+
+### v8.9 读数（2026-11-26 凌晨，本机单并发 MLX，12 条双侧 `mixed` × `agent`，339 向量评估库）
+
+| 轮 | 设置 | answer_rate | source_hit | both_sides_hit | evidence_hit@3 | citation / validity | mrr@3 | context_precision@3 | 工具调用 / 步数 | 检索片段 | 单条均耗时 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 第 1 轮 | `off` | 0.917（11/12） | 0.917（11/12） | 0.833（10/12） | 0.667（8/12） | 1.000 / 1.000 | 0.667 | 0.222 | 3.58 / 7.08 | 2.58 | 65.3s（冷启动，作废） |
+| 第 2 轮 | `on` | **1.000（12/12）** | 0.917 | 0.833 | 0.667 | 1.000 / 1.000 | 0.667 | 0.222 | **2.58 / 5.08** | **1.58** | 41.2s |
+| 第 3 轮 | `off` | 0.917（11/12） | 0.917 | 0.833 | 0.667 | 1.000 / 1.000 | 0.667 | 0.222 | 3.58 / 7.08 | 2.58 | 61.0s |
+
+逐条翻动 8 条，形状完全一样：`xm01` `xm02` `xm05` `m01` `m02` `m04` `m05` 从
+「`stop_reason=max_steps`、4 次工具」变成「`final`、2–3 次工具」，`xm03`（可回答样本）从拒答变作答。
+`source_hit` / `both_sides_hit` / `evidence_hit@3` / 引用两项三轮逐字相同——少一次调用没有少引用某一侧。
+**噪声底**：同设置的第 1 轮与第 3 轮九项指标与逐条行为逐字相同，这批样本这一轮漂移为 0，
+所以翻动可以归因到改动本身。耗时 41.2s vs 61.0s 只记方向（机制是每条少一次强制调用），不作收益依据。
+
+### v8.10 读数（2026-11-25 晚，本机单并发 MLX，339 向量评估库）
+
+收益侧（`xd01`–`xd08` 8 条，路由提示词第 10 条一起关掉）：
+
+| 轮 | 设置 | answer_rate | source_hit | evidence_hit@3 | citation / validity | refusal_accuracy | 工具调用 / 步数 | 单条均耗时 |
+|---|---|---|---|---|---|---|---|---|
+| 第 1 轮 | `off` | 0.625（5/8） | 0.500（4/8） | 0.500 | 0.625 / 0.625 | — | 2.25 / 4.88 | 58.9s（冷启动，作废） |
+| 第 2 轮 | `on` | **1.000（8/8）** | 0.625 | 0.625 | **1.000 / 1.000** | — | 2.38 / 5.00 | 75.7s |
+| 第 3 轮 | `off` | 0.750（6/8） | 0.625 | 0.625 | 0.750 / 0.750 | — | 2.25 / 5.00 | 68.9s |
+
+能归因给门控的是两条：`xd05` 与 `xd08` 在两个 `off` 轮都是「拒答 / `insufficient_evidence` / 1–2 次工具」，
+在 `on` 轮都是「作答 / `final` / 3 次工具」。`xd02` 在暖 `off` 轮也作答了（属漂移），
+`xd01` 的意图翻动是路由器自己（第 10 条被关掉）。同设置两个 `off` 轮自己差 1 条
+（`answer_rate` 0.625 vs 0.750），所以这道兜底在这批样本上的可见收益是 **+2 条，比漂移多 1 条**——
+够过「≥1 条才算」这条线，但余量小，别当成大收益。
+
+护栏侧（21 条，出厂设置，`off → on → off`）：九项指标 `off` 与 `on` 全等
+（`answer_rate` 0.9375、`source_hit` 0.9375、`refusal_accuracy` 1.000、`both_sides_hit` 0.714、
+引用两项 1.000、`evidence_hit@3` 0.75、`mrr@3` 0.635、`context_precision@3` 0.25、`n_errors` 0），
+两个 `off` 轮逐条行为没有翻动。唯一行为差别是 `xr04` 从 1 次工具变 2 次（它的问题指名的实体在目录里，
+门控多兜一次查询），仍然正确拒答。
+
+### 限制（引用这两轮数字时一并带上）
+
+- **`xd08` 兜住以后指标仍判 0**：答案内容正确、也引用了那一行 SQL，但那条 SQL 引用排在第 10 位，
+  `source_hit` 与 `evidence_hit@3` 只看前 3 位。这是口径（`@3` 窗口）不是又答错。
+- **v8.10 的读数测于 v8.9 之前的代码状态**：那时兜底门控的「SQL 侧查过没有」还按标签文字认（等于从不跳过），
+  也就是说最终代码比被测代码多一条「SQL 侧已经查过就不再兜」的收紧。合入前在文档定稿重建的库上
+  按最终代码重跑一遍护栏与收益，见上面 v8.10 详细验收最后一项。
+- **v8.9 的读数测于文档定稿前的 339 向量库**：新增文档只讲门控与开关，不含样本的实体或应拒答样本的原问题。
+- **耗时不作收益依据**：v8.9 的 `on` 41.2s vs 暖 `off` 61.0s、v8.10 的 `on` 75.7s vs 暖 `off` 68.9s，
+  方向相反（一次是少调用、一次是多一次查询），单次交替对照量不出耗时。
+- **单测抓不到这个 bug 的原因**：`TestMixedGate` 的替身把块标签写成含工具名，老逻辑在那种替身里成立，
+  所以旧单测全绿而真实链路一直误拦。新加的 `TestMixedGateSideTracking` 用生产链路的标签样子
+  （「SQL 查询（表 demo.products）」与文档标题），并留了一条断言说明关掉新依据时仍然误拦。
+
