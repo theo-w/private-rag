@@ -1278,7 +1278,8 @@ v8 的 MCP 工具面已经合入 main（PR #24），但引用只能说到「出�
       的正常形状 / 缺 metadata / 片段被截掉 / 父块扩展 / metadata 里数字写坏不抛异常；`kb_search` 的引用与
       证据块带同一份 locator；截断块省略 `snippet_offset`；`ask` 的载荷与 schema 都没有 locator；开关关闭时
       引用与证据逐字等于今天的形状且 `tools/list` 里没有 `locator`；`render_evidence` 带不带 locator 输出相同；
-      agentic 轨迹与上下文里不出现 `chunk_id` / `snippet_offset`
+      agentic 轨迹与上下文里不出现 `chunk_id` / `snippet_offset`。断言 locator 存在的用例都自己把开关钉到
+      要的那一档，所以带着 `RAG_DISABLE_CITATION_LOCATOR=1` 跑全量同样是 735 passed
 - [x] **护栏读数（`knowledge` 9 条 + 应拒答 5 条 = 14 条，同进程 `off → on → off`）**：这一处 agentic 链路
       根本不读 locator，量的是「加了它会不会扰动行为」，是护栏不是收益。**两个暖轮（第 2 轮带、第 3 轮不带）
       九项指标逐字相同、逐条行为零翻动**：`answer_rate` / `source_hit` / `refusal_accuracy` /
