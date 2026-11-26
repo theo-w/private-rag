@@ -62,6 +62,27 @@ def _set_gate_side_tracking(value: str) -> None:
     setattr(runtime_module, "AGENT_GATE_SIDE_TRACKING", value not in {"off", "0", "no"})
 
 
+def _set_kbmiss_evidence_priority(value: str) -> None:
+    """兜底门控捞回的 SQL 记录是否排到证据最前。两轮都把门控钉在「开」，
+    这样开关只改排列，不改「查不查」——否则量的就不是这一处改动。
+    """
+    setattr(runtime_module, "AGENT_KB_MISS_SQL_GATE", True)
+    setattr(runtime_module, "AGENT_KBMISS_EVIDENCE_PRIORITY", value not in {"off", "0", "no"})
+
+
+def _set_kbmiss_priority_bad_route(value: str) -> None:
+    """同上，但把路由提示词的第 10 条关掉，模拟「路由判错意图」的场景：那正是兜底门控
+    存在的理由，也只有在这种场景里每条数据侧样本都会走到「眼看要拒答」这一支，
+    排列改动的效果才量得满。
+
+    目录那半（`AGENT_CATALOG_ENUM`）必须留在「开」：门控认实体靠的就是这份目录，
+    一起关掉的话靠后几行的实体根本进不了目录，门控不触发，量的就不是这一处改动了。
+    """
+    setattr(prompts, "AGENT_ROUTE_DATA_SIDE", False)
+    setattr(runtime_module, "AGENT_CATALOG_ENUM", True)
+    _set_kbmiss_evidence_priority(value)
+
+
 # 可以交替的设置项。思考开关在 prompts 里是导入时抓的快照，必须改模块属性才生效
 # （只改 config 不会被读到，见 scripts/check_generation_determinism.py 的同一处理）。
 SETTINGS: dict[str, Callable[[str], None]] = {
@@ -76,6 +97,8 @@ SETTINGS: dict[str, Callable[[str], None]] = {
     "data_side_routing": _set_data_side_routing,
     "kb_miss_sql_gate": _set_kb_miss_sql_gate,
     "gate_side_tracking": _set_gate_side_tracking,
+    "kbmiss_evidence_priority": _set_kbmiss_evidence_priority,
+    "kbmiss_priority_bad_route": _set_kbmiss_priority_bad_route,
 }
 
 # 对照时看的整轮指标：前四项是「不能变差」的门禁，其余是取证与引用的质量

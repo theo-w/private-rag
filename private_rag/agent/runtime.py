@@ -40,6 +40,7 @@ from private_rag.config import (
     AGENT_CATALOG_SCAN_ROWS,
     AGENT_CONTEXT_CHARS,
     AGENT_GATE_SIDE_TRACKING,
+    AGENT_KBMISS_EVIDENCE_PRIORITY,
     AGENT_KB_MISS_SQL_GATE,
     AGENT_LLM_MODEL,
     AGENT_MAX_STEPS,
@@ -359,6 +360,7 @@ class AgentRuntime:
         intent: str = "",
         mixed_gate: bool = AGENT_MIXED_GATE,
         kb_miss_sql_gate: Optional[bool] = None,
+        kbmiss_evidence_priority: Optional[bool] = None,
         gate_side_tracking: Optional[bool] = None,
     ):
         self.registry = registry
@@ -380,6 +382,12 @@ class AgentRuntime:
         # mixed 门控认侧别的依据，同上：在装配时才读模块设置，同一进程里换设置才生效
         self.gate_side_tracking = (
             AGENT_GATE_SIDE_TRACKING if gate_side_tracking is None else bool(gate_side_tracking)
+        )
+        # 兜底门控捞回的 SQL 记录是否排到证据最前，同上：装配时才读模块设置
+        self.kbmiss_evidence_priority = (
+            AGENT_KBMISS_EVIDENCE_PRIORITY
+            if kbmiss_evidence_priority is None
+            else bool(kbmiss_evidence_priority)
         )
 
     def _available(self, allow_sql: bool) -> ToolRegistry:
@@ -429,6 +437,19 @@ class AgentRuntime:
             if entity in text:
                 return entity, _entity_lookup_sql(table, column, entity)
         return None
+
+    @staticmethod
+    def _promote_evidence(blocks: list[ToolBlock], new_blocks: Sequence[ToolBlock]) -> None:
+        """把刚跑完的那次查询捞回的证据段排到最前面，其余保持原有顺序。
+
+        只在兜底门控强制的那次 `sql_query` 上生效。门控的触发条件本身就是「模型自己判定
+        文档侧缺那项事实」，所以这一侧的记录才是作答依据；按调用顺序它会排在文档片段之后
+        （v8.10 复查里的 `xd08` 排第 4），引用编号与评估的 `@3` 窗口都对不上，量出来就是
+        「答对了、也引用了，但取证与来源两项都是 0」。
+        """
+        if not new_blocks or len(new_blocks) >= len(blocks):
+            return
+        blocks[:] = list(new_blocks) + blocks[: -len(new_blocks)]
 
     def _sync_tool_intent(self, registry: ToolRegistry, intent: str) -> None:
         """把路由判出的意图写进知识库检索工具——树索引只在纯知识意图上启用，靠这个才知道意图。
@@ -537,6 +558,8 @@ class AgentRuntime:
         gate_intercepts = 0
         # 兜底门控一条问题只兜一次：查完库里还是缺那项事实，就照原样拒答，别反复查
         kb_miss_forced = False
+        # 兜底门控强制的那次 sql_query 跑完以后，它的证据要排到最前（见 `_promote_evidence`）
+        pending_forces_sql = False
         # 两侧各查过没有——两道门控都看这两个标记，而不是 `_has_evidence_for`：
         # 真实证据块的标签是「SQL 查询（表 …）」与文档标题，里面没有工具名，
         # 按标签认等于「两侧永远零证据」，那个判断只对测试替身成立
@@ -569,6 +592,10 @@ class AgentRuntime:
             if tool_calls >= max_steps or guard > max_steps + 3:
                 stop_reason = stop_reason or "max_steps"
                 break
+
+            # 门控强制的那一步只影响它自己这一次执行，取出来立刻清掉标记
+            forced_sql_evidence = pending_forces_sql
+            pending_forces_sql = False
 
             if pending is not None:
                 tool_name, args, reason = pending.tool, dict(pending.args), pending.reason
@@ -642,6 +669,7 @@ class AgentRuntime:
                         if hit is not None:
                             entity, forced_sql = hit
                             kb_miss_forced = True
+                            pending_forces_sql = True
                             gate_intercepts += 1
                             observations.append(
                                 f"步骤{step_index + 1}：门控拦截 final——要的那项事实不在文档证据里，"
@@ -682,7 +710,10 @@ class AgentRuntime:
             elapsed_ms = int((time.perf_counter() - tool_started) * 1000)
 
             tool_calls += 1
-            blocks.extend(result.blocks)
+            new_blocks = list(result.blocks)
+            blocks.extend(new_blocks)
+            if forced_sql_evidence and self.kbmiss_evidence_priority and tool.name == SqlQueryTool.name:
+                self._promote_evidence(blocks, new_blocks)
             # 「这一侧查过了」看的是工具跑过没有，而不是有没有返回内容：查过但为空也算查过，
             # 再逼一次只会把步数烧光，而「库里确实没有这项事实」本身就是可以作答或拒答的依据
             if tool.name == SqlQueryTool.name:
@@ -877,6 +908,8 @@ class AgentRuntime:
         gate_intercepts = 0
         # 兜底门控一条问题只兜一次：查完库里还是缺那项事实，就照原样拒答，别反复查
         kb_miss_forced = False
+        # 兜底门控强制的那次 sql_query 跑完以后，它的证据要排到最前（见 `_promote_evidence`）
+        pending_forces_sql = False
         # 两侧各查过没有——两道门控都看这两个标记，而不是 `_has_evidence_for`：
         # 真实证据块的标签是「SQL 查询（表 …）」与文档标题，里面没有工具名，
         # 按标签认等于「两侧永远零证据」，那个判断只对测试替身成立
@@ -907,6 +940,10 @@ class AgentRuntime:
             if tool_calls >= max_steps or guard > max_steps + 3:
                 stop_reason = stop_reason or "max_steps"
                 break
+
+            # 门控强制的那一步只影响它自己这一次执行，取出来立刻清掉标记
+            forced_sql_evidence = pending_forces_sql
+            pending_forces_sql = False
 
             if pending is not None:
                 tool_name, args, reason = pending.tool, dict(pending.args), pending.reason
@@ -985,6 +1022,7 @@ class AgentRuntime:
                         if hit is not None:
                             entity, forced_sql = hit
                             kb_miss_forced = True
+                            pending_forces_sql = True
                             gate_intercepts += 1
                             observations.append(
                                 f"步骤{step_index + 1}：门控拦截 final——要的那项事实不在文档证据里，"
@@ -1025,7 +1063,10 @@ class AgentRuntime:
             elapsed_ms = int((time.perf_counter() - tool_started) * 1000)
 
             tool_calls += 1
-            blocks.extend(result.blocks)
+            new_blocks = list(result.blocks)
+            blocks.extend(new_blocks)
+            if forced_sql_evidence and self.kbmiss_evidence_priority and tool.name == SqlQueryTool.name:
+                self._promote_evidence(blocks, new_blocks)
             # 「这一侧查过了」看的是工具跑过没有，而不是有没有返回内容：查过但为空也算查过，
             # 再逼一次只会把步数烧光，而「库里确实没有这项事实」本身就是可以作答或拒答的依据
             if tool.name == SqlQueryTool.name:
