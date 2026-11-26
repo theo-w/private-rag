@@ -1,0 +1,755 @@
+{
+  "meta": {
+    "report_title": "# private-rag 检索策略评估报告：v8_agentic_expanded",
+    "generated_at": "2026-11-26T10:14:44+08:00",
+    "dataset": "eval/v8_agentic_expanded.jsonl",
+    "dataset_sha256": "a99e2ca3fa7784eb9bb6c6bc853497751c60125932ff32a50a152e208d58f634",
+    "datasets": [
+      "eval/v8_agentic_expanded.jsonl"
+    ],
+    "datasets_sha256": [
+      "a99e2ca3fa7784eb9bb6c6bc853497751c60125932ff32a50a152e208d58f634"
+    ],
+    "dataset_total": 40,
+    "samples_total": 8,
+    "samples_answerable": 8,
+    "samples_refusal": 0,
+    "sample_ids": [
+      "xd01",
+      "xd02",
+      "xd03",
+      "xd04",
+      "xd05",
+      "xd06",
+      "xd07",
+      "xd08"
+    ],
+    "categories": {
+      "database": 8
+    },
+    "configs": [
+      "agent"
+    ],
+    "agent": {
+      "enabled": true,
+      "configs": [
+        "agent"
+      ],
+      "sources": "config/sources.eval.agent.v8.yaml",
+      "tools": [
+        "kb_search",
+        "sql_query"
+      ],
+      "max_steps": 4,
+      "allow_sql": true,
+      "sql_rows": 20,
+      "trace_enabled": false
+    },
+    "dataset_is_default": false,
+    "output_markdown": "eval/reports/v8_12_kbmiss_data_ab_3_off.md",
+    "output_json": "eval/reports/v8_12_kbmiss_data_ab_3_off.json",
+    "llm_model": "qwen3.8:27b-mlx",
+    "judge_model": "qwen3.8:27b-mlx",
+    "embed_model": "bge-m3",
+    "ragas": {
+      "enabled": false,
+      "configs": [],
+      "limit": null,
+      "metrics": [
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall"
+      ],
+      "strictness": 3,
+      "max_workers": 1,
+      "cache": true,
+      "cache_dir": "storage/eval_cache"
+    },
+    "ragas_errors": {},
+    "duration_seconds": 87.53,
+    "git_commit": "d264582ec43d7522f21ba76d9968fe889c55f2ad",
+    "git_dirty": true,
+    "run_note": "同一进程交替对照 第3轮 kbmiss_evidence_priority=off"
+  },
+  "samples_meta": [
+    {
+      "id": "xd01",
+      "question": "蓝莓收到以后该怎么处理？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd02",
+      "question": "牛油果买回来还是硬的，该拿它怎么办？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd03",
+      "question": "芒果放冰箱能多存几天吗？会有什么代价？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd04",
+      "question": "核桃剥了壳以后还能常温放着吗？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd05",
+      "question": "腰果拆开以后一直敞着放，会出什么问题？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd06",
+      "question": "桂圆干开袋以后要注意什么？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd07",
+      "question": "鳕鱼放到冷藏化冻以后，还有什么要求？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    },
+    {
+      "id": "xd08",
+      "question": "酸奶胀包了还能喝吗？",
+      "category": "database",
+      "answerable": true,
+      "expected_source": "scripts/init_eval_db.py",
+      "expected_sources": [],
+      "history_turns": 0
+    }
+  ],
+  "configs": {
+    "agent": {
+      "spec": {
+        "name": "agent",
+        "label": "Agentic：意图路由 + 工具循环（kb_search + 运行时只读 SQL）",
+        "use_lexical": true,
+        "use_rerank": true,
+        "top_k": 3,
+        "use_parent": true,
+        "query_rewrite": "off",
+        "context_max_chars": 6000,
+        "is_agent": true
+      },
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "both_sides_hit": null,
+        "answer_rate": 1.0,
+        "refusal_accuracy": null,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "avg_latency_ms": 10939.75,
+        "avg_retrieval_ms": 1.5,
+        "avg_generation_ms": 10938.25,
+        "generation_cache_hits": 0,
+        "avg_retrieved": 1.0,
+        "avg_context_chars": 105.625,
+        "avg_query_count": 1.0,
+        "avg_tool_calls": 1.0,
+        "avg_tool_steps": 3.0,
+        "avg_tool_calls_knowledge": null,
+        "avg_tool_calls_database": 1.0,
+        "avg_tool_calls_mixed": null,
+        "dual_tool_rate": 0.0,
+        "dual_tool_rate_knowledge": null,
+        "dual_tool_rate_database": 0.0,
+        "dual_tool_rate_mixed": null,
+        "gate_intercept_rate": 0.0,
+        "used_parent_rate": 1.0,
+        "used_tree_rate": 0.0,
+        "rewrite_fallbacks": 0,
+        "n_answerable": 8,
+        "n_refusal": 0,
+        "n_errors": 0
+      },
+      "ragas": null,
+      "n_results": 8
+    }
+  },
+  "samples": [
+    {
+      "id": "xd01",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "蓝莓收到以后该怎么处理？",
+      "reference": "蓝莓娇嫩易压，收到后应尽快食用；没洗过的那种可以冷藏存放三四天。",
+      "evidence": [
+        "收到后应尽快食用，未洗的可以冷藏存放三四天"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "蓝莓收到后应尽快食用；如果未清洗，可以冷藏存放三四天[1]。",
+      "contexts": [
+        "name | storage | description\n蓝莓 | 冷藏 0-4℃ | 蓝莓娇嫩易压，收到后应尽快食用，未洗的可以冷藏存放三四天。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：蓝莓 | 冷藏 0-4℃ | 蓝莓娇嫩易压，收到后应尽快食用，未洗的可以冷藏存放三四天。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "used_tree": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 104,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "tool_names": [
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "c300df05e1db",
+      "history_turns": 0,
+      "retrieval_ms": 2.0,
+      "generation_ms": 7527.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd02",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "牛油果买回来还是硬的，该拿它怎么办？",
+      "reference": "牛油果硬的时候常温放两三天催熟，等捏着发软再吃。",
+      "evidence": [
+        "牛油果硬的时候常温放两三天催熟"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "牛油果买回来还是硬的时候，可以放在常温下催熟两三天，等捏着发软后再吃；如果切开吃不完，需要冷藏保存并淋上柠檬汁 [1]。",
+      "contexts": [
+        "name | storage | description\n牛油果 | 常温催熟后冷藏 | 牛油果硬的时候常温放两三天催熟，捏着发软就要当天吃，切开吃不完需冷藏并淋柠檬汁。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：牛油果 | 常温催熟后冷藏 | 牛油果硬的时候常温放两三天催熟，捏着发软就要当天吃，切开吃不完需冷藏并淋柠檬汁。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "used_tree": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 116,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "tool_names": [
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "4e14518848cc",
+      "history_turns": 0,
+      "retrieval_ms": 2.0,
+      "generation_ms": 9851.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd03",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "芒果放冰箱能多存几天吗？会有什么代价？",
+      "reference": "成熟后冷藏可多放两天，代价是香气会变淡。",
+      "evidence": [
+        "成熟后冷藏可多放两天，但香气会变淡"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "芒果在常温催熟后放入冰箱冷藏，可以多存放两天，但代价是香气会变淡 [1]。",
+      "contexts": [
+        "name | storage | description\n芒果 | 常温催熟后冷藏 | 芒果常温催熟，表皮起皱前食用，成熟后冷藏可多放两天，但香气会变淡。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：芒果 | 常温催熟后冷藏 | 芒果常温催熟，表皮起皱前食用，成熟后冷藏可多放两天，但香气会变淡。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "used_tree": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 108,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "tool_names": [
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "8716465f08db",
+      "history_turns": 0,
+      "retrieval_ms": 2.0,
+      "generation_ms": 16725.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd04",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "核桃剥了壳以后还能常温放着吗？",
+      "reference": "剥壳后必须密封冷藏；受潮会变苦。带壳的干燥常温能放半年。",
+      "evidence": [
+        "剥壳后必须密封冷藏，受潮会变苦"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "不能。根据资料，核桃剥壳后必须密封冷藏，不能常温存放，否则受潮会变苦 [1]。",
+      "contexts": [
+        "name | storage | description\n核桃 | 密封干燥常温 | 核桃带壳干燥常温能放半年，剥壳后必须密封冷藏，受潮会变苦。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：核桃 | 密封干燥常温 | 核桃带壳干燥常温能放半年，剥壳后必须密封冷藏，受潮会变苦。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "used_tree": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 103,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "tool_names": [
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "75a437e0dba8",
+      "history_turns": 0,
+      "retrieval_ms": 1.0,
+      "generation_ms": 8787.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd05",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "腰果拆开以后一直敞着放，会出什么问题？",
+      "reference": "敞放两周就会返软失去脆度，所以开封后必须密封并冷藏。",
+      "evidence": [
+        "敞放两周就会返软失去脆度"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "腰果开封后如果一直敞着放，两周就会返软，失去脆度；因此开封后务必密封并冷藏保存 [1]。",
+      "contexts": [
+        "name | storage | description\n腰果 | 密封冷藏 | 腰果开封后务必密封并冷藏，敞放两周就会返软失去脆度。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：腰果 | 密封冷藏 | 腰果开封后务必密封并冷藏，敞放两周就会返软失去脆度。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "used_tree": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 98,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "tool_names": [
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "02974ce270d0",
+      "history_turns": 0,
+      "retrieval_ms": 2.0,
+      "generation_ms": 10540.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd06",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "桂圆干开袋以后要注意什么？",
+      "reference": "开袋后尽快吃完；返潮容易发霉。未开封的阴凉干燥处可放一年。",
+      "evidence": [
+        "开袋后尽快吃完，返潮容易发霉"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "桂圆干开袋后应尽快吃完，因为开袋后容易返潮发霉[1]。",
+      "contexts": [
+        "name | storage | description\n桂圆干 | 阴凉干燥 | 桂圆干未开封阴凉干燥处可放一年，开袋后尽快吃完，返潮容易发霉。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：桂圆干 | 阴凉干燥 | 桂圆干未开封阴凉干燥处可放一年，开袋后尽快吃完，返潮容易发霉。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "used_tree": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 104,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "tool_names": [
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "d9c025d7b46d",
+      "history_turns": 0,
+      "retrieval_ms": 1.0,
+      "generation_ms": 8127.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd07",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "鳕鱼放到冷藏化冻以后，还有什么要求？",
+      "reference": "冷藏化冻后当天必须烹煮，否则腥味明显。",
+      "evidence": [
+        "冷藏化冻后当天必须烹煮，否则腥味明显"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "鳕鱼冷藏化冻后，当天必须烹煮，否则腥味会明显 [1]。",
+      "contexts": [
+        "name | storage | description\n鳕鱼 | 冷冻 -18℃ | 鳕鱼冷冻保存不要反复解冻，冷藏化冻后当天必须烹煮，否则腥味明显。"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | storage | description；首行：鳕鱼 | 冷冻 -18℃ | 鳕鱼冷冻保存不要反复解冻，冷藏化冻后当天必须烹煮，否则腥味明显。",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "used_tree": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 107,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "tool_names": [
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "4faa59fdd307",
+      "history_turns": 0,
+      "retrieval_ms": 1.0,
+      "generation_ms": 7412.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    },
+    {
+      "id": "xd08",
+      "config": "agent",
+      "category": "database",
+      "answerable": true,
+      "question": "酸奶胀包了还能喝吗？",
+      "reference": "胀包就直接扔掉；过期一天但没拆封的一般还能喝。",
+      "evidence": [
+        "胀包就直接扔掉"
+      ],
+      "expected_source": "demo.products",
+      "expected_sources": [],
+      "answer": "酸奶胀包了不能喝，应直接扔掉。根据资料，酸奶需全程冷藏（2-6℃），若出现胀包现象，说明已变质，必须丢弃 [1]。",
+      "contexts": [
+        "name | description | storage\n酸奶 | 酸奶全程冷藏，过期一天未拆封一般还能喝，胀包就直接扔掉。 | 全程冷藏 2-6℃"
+      ],
+      "citations": [
+        {
+          "index": 1,
+          "title": "demo.products 查询结果",
+          "source_type": "sql",
+          "source_uri": "demo.products#sql_query",
+          "snippet": "name | description | storage；首行：酸奶 | 酸奶全程冷藏，过期一天未拆封一般还能喝，胀包就直接扔掉。 | 全程冷藏 2-6℃",
+          "page": null,
+          "table": "demo.products",
+          "score": null
+        }
+      ],
+      "source_uris": [
+        "demo.products#sql_query"
+      ],
+      "used_lexical": true,
+      "used_rerank": true,
+      "used_parent": true,
+      "used_tree": false,
+      "query_rewrite": "off",
+      "query_count": 1,
+      "context_chars": 105,
+      "rewrite_fallback": false,
+      "rewrite_reason": "",
+      "requested_rerank": true,
+      "retrieved": 1,
+      "refusal": false,
+      "intent": "database",
+      "stop_reason": "final",
+      "tool_calls": 1,
+      "tool_steps": 3,
+      "tool_names": [
+        "sql_query"
+      ],
+      "gate_intercepts": 0,
+      "trace_id": "b98647355b58",
+      "history_turns": 0,
+      "retrieval_ms": 1.0,
+      "generation_ms": 18537.0,
+      "generation_cached": false,
+      "error": null,
+      "metrics": {
+        "evidence_hit@3": 1.0,
+        "evidence_recall@3": 1.0,
+        "context_precision@3": 1.0,
+        "mrr@3": 1.0,
+        "source_hit": 1.0,
+        "citation_rate": 1.0,
+        "citation_validity": 1.0,
+        "both_sides_hit": null
+      },
+      "ragas": null
+    }
+  ]
+}

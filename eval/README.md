@@ -1666,3 +1666,91 @@ insufficient_evidence 11 / context_budget 2`。68 条可回答样本里被拒答
   （评估库 12 行没有 NULL）、以及「文档侧与 SQL 侧说法冲突时以哪侧为准」（语料里没有互相矛盾的陈述，
   加一句会改变所有旧题的检索行为）。本轮用「查空集不许编造」（`xe09`）与「一侧查无此物」（`xe07`）
   当它们的近邻替身：能说明「查不到时会不会编」，说明不了「字段是 NULL 时会不会编」。
+
+## v8.12 兜底门控捞回的记录排到证据最前（`kbmiss_evidence_priority`）
+
+修的是引用排序，不是检索：兜底门控（v8.10）在拒答之前强制的那次 `sql_query`，它的证据段按**调用先后**
+追加在证据列表末尾，而评取证只看前 3 位（`evidence_hit@3`、`source_hit`、`mrr@3`、`context_precision@3`
+都只统计前 3 段），文档侧那几段是模型自己判定「不够」的材料、必然排在前面，于是真正答题的那一行被挤到
+第 4 位，答案正确并引用了它，两项指标却量不到。现在把门控强制的那次查询的结果挪到最前，其余顺序不动；
+`RAG_DISABLE_AGENT_KBMISS_EVIDENCE_PRIORITY=1` 逐字退回按调用先后排列。判定口径一个字没改，
+所以历史读数仍然可比。模型自己发起的 `sql_query` 排列不变（单测钉住），mixed 门控那条路径没动。
+
+### 复现命令
+
+跑前先确认精排模型在用（报告里每条 `used_rerank` 为真、单条秒级耗时），否则读数无效：
+
+```bash
+# 重建评估库：评估语料就是本分支的 README.md + docs/*.md，文档改过以后必须重建
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/prepare_eval_kb.py --recreate
+
+# 收益侧：把数据侧路由的提示词第 10 条关掉，模拟「路由判错意图」——那正是兜底门控存在的理由，
+# 也只有在这种场景里 8 条数据侧样本都会走到「眼看要拒答」这一支，排列的效果才量得满。
+# 目录那半（AGENT_CATALOG_ENUM）留在「开」：门控认实体靠的就是它。一轮约 4–6 分钟，三轮约 15 分钟
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting kbmiss_priority_bad_route --values off,on,off \
+  --dataset eval/v8_agentic_expanded.jsonl \
+  --ids xd01,xd02,xd03,xd04,xd05,xd06,xd07,xd08 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_v812_misroute
+
+# 护栏侧：knowledge 9 条 + 应拒答 5 条 + mixed 7 条，出厂设置。一轮约 9–11 分钟，三轮约半小时
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting kbmiss_evidence_priority --values off,on,off --dataset eval/v8_agentic_expanded.jsonl \
+  --ids xk01,xk02,xk03,xk04,xk05,xk06,xk07,xk08,xk09,xr01,xr02,xr03,xr04,xr05,xm01,xm02,xm03,xm04,xm05,xm06,xm07 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_v812_guard
+
+# 另一组：出厂设置下同样 8 条（判不可判定，见下面限制第 1 条）
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting kbmiss_evidence_priority --values off,on,off --dataset eval/v8_agentic_expanded.jsonl \
+  --ids xd01,xd02,xd03,xd04,xd05,xd06,xd07,xd08 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_v812_data
+```
+
+报告在 `eval/reports/v8_12_kbmiss_misroute_ab_*`、`v8_12_kbmiss_guard_ab_*`、`v8_12_kbmiss_data_ab_*`。
+
+### 收益读数：数据侧 8 条（模拟路由判错，门控两轮都钉在「开」）
+
+| 指标 | `off`（第 1 / 第 3 轮） | `on`（第 2 轮） | 差 |
+| --- | --- | --- | --- |
+| `evidence_hit@3` | 0.625 / 0.625 | 0.875 | +2 条 = +25pt |
+| `source_hit` | 0.625 / 0.625 | 0.875 | +2 条 = +25pt |
+| `mrr@3` | 0.625 / 0.625 | 0.875 | +2 条 = +25pt |
+| `context_precision@3` | 0.375 / 0.375 | 0.458 | +0.083 |
+| `answer_rate` | 0.875 / 1.000 | 1.000 | 不是收益，见限制第 2 条 |
+| `citation_rate` / `citation_validity` | 1.000 / 1.000 | 1.000 / 1.000 | 持平 |
+| `n_errors` | 0 / 0 | 0 | 持平 |
+| 单条均耗时 | 44.5s（冷） / 31.1s | 31.2s | +0.3%，不作收益 |
+
+涨幅来自哪两条，逐条能对上（`g` = 门控拦截次数，`t` = 工具调用次数，`c` = 引用条数）：
+
+| id | `off` 第 3 轮 | `on` 第 2 轮 | 引用顺序 |
+| --- | --- | --- | --- |
+| `xd08` | `knowledge` g1 t2 c4 `final` 未命中 | 同形状 g1 t2 c4 `final` 命中 | SQL 记录第 4 位 → 第 1 位 |
+| `xd05` | `knowledge` g1 t2 c4 `final` 未命中 | 同形状 g1 t2 c4 `final` 命中 | SQL 记录第 4 位 → 第 1 位 |
+
+两轮的门控次数、工具次数、引用条数、停止原因完全一样，只有引用编号顺序变了——所以这 2 条是排列造成的，
+不是模型行为变了。两个 `off` 暖轮在这两项上逐字相同（0.625），也就是说噪声底这两轮是 0 条，
++2 条远在噪声之上。`xd04`（mixed 意图）两轮都是 0，本次没修那条路径。
+
+### 护栏读数：21 条（knowledge 9 + 应拒答 5 + mixed 7），出厂设置
+
+九项指标（`answer_rate`、`source_hit`、`refusal_accuracy`、`both_sides_hit`、`citation_rate`、
+`citation_validity`、`evidence_hit@3`、`mrr@3`、`context_precision@3`）三轮逐字相同：
+1.000 / 1.000 / 1.000 / 0.714 / 1.000 / 1.000 / 0.750 / 0.677 / 0.250，`n_errors` 三轮都是 0。
+逐条行为（拒答与否、意图、停止原因、工具次数）在第 1 轮与第 2 轮之间零翻动，第 1 轮与第 3 轮之间也零翻动。
+这一组里门控一共拦了 5 次，排列改动没有动任何一条的结论。耗时暖轮 25.9s vs 25.7s（+0.8%），不作依据。
+
+### 限制（引用这轮数字时一并带上）
+
+- **出厂设置那一组判不可判定**（`v8_12_kbmiss_data_ab_*`）：只有第 1 轮把 `xd08` 判成 `knowledge` 并触发门控，
+  第 2、3 轮的路由直接判 `database`（门控 0 次），那 8 条压根没走到兜底这一支。所以它的 0.875 → 1.000
+  是路由翻动，不是排列收益，且两个 `off` 轮自己就差 1 条。真正的收益读数只在上面那组「模拟路由判错」里。
+- **`answer_rate` 那 +1 条不是收益**：`off` 第 1 轮的 `xd05` 是冷启动轮（上下文字符预算耗尽后拒答），
+  `off` 第 3 轮的 `xd05` 正常作答。也就是说暖轮之间 `answer_rate` 都是 1.000，排列改动没有把拒答变成作答。
+- **mixed 意图那条路径没修**：`xd04` 的两次取证都发生在门控之前，不是被强制的那一步，
+  本次的排列规则只作用在门控强制的 `sql_query` 上，所以它仍判 0。
+- **护栏只覆盖 21 条，边界集本轮没跑**（`xe01`–`xe11`），所以「不影响新加的边界题」这轮没有读数支撑。
+- **报告记 `git_commit=d264582`、`git_dirty=True`**：跑读数时 `scripts/measure_thinking_ab.py` 的两档新设置
+  还没提交（只有那两档设置，代码与单测都在 `d264582` 里）。出处要逐字复现得连未提交的测量脚本一起还原。
+- **语料会变长**：评估库就是 README.md + `docs/*.md`，本节与 `docs/ROADMAP.md` 的 v8.12 章节都在测量之后写的，
+  旧题的命中可能跟着变。复现这轮数字必须 `git checkout d264582` 再 `prepare_eval_kb.py --recreate`。

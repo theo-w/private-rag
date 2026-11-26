@@ -71,11 +71,15 @@ def _set_kbmiss_evidence_priority(value: str) -> None:
 
 
 def _set_kbmiss_priority_bad_route(value: str) -> None:
-    """同上，但把数据侧路由退回改动前（目录每列只取前 4 个值 + 提示词没有第 10 条），
-    模拟「路由判错意图」的场景：那正是兜底门控存在的理由，也只有在这种场景里
-    每一条数据侧样本都会被门控捞一次，排列改动的效果才量得满。
+    """同上，但把路由提示词的第 10 条关掉，模拟「路由判错意图」的场景：那正是兜底门控
+    存在的理由，也只有在这种场景里每条数据侧样本都会走到「眼看要拒答」这一支，
+    排列改动的效果才量得满。
+
+    目录那半（`AGENT_CATALOG_ENUM`）必须留在「开」：门控认实体靠的就是这份目录，
+    一起关掉的话靠后几行的实体根本进不了目录，门控不触发，量的就不是这一处改动了。
     """
-    _set_data_side_routing("off")
+    setattr(prompts, "AGENT_ROUTE_DATA_SIDE", False)
+    setattr(runtime_module, "AGENT_CATALOG_ENUM", True)
     _set_kbmiss_evidence_priority(value)
 
 
