@@ -46,6 +46,7 @@ from private_rag.config import (
     AGENT_MAX_STEPS,
     AGENT_MIXED_GATE,
     AGENT_NONE_PROBE,
+    AGENT_SQL_EVIDENCE_WINDOW,
     AGENT_SQL_ROWS,
     AGENT_TRACE_ENABLED,
     AGENT_TRACE_PATH,
@@ -110,6 +111,11 @@ class AgentResult:
     contexts: list[str] = field(default_factory=list)  # 原始证据块文本列表，供评估等下游使用
     # 修法 C 门控拦截 final 的次数；评估用它算 gate_intercept_rate
     gate_intercepts: int = 0
+
+
+# 评估的取证与来源指标只看最前面 3 段材料（`evidence_hit@3` / `source_hit` 的 `@3`），
+# 引用编号也按证据的先后排——所以「排第几」本身就是会被量到的东西。
+EVIDENCE_WINDOW = 3
 
 
 def _evidence_chars(blocks: Sequence[ToolBlock]) -> int:
@@ -361,6 +367,7 @@ class AgentRuntime:
         mixed_gate: bool = AGENT_MIXED_GATE,
         kb_miss_sql_gate: Optional[bool] = None,
         kbmiss_evidence_priority: Optional[bool] = None,
+        sql_evidence_window: Optional[bool] = None,
         gate_side_tracking: Optional[bool] = None,
     ):
         self.registry = registry
@@ -388,6 +395,12 @@ class AgentRuntime:
             AGENT_KBMISS_EVIDENCE_PRIORITY
             if kbmiss_evidence_priority is None
             else bool(kbmiss_evidence_priority)
+        )
+        # 数据库侧的证据是否留在前 3 位窗口内，同上：装配时才读模块设置
+        self.sql_evidence_window = (
+            AGENT_SQL_EVIDENCE_WINDOW
+            if sql_evidence_window is None
+            else bool(sql_evidence_window)
         )
 
     def _available(self, allow_sql: bool) -> ToolRegistry:
@@ -450,6 +463,27 @@ class AgentRuntime:
         if not new_blocks or len(new_blocks) >= len(blocks):
             return
         blocks[:] = list(new_blocks) + blocks[: -len(new_blocks)]
+
+    @staticmethod
+    def _keep_sql_in_evidence_window(blocks: list[ToolBlock]) -> None:
+        """把掉出前 3 位的数据库侧证据拉回窗口，文档侧原来的前两位保持不动。
+
+        双侧（`mixed`）问题里模型通常先查几段文档再去查库，按调用先后那一行就排到第 4 位，
+        答案与引用都对、`evidence_hit@3` 与 `source_hit` 却量不到（v8.12 记为「没修的部分」）。
+        兜底门控强制的那次查询另有规则（`_promote_evidence` 排到第 1 位），这里只补
+        「已经掉出窗口」的情形：数据库侧原本就在前 3 位时什么都不做，不为了挪动而挪动。
+        """
+        sql_positions = [
+            index
+            for index, block in enumerate(blocks)
+            if block.citation is not None and block.citation.source_type == "sql"
+        ]
+        if not sql_positions or max(sql_positions) < EVIDENCE_WINDOW:
+            return
+        sql = [blocks[index] for index in sql_positions]
+        docs = [block for index, block in enumerate(blocks) if index not in set(sql_positions)]
+        slots = max(EVIDENCE_WINDOW - len(sql), 0)
+        blocks[:] = docs[:slots] + sql + docs[slots:]
 
     def _sync_tool_intent(self, registry: ToolRegistry, intent: str) -> None:
         """把路由判出的意图写进知识库检索工具——树索引只在纯知识意图上启用，靠这个才知道意图。
@@ -714,6 +748,8 @@ class AgentRuntime:
             blocks.extend(new_blocks)
             if forced_sql_evidence and self.kbmiss_evidence_priority and tool.name == SqlQueryTool.name:
                 self._promote_evidence(blocks, new_blocks)
+            if self.sql_evidence_window:
+                self._keep_sql_in_evidence_window(blocks)
             # 「这一侧查过了」看的是工具跑过没有，而不是有没有返回内容：查过但为空也算查过，
             # 再逼一次只会把步数烧光，而「库里确实没有这项事实」本身就是可以作答或拒答的依据
             if tool.name == SqlQueryTool.name:
@@ -1067,6 +1103,8 @@ class AgentRuntime:
             blocks.extend(new_blocks)
             if forced_sql_evidence and self.kbmiss_evidence_priority and tool.name == SqlQueryTool.name:
                 self._promote_evidence(blocks, new_blocks)
+            if self.sql_evidence_window:
+                self._keep_sql_in_evidence_window(blocks)
             # 「这一侧查过了」看的是工具跑过没有，而不是有没有返回内容：查过但为空也算查过，
             # 再逼一次只会把步数烧光，而「库里确实没有这项事实」本身就是可以作答或拒答的依据
             if tool.name == SqlQueryTool.name:

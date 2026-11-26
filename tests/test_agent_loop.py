@@ -1421,6 +1421,150 @@ class TestKbMissSqlGate:
         ]
 
 
+class TestSqlEvidenceWindow:
+    """数据库侧的证据不许掉出前 3 位窗口。
+
+    引用编号与评估的取证/来源指标都按证据先后排，而那两个指标只看最前面 3 段材料。双侧
+    （`mixed`）问题里模型通常先查几段文档再去查库，那一行就排到第 4 位——答案与引用都对，
+    两项却记 0（v8.12 记为「没修的部分」）。这里只补「已经掉出窗口」的情形。
+    """
+
+    SQL_TEXT = "酸奶全程冷藏，胀包就直接扔掉"
+    DOC_TEXTS = ["冷藏链条说明", "名次越靠前加分越多", "旧指标定义一字未动"]
+    DOC_URIS = ["README.md", "docs/beginner-guide.md", "docs/v7.4-history-as-evidence.md"]
+
+    def tools(self, docs: int = 3) -> tuple[RecordingTool, RecordingTool]:
+        kb = RecordingTool(
+            "kb_search",
+            blocks=[
+                ToolBlock(
+                    uri,
+                    text,
+                    Citation(1, uri, "file", uri, text[:4]),
+                )
+                for uri, text in zip(self.DOC_URIS[:docs], self.DOC_TEXTS[:docs])
+            ],
+        )
+        sql = RecordingTool(
+            "sql_query",
+            blocks=[
+                ToolBlock(
+                    "demo.products#sql_query",
+                    self.SQL_TEXT,
+                    Citation(1, "demo.products 查询结果", "sql", "demo.products#sql_query", "胀包"),
+                )
+            ],
+        )
+        return kb, sql
+
+    def mixed_planner(self, *decisions) -> ScriptedPlanner:
+        return ScriptedPlanner(
+            route=RouteDecision(
+                intent="mixed",
+                action={"tool": "kb_search", "args": {"query": "酸奶 冷藏 胀包"}},
+                reason="双侧问题",
+            ),
+            decisions=list(decisions),
+        )
+
+    def query_then_answer(self) -> list[StepDecision]:
+        return [
+            StepDecision(
+                action="tool",
+                tool="sql_query",
+                args={"sql": "SELECT * FROM products WHERE name LIKE '%酸奶%'"},
+                reason="再查数值",
+            ),
+            StepDecision(action="final", sufficient=True, reason="两侧都有", answer="胀包就扔[3]"),
+        ]
+
+    def test_sql_after_three_doc_chunks_is_pulled_into_the_window(self, tmp_path):
+        kb, sql = self.tools(docs=3)
+        result = make_runtime(tmp_path, [kb, sql], self.mixed_planner(*self.query_then_answer())).run(
+            "酸奶怎么保存，胀包了还能喝吗"
+        )
+
+        # 两侧都查过了，门控不该再拦
+        assert result.gate_intercepts == 0
+        # 文档侧前两段照旧，数据库那一行落在第 3 位——正好留在只看前 3 段的那个窗口里
+        assert [c.source_uri for c in result.citations] == [
+            self.DOC_URIS[0],
+            self.DOC_URIS[1],
+            "demo.products#sql_query",
+            self.DOC_URIS[2],
+        ]
+        assert [c.index for c in result.citations] == [1, 2, 3, 4]
+        assert result.contexts[:3] == [self.DOC_TEXTS[0], self.DOC_TEXTS[1], self.SQL_TEXT]
+
+    def test_sql_pulled_into_the_window_in_stream(self, tmp_path):
+        kb, sql = self.tools(docs=3)
+        events = list(
+            make_runtime(tmp_path, [kb, sql], self.mixed_planner(*self.query_then_answer())).run_stream(
+                "酸奶怎么保存，胀包了还能喝吗"
+            )
+        )
+        citation_event = [e for e in events if e["event"] == "citations"][0]["data"]["citations"]
+        assert [c["source_uri"] for c in citation_event] == [
+            self.DOC_URIS[0],
+            self.DOC_URIS[1],
+            "demo.products#sql_query",
+            self.DOC_URIS[2],
+        ]
+
+    def test_sql_already_inside_the_window_is_left_alone(self, tmp_path):
+        kb, sql = self.tools(docs=2)
+        result = make_runtime(tmp_path, [kb, sql], self.mixed_planner(*self.query_then_answer())).run(
+            "酸奶怎么保存，胀包了还能喝吗"
+        )
+
+        # 只补「掉出窗口」的情形：数据库那一行本来在第 3 位，不为了挪动而挪动
+        assert [c.source_uri for c in result.citations] == [
+            self.DOC_URIS[0],
+            self.DOC_URIS[1],
+            "demo.products#sql_query",
+        ]
+        assert result.contexts[0] == self.DOC_TEXTS[0]
+
+    def test_window_rule_disabled_by_flag(self, tmp_path):
+        kb, sql = self.tools(docs=3)
+        result = make_runtime(
+            tmp_path,
+            [kb, sql],
+            self.mixed_planner(*self.query_then_answer()),
+            sql_evidence_window=False,
+        ).run("酸奶怎么保存，胀包了还能喝吗")
+
+        # 退回纯按调用顺序排列：数据库那一行仍在第 4 位，掉在只看前 3 段的窗口之外
+        assert [c.source_uri for c in result.citations] == self.DOC_URIS + ["demo.products#sql_query"]
+        assert result.contexts[3] == self.SQL_TEXT
+
+    def test_gate_forced_sql_stays_first_with_window_rule_on(self, tmp_path):
+        kb, sql = self.tools(docs=3)
+        sql.catalog = "products.name 取值样例：橙子 / 酸奶；products.description 存长文本，例：酸奶全程冷藏。"
+        planner = ScriptedPlanner(
+            route=RouteDecision(
+                intent="knowledge",
+                action={"tool": "kb_search", "args": {"query": "酸奶胀包 能否饮用"}},
+                reason="文档类问题",
+            ),
+            decisions=[
+                StepDecision(
+                    action="final",
+                    sufficient=False,
+                    missing="证据中未包含酸奶胀包后是否可饮用的说明",
+                    answer="",
+                    reason="查过了，材料里没有",
+                )
+            ],
+        )
+        result = make_runtime(tmp_path, [kb, sql], planner).run("酸奶胀包了还能喝吗？")
+
+        # 兜底门控那一次仍排第 1（v8.12 的规则），窗口规则只补掉出窗口的情形，不会把它挪回去
+        assert result.gate_intercepts == 1
+        assert result.contexts[0] == self.SQL_TEXT
+        assert [c.source_uri for c in result.citations][0] == "demo.products#sql_query"
+
+
 class TestSharedToolRegistryAssembly:
     """`build_tool_registry` 是 agentic 与 MCP 共用的装配：只认注册表，不经过 AgentRuntime。"""
 

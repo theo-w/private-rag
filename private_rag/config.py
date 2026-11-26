@@ -180,6 +180,10 @@ AGENT_KB_MISS_SQL_GATE = not _env_flag("RAG_DISABLE_AGENT_KB_MISS_SQL_GATE")
 # 按调用顺序排在前 3 位，就会把真正答题的那一行挤出引用编号与 @3 窗口（v8.10 复查里的 `xd08`
 # 正是这样：答案正确并引用了那一行，但它排第 4，取证与来源两项量不到）。置 1 退回按调用顺序排列。
 AGENT_KBMISS_EVIDENCE_PRIORITY = not _env_flag("RAG_DISABLE_AGENT_KBMISS_EVIDENCE_PRIORITY")
+# 数据库侧的记录不许掉出前 3 位证据窗口：双侧（mixed）问题里模型常先查几段文档再去查库，
+# 那一行就排到第 4 位，答案与引用都对、取证与来源两项却量不到（v8.12 记为「没修的部分」）。
+# 掉出窗口时把它拉回第 3 位，文档侧原来的前两位照旧。置 1 退回纯按调用顺序排列。
+AGENT_SQL_EVIDENCE_WINDOW = not _env_flag("RAG_DISABLE_AGENT_SQL_EVIDENCE_WINDOW")
 # 决策 JSON 的输出预算。推理型模型会先输出一段不可见的思考内容，
 # 预算给小了正文就是空的，路由会整段回退到关键词判断。
 AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)
