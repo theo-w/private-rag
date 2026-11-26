@@ -1861,3 +1861,69 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
 - **语料会变长**：评估库就是 README.md + `docs/*.md`，本节与 `docs/ROADMAP.md` 的 v8.13 章节都写在测量之后，
   旧题的命中可能跟着变。复现这轮数字必须 `git checkout 745540b` 再 `prepare_eval_kb.py --recreate`
   （两节正文都不含任何样本的原问题与证据原句，新增语料不会改变这些样本的检索行为）。
+
+## v8.14 引用带块级定位（`citation_locator`）——这一轮是护栏，不是收益
+
+这一轮改的是 MCP 对外的返回：引用与证据块多带一组「坐标」（出自哪一块、命中片段在返回文本里的哪个位置）。
+**agentic 链路根本不读这组字段**——它挂在 `ToolBlock.locator` 上，`render_evidence` 只读
+`label` / `text` / `citation`，轨迹与评估序列化也不读它。所以评估在这里量的是「加了它有没有把别的东西碰坏」，
+不是「涨了多少」；对外那条路径的可用性由单测与 MCP 真机冒烟负责。
+
+### 复现
+
+```bash
+# 按被测提交加本轮文档正文重建评估库（这一轮建出 442 个向量）
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/prepare_eval_kb.py --recreate
+
+# 14 条（knowledge 9 + 应拒答 5），同一进程里 off → on → off
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting citation_locator --values off,on,off \
+  --dataset eval/v8_agentic_expanded.jsonl \
+  --ids xk01,xk02,xk03,xk04,xk05,xk06,xk07,xk08,xk09,xr01,xr02,xr03,xr04,xr05 \
+  --agent-sources config/sources.eval.agent.v8.yaml \
+  --prefix v8_14_locator_guard_ab --keep-reports
+```
+
+报告在 `eval/reports/v8_14_locator_guard_ab_1_off.*`、`_2_on.*`、`_3_off.*`。三轮精排都生效（14/14），
+`n_errors` 三轮都是 0。对照脚本新增的 `citation_locator` 那一档把
+`private_rag.agent.tools.CITATION_LOCATOR` 与 `private_rag.mcp.evidence.CITATION_LOCATOR` 一起开关——
+只改一处会出现「造块时带定位、拼载荷时不带」的半开状态，那就不是在量这次要 ship 的行为。
+
+### 读数（14 条，同一进程三轮）
+
+| 指标 | 第 1 轮 `off`（冷，作废） | 第 2 轮 `on` | 第 3 轮 `off` |
+| --- | --- | --- | --- |
+| `answer_rate` | 1.000 | 1.000 | 1.000 |
+| `source_hit` | 0.889 | 1.000 | 1.000 |
+| `refusal_accuracy` | 1.000 | 1.000 | 1.000 |
+| `citation_rate` / `citation_validity` | 1.000 / 1.000 | 1.000 / 1.000 | 1.000 / 1.000 |
+| `evidence_hit@3` | 0.556 | 0.556 | 0.556 |
+| `mrr@3` | 0.426 | 0.426 | 0.426 |
+| `context_precision@3` | 0.185 | 0.185 | 0.185 |
+| `n_errors` | 0 | 0 | 0 |
+| 单条均耗时 | 47.1s（冷） | 37.1s | 33.9s |
+
+**两个暖轮（第 2 轮带、第 3 轮不带）九项指标逐字相同，十四条的逐条行为也零翻动**——逐条比的是拒答与否、
+意图、停止原因、工具次数与引用条数。这一处改动在评估路径上的全部作用是「造证据块时多算一份坐标」，
+读数量出来的是它什么都不改。
+
+翻动只出现在与冷启动参照轮之间，且不带定位的那一轮同样出现：`xk07` 的 `source_hit` 0 → 1、
+`xr04` 的停止原因 `insufficient_evidence`（1 次工具）→ `context_budget`（3 次工具，仍然正确拒答）。
+第 1 轮要把生成与精排模型加载进来，按既有口径作废，所以这两处归冷启动与路由漂移。
+
+### 限制（引用这轮数字时一并带上）
+
+- **它是护栏不是收益**：定位信息模型不读，评估只能证明「没扰动」，不能证明「对外有用」。后者的证据是
+  MCP 真机冒烟（`tools/list` 里只有 `kb_search` / `sql_query` 声明 `locator`、`ask` 两处都没有；
+  返回的证据块与引用带同一份定位，偏移相对返回文本）。
+- **同设置的两轮之间本来就有 1 条指标翻动**（第 1 轮与第 3 轮的 `source_hit`），所以本轮能归因的结论
+  只有「两个暖轮逐字相同」；暖轮之间的噪声底是 0 条。
+- **耗时判不可归因**：作废第一轮后同设置只剩一个暖「不带」轮，37.1s 对 33.9s 没有可比性；
+  这一处不增加任何模型调用与检索，每条只多几次字符串查找。
+- **数据侧与双侧样本没跑**：这 14 条没有一条走 SQL 那侧。SQL 侧的定位（哪条查询、取了哪些行）
+  由单测与真机冒烟覆盖，这轮没有读数。
+- **报告记 `git_commit=c9599ef`、`git_dirty=True`**：跑读数时脏的是正在写的文档正文与落盘的报告本身，
+  被测代码与单测就是 `c9599ef` 的内容。
+- **语料会变长**：评估库就是 `README.md` + `docs/*.md`，本节与 `docs/ROADMAP.md` 的 v8.14 章节都写在测量之后。
+  复现这轮数字要 `git checkout c9599ef` 再带上文档改动跑 `prepare_eval_kb.py --recreate`
+  （两节正文都不含任何样本的原问题与证据原句，新增语料不会改变这些样本的检索行为）。
