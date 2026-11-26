@@ -176,6 +176,10 @@ AGENT_NONE_PROBE = not _env_flag("RAG_DISABLE_AGENT_NONE_PROBE")
 # 同一条提示词在温度 0 下仍会翻动（v8.8 之后新集里剩的那条误判就是这个形状），
 # 靠措辞修不干净。置 1 退回「文档侧找不到那项事实就拒答」的原行为。
 AGENT_KB_MISS_SQL_GATE = not _env_flag("RAG_DISABLE_AGENT_KB_MISS_SQL_GATE")
+# 兜底门控捞回来的那条 SQL 记录排到证据最前面。文档侧那几段正是模型自己判定「不够」的材料，
+# 按调用顺序排在前 3 位，就会把真正答题的那一行挤出引用编号与 @3 窗口（v8.10 复查里的 `xd08`
+# 正是这样：答案正确并引用了那一行，但它排第 4，取证与来源两项量不到）。置 1 退回按调用顺序排列。
+AGENT_KBMISS_EVIDENCE_PRIORITY = not _env_flag("RAG_DISABLE_AGENT_KBMISS_EVIDENCE_PRIORITY")
 # 决策 JSON 的输出预算。推理型模型会先输出一段不可见的思考内容，
 # 预算给小了正文就是空的，路由会整段回退到关键词判断。
 AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)

@@ -1324,6 +1324,102 @@ class TestKbMissSqlGate:
             "sql_query",
         ]
 
+    def split_tools(self, tmp_path) -> tuple[RecordingTool, RecordingTool]:
+        """文档侧两段 + SQL 侧一行，标签与正文都互不相同，便于断言排列顺序。"""
+        kb = RecordingTool(
+            "kb_search",
+            blocks=[
+                ToolBlock("README.md", "酸奶冷藏保存", Citation(1, "README.md", "file", "README.md", "冷藏")),
+                ToolBlock(
+                    "docs/beginner-guide.md",
+                    "冷藏链条说明",
+                    Citation(1, "docs/beginner-guide.md", "file", "docs/beginner-guide.md", "冷藏"),
+                ),
+            ],
+        )
+        sql = RecordingTool(
+            "sql_query",
+            blocks=[
+                ToolBlock(
+                    "demo.products#sql_query",
+                    "酸奶全程冷藏，胀包就直接扔掉",
+                    Citation(1, "demo.products 查询结果", "sql", "demo.products#sql_query", "胀包"),
+                )
+            ],
+            data={"sql": "SELECT * FROM products WHERE name LIKE '%酸奶%' LIMIT 5"},
+        )
+        sql.catalog = self.CATALOG
+        return kb, sql
+
+    def test_gate_forced_sql_row_is_the_first_evidence(self, tmp_path):
+        kb, sql = self.split_tools(tmp_path)
+        result = make_runtime(tmp_path, [kb, sql], self.kb_planner(self.refusal())).run(
+            "酸奶胀包了还能喝吗？"
+        )
+
+        assert result.gate_intercepts == 1
+        # 门控那次查询才是这道题的答案所在，文档侧那两段是模型自己判定「不够」的材料，
+        # 排在前头会把真正答题的那一行挤出引用编号与评估的 @3 窗口
+        assert result.contexts[0] == "酸奶全程冷藏，胀包就直接扔掉"
+        assert [c.source_uri for c in result.citations] == [
+            "demo.products#sql_query",
+            "README.md",
+            "docs/beginner-guide.md",
+        ]
+        assert [c.index for c in result.citations] == [1, 2, 3]
+
+    def test_gate_forced_sql_row_is_the_first_evidence_in_stream(self, tmp_path):
+        kb, sql = self.split_tools(tmp_path)
+        events = list(
+            make_runtime(tmp_path, [kb, sql], self.kb_planner(self.refusal())).run_stream(
+                "酸奶胀包了还能喝吗？"
+            )
+        )
+
+        citation_event = [e for e in events if e["event"] == "citations"][0]["data"]["citations"]
+        assert [c["source_uri"] for c in citation_event][:2] == [
+            "demo.products#sql_query",
+            "README.md",
+        ]
+
+    def test_priority_disabled_by_flag(self, tmp_path):
+        kb, sql = self.split_tools(tmp_path)
+        result = make_runtime(
+            tmp_path,
+            [kb, sql],
+            self.kb_planner(self.refusal()),
+            kbmiss_evidence_priority=False,
+        ).run("酸奶胀包了还能喝吗？")
+
+        # 退回按调用顺序排列：SQL 那一行仍在文档两段之后
+        assert result.gate_intercepts == 1
+        assert [c.source_uri for c in result.citations] == [
+            "README.md",
+            "docs/beginner-guide.md",
+            "demo.products#sql_query",
+        ]
+
+    def test_model_initiated_sql_keeps_call_order(self, tmp_path):
+        kb, sql = self.split_tools(tmp_path)
+        planner = self.kb_planner(
+            StepDecision(
+                action="tool",
+                tool="sql_query",
+                args={"sql": "SELECT * FROM products WHERE name LIKE '%酸奶%'"},
+                reason="自己想去查库",
+            ),
+            StepDecision(action="final", sufficient=True, reason="两侧都有", answer="胀包就扔[1]"),
+        )
+        result = make_runtime(tmp_path, [kb, sql], planner).run("酸奶胀包了还能喝吗？")
+
+        # 门控没触发，顺序不动：这一档只改门控强制的那一次
+        assert result.gate_intercepts == 0
+        assert [c.source_uri for c in result.citations] == [
+            "README.md",
+            "docs/beginner-guide.md",
+            "demo.products#sql_query",
+        ]
+
 
 class TestSharedToolRegistryAssembly:
     """`build_tool_registry` 是 agentic 与 MCP 共用的装配：只认注册表，不经过 AgentRuntime。"""
