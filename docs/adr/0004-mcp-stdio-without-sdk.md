@@ -10,7 +10,7 @@
 
 ## Consequences
 
-- 只支持 stdio，没有进度通知与流式工具结果；长调用（尤其 `ask`）在客户端侧表现为「这一次调用慢」，而不是「有中间进度」。
+- 只支持 stdio。进度通知已按阶段手写补上（v8.15，见 `docs/adr/0010`）：客户端带 `progressToken` 时，长调用在响应之前先几条「现在在做什么」。分段的工具结果仍做不到——协议里没有这种东西，SDK 也帮不上。
 - 协议版本要手工跟进：`SUPPORTED_PROTOCOL_VERSIONS` 里只有三个已知日期，客户端带更新的日期时回落到我方声明的版本，由客户端决定能不能继续。协议新增必填字段时这里要改代码，不会自动跟上。
 - 没有鉴权：能启动这个进程的人就能读知识库，与本机 HTTP 服务的无鉴权同级。
 - 将来仓库升到 3.10+ 时，可以把 `private_rag/mcp/server.py` 换成 SDK 的 `Server` + `stdio_server`，工具层（`private_rag/mcp/tools.py`）与证据编号（`private_rag/mcp/evidence.py`）不用动——协议面与业务面是分开的，这层替换是纯替换。

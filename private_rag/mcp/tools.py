@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field, replace
-from typing import Any, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 from private_rag.agent.tools import ToolBlock, citation_label
 from private_rag.config import (
@@ -53,6 +53,15 @@ STORAGE_LOCKED_HINT = (
 STORAGE_LOCKED_MARKERS = ("another instance", "already accessed", "already locked")
 
 ENGINE_NOT_READY_HINT = "未注入检索引擎：这个工具面只能用于查看工具定义（--list-tools）"
+
+# 进度回调：与 `private_rag/evaluation.py` 的 `Progress` 同形（可选、用前判空、阶段之间调用），
+# 只是多带一个步数——服务端拿它当 notifications/progress 里的 progress。
+Progress = Callable[[str, int], None]
+
+
+def _report(progress: Optional[Progress], message: str, step: int) -> None:
+    if progress is not None:
+        progress(message, step)
 
 
 @dataclass
@@ -186,8 +195,11 @@ class McpTool:
     title: str = ""
     input_schema: dict[str, Any] = {"type": "object", "properties": {}}
     output_schema: dict[str, Any] = {"type": "object", "properties": {}}
+    # 这次调用一共几步，服务端拿它当进度通知里的 total。没有进度可报的工具保持 1，
+    # 只在类属性里声明，不进 definition()，所以 tools/list 的形状不受影响。
+    progress_steps: int = 1
 
-    def run(self, args: dict[str, Any]) -> ToolOutcome:
+    def run(self, args: dict[str, Any], *, progress: Optional[Progress] = None) -> ToolOutcome:
         raise NotImplementedError
 
     def definition(self) -> dict[str, Any]:
@@ -218,6 +230,7 @@ class KbSearchTool(McpTool):
         "检索本机知识库，返回带编号的证据块与引用元数据（来源类型、标题、URI、页码/表名）。"
         "只读，不会改动知识库；资料类问题优先用它，需要成句回答时用 ask。"
     )
+    progress_steps = 2
 
     def __init__(
         self,
@@ -257,7 +270,7 @@ class KbSearchTool(McpTool):
         }
         self.output_schema = search_output_schema()
 
-    def run(self, args: dict[str, Any]) -> ToolOutcome:
+    def run(self, args: dict[str, Any], *, progress: Optional[Progress] = None) -> ToolOutcome:
         invalid = _reject_unknown(args, ("query", "limit", "tags", "tag", "source_type"))
         if invalid:
             return ToolOutcome(False, error=invalid)
@@ -286,12 +299,14 @@ class KbSearchTool(McpTool):
             source_type=source_type,
             tags=tags or None,
         )
+        _report(progress, "正在检索知识库", 1)
         try:
             trace = self.engine.retrieve_with_trace(query, options)
         except Exception as exc:
             return ToolOutcome(False, error=f"检索失败：{failure_reason(exc)}")
 
         chunks = list(trace.chunks)
+        _report(progress, f"已检索到 {len(chunks)} 段证据", 2)
         if not chunks:
             return ToolOutcome(
                 True,
@@ -355,6 +370,7 @@ class AskTool(McpTool):
         "资料不足时返回固定拒答话术而不是编造；只读，不会改动知识库。"
         "单次调用是一轮独立问答（没有会话历史），多轮追问请自己带上上下文。"
     )
+    progress_steps = 3
 
     def __init__(
         self,
@@ -392,7 +408,7 @@ class AskTool(McpTool):
         }
         self.output_schema = ask_output_schema()
 
-    def run(self, args: dict[str, Any]) -> ToolOutcome:
+    def run(self, args: dict[str, Any], *, progress: Optional[Progress] = None) -> ToolOutcome:
         invalid = _reject_unknown(args, ("question", "limit", "tags", "tag", "source_type"))
         if invalid:
             return ToolOutcome(False, error=invalid)
@@ -421,9 +437,16 @@ class AskTool(McpTool):
             source_type=source_type,
             tags=tags or None,
         )
+        _report(progress, "正在检索知识库", 1)
+        call_kwargs: dict[str, Any] = {"options": options}
+        if progress is not None:
+            # 只有要发进度时才挂这个钩子，不挂时与 HTTP /chat 是同一个调用形状
+            call_kwargs["on_retrieved"] = lambda count: _report(
+                progress, f"已检索到 {count} 段证据，正在生成答案", 2
+            )
         started = time.perf_counter()
         try:
-            result = self.engine.answer(question, options=options)
+            result = self.engine.answer(question, **call_kwargs)
         except Exception as exc:
             return ToolOutcome(False, error=f"问答失败：{failure_reason(exc)}")
         elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -460,6 +483,7 @@ class SqlQueryTool(McpTool):
 
     name = "sql_query"
     title = "业务库只读查询"
+    progress_steps = 2
 
     def __init__(self, tool: Any):
         self.tool = tool
@@ -478,7 +502,7 @@ class SqlQueryTool(McpTool):
         }
         self.output_schema = sql_output_schema()
 
-    def run(self, args: dict[str, Any]) -> ToolOutcome:
+    def run(self, args: dict[str, Any], *, progress: Optional[Progress] = None) -> ToolOutcome:
         invalid = _reject_unknown(args, ("sql",))
         if invalid:
             return ToolOutcome(False, error=invalid)
@@ -491,12 +515,14 @@ class SqlQueryTool(McpTool):
         if len(sql) > MAX_SQL_CHARS:
             return ToolOutcome(False, error=f"参数 sql 最多 {MAX_SQL_CHARS} 个字符")
 
+        _report(progress, "正在查询业务库", 1)
         try:
             result = self.tool.run({"sql": sql})
         except Exception as exc:  # 连库失败之类不能让服务死掉
             return ToolOutcome(False, error=f"查询失败：{failure_reason(exc)}")
         if not result.ok:
             return ToolOutcome(False, error=f"查询失败：{result.error or '查询未成功'}")
+        _report(progress, f"已取回 {result.rows} 行", 2)
 
         data = result.data or {}
         executed = str(data.get("sql") or sql)

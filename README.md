@@ -226,6 +226,7 @@ event: error      data: {"code":"generation_failed","message":"...","request_id"
 | `RAG_DISABLE_AGENT_KB_MISS_SQL_GATE` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：意图判 `knowledge` 而文档侧查不到那项事实就直接按证据不足拒答（默认在拒答之前，若问题指名的实体出现在「库内数据」的取值里，先按该实体查一次业务表） |
 | `RAG_DISABLE_AGENT_KBMISS_EVIDENCE_PRIORITY` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：兜底门控捞回的那条 SQL 记录按调用先后排在证据末尾（默认排到最前——文档侧那几段正是模型判定「不够」的材料，排在前面会把真正答题的那一行挤出引用编号与前 3 位的取证窗口） |
 | `RAG_DISABLE_CITATION_LOCATOR` | 未设置 | 设为 `1/true/yes/on` 时 MCP 的引用与证据块不带块级定位（`locator`），连 `tools/list` 里的工具定义都逐字退回没有这个字段的形状；只影响 MCP 对外载荷，agentic 循环、HTTP 接口与评估报告本来就不读它 |
+| `RAG_DISABLE_MCP_PROGRESS` | 未设置 | 设为 `1/true/yes/on` 时 MCP 长调用不发进度通知，逐字退回今天的一问一答（客户端带 `progressToken` 也只收到一条最终响应）；只影响 MCP 对外通道，HTTP 与 agentic 链路本来就不发通知 |
 | `RAG_DISABLE_AGENT_SQL_EVIDENCE_WINDOW` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：证据完全按调用先后排列（默认把掉出前 3 位的数据库侧记录拉回第 3 位——双侧问题里模型常先查几段文档再去查库，那一行排到第 4 位就落在取证与来源两项的窗口之外，答题与引用都对却量不到） |
 | `RAG_AGENT_PLANNER_MODE` | `json` | 设为 `function` 时路由/步进决策改走原生 function calling（同一提示词与预算，见 `ask_tool_json`）；非法值归一为 `json`。两条通道的对比读数见 `eval/reports/fc_comparison_report.md` |
 
@@ -734,13 +735,41 @@ python3 scripts/serve_mcp.py --list-tools
 **`ask` 没有 `locator`**——它的引用来自生成阶段，手上没有块，补不出定位（工具定义里也不声明这个字段）。
 `RAG_DISABLE_CITATION_LOCATOR=1` 逐字退回今天的形状，连 `tools/list` 里那份工具定义都不多一个键。
 
+### 进度通知
+
+`ask` 一次要十几秒（检索加生成），客户端原本只能看到一个转圈的未知时长。MCP 协议里有个专门表达
+「这次调用还在进行」的机制，叫**进度通知**：客户端在请求的 `params._meta.progressToken` 里放一个
+不透明的标记（字符串或整数，服务端原样回传），服务端就在最终响应之前先写几条 `notifications/progress`，
+说清楚现在做到哪一段。协议里没有「结果分段返回」这种东西，所以答案仍是一次性给全，通知只说
+「现在在做什么」，不编造百分比。
+
+| 工具 | 通知内容（`progress` 是步数，`total` 是这次调用的总步数） |
+|---|---|
+| `kb_search` | 1 正在检索知识库 → 2 已检索到 N 段证据 |
+| `ask` | 1 正在检索知识库 → 2 已检索到 N 段证据，正在生成答案 → 3 已完成 |
+| `sql_query` | 1 正在查询业务库 → 2 已取回 N 行 |
+
+四条口径：
+
+- **客户端不带 `progressToken` 就一条都不发**，响应逐字与以前相同。`_meta` 写了别的东西，或者 token
+  是列表、对象、布尔这类不是字符串和整数的值，一律按「没带」处理；客户端把 `_meta` 乱填成字符串也
+  不会让这个服务退出。
+- **通知没有 `id`**，按 JSON-RPC 客户端不会为它等一个响应；不认识这种通知的客户端直接忽略，最终
+  响应照旧。
+- **只报真实阶段**：参数校验没过、工具没注册（没开 `--allow-sql` 时调 `sql_query`）、检索还没开始，
+  都不发「正在检索」这类假消息。工具体内失败时补的是「已结束」而不是「已完成」，客户端不会停在半截。
+- `RAG_DISABLE_MCP_PROGRESS=1` 逐字退回今天的一问一答（一条通知都不发）。`initialize` 与 `tools/list`
+  的形状本来就没动——协议里没有「进度」这个能力字段，开关就是请求里那个 token 本身。
+
+选型与被否方案见 [docs/adr/0010](docs/adr/0010-mcp-progress-notifications-by-phase.md)。
+
 ### 与 HTTP API 的区别
 
 | | `scripts/serve.py`（HTTP） | `scripts/serve_mcp.py`（MCP） |
 |---|---|---|
 | 调用方 | curl / 前端 / 评估脚本 | MCP 客户端（模型自己决定何时调用） |
 | 会话 | `session_id` + 历史裁剪 | 无会话，单次调用是一轮独立问答 |
-| 流式 | `/chat/stream` SSE | 无流式，也不发进度通知 |
+| 流式 | `/chat/stream` SSE | 无流式（工具结果一次性返回，协议里没有分段结果），但长调用会在响应之前发进度通知（见上面「进度通知」） |
 | 数据面 | `/chat` 固定链路、`/chat/agent` agentic | 固定链路的检索与问答；`--allow-sql` 才有业务库查询 |
 | SQL | `/chat/agent` 按 `sources.yaml` 授权开只读 SQL 工具 | 默认不暴露；`--allow-sql` 才暴露，入库/写库两边都不暴露 |
 | 引用定位 | 引用只有 `page` / `table`（与历史评估报告逐字一致，刻意不加字段） | 额外带块级定位 `locator`（见上面「可用工具与参数」），只在 MCP 载荷里 |
