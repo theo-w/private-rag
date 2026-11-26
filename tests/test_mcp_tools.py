@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from private_rag.agent.tools import ToolResult
+from private_rag.agent.tools import ToolBlock, ToolResult
 from private_rag.config import MAX_QUESTION_CHARS, TOP_K_RERANK
 from private_rag.generation import REFUSAL, build_citations
-from private_rag.mcp.evidence import citation_payload
+from private_rag.mcp.evidence import citation_payload, evidence_citations, evidence_payload
 from private_rag.mcp.tools import (
     MAX_SQL_CHARS,
     STORAGE_LOCKED_HINT,
@@ -350,6 +350,23 @@ def test_citation_payload_shape():
     payload = citation_payload(citation)
     assert payload["index"] == 2 and payload["table"] == "products" and payload["score"] == 0.8123
     assert "page" not in payload
+    # 没给定位就不出现这个键，与其余「缺字段省略」的口径一致
+    assert "locator" not in payload
+    located = citation_payload(citation, {"chunk_id": "p1", "snippet_offset": 3})
+    assert located["locator"] == {"chunk_id": "p1", "snippet_offset": 3}
+
+
+def test_evidence_and_citations_share_the_block_locator():
+    block = ToolBlock(
+        label="file | 文档1",
+        text="第一段",
+        citation=Citation(1, "文档1", "file", "u1", "s"),
+        locator={"chunk_id": "p1", "snippet_offset": 0},
+    )
+    assert evidence_payload([block])[0]["locator"] == {"chunk_id": "p1", "snippet_offset": 0}
+    assert evidence_citations([block])[0]["locator"] == {"chunk_id": "p1", "snippet_offset": 0}
+    # 无引用的块不参与编号，也不带定位
+    assert "locator" not in evidence_payload([ToolBlock(label="a", text="无来源")])[0]
 
 
 # sql_query：包装 agentic 那颗运行时查询工具，护栏与授权语义照旧

@@ -70,6 +70,47 @@ def build_citations(chunks: Sequence[RetrievedChunk]) -> list[Citation]:
     return citations
 
 
+def chunk_locator(chunk: RetrievedChunk, block_text: str = "") -> dict[str, Any]:
+    """这条引用出自哪一块、命中片段在实际返回的那段文本里的什么位置。
+
+    只给对外通道用（MCP 的工具返回），agentic 循环不读它。**拿不到的键直接不出现**，
+    与 `build_citations` 的省略口径一致，不臆造数字：
+
+    - `chunk_id` 是入库时算出的块身份（`doc_id:内容哈希:块序号` 的稳定 id），内容一改就换 id。
+    - `doc_id` / `chunk_index` / `chunk_count` 指**命中的子块**，不是父块扩展后的整段；
+      开启父块扩展时另外给 `parent_id`。
+    - `snippet_offset` 相对调用方传进来的 `block_text` 算（父块扩展后返回文本比命中片段长，
+      截断以后也更短），命中片段不在那段文本里时整个不出现。
+    """
+    metadata = chunk.metadata or {}
+    locator: dict[str, Any] = {}
+    chunk_id = str(getattr(chunk, "point_id", "") or "")
+    if chunk_id:
+        locator["chunk_id"] = chunk_id
+    if metadata.get("doc_id") is not None:
+        locator["doc_id"] = str(metadata["doc_id"])
+    for key in ("chunk_index", "chunk_count"):
+        value = metadata.get(key)
+        if value is not None:
+            try:
+                locator[key] = int(value)
+            except (TypeError, ValueError):
+                pass
+    parent_id = getattr(chunk, "parent_id", None) or metadata.get("parent_id")
+    if parent_id:
+        locator["parent_id"] = str(parent_id)
+    if metadata.get("page") is not None:
+        locator["page"] = int(metadata["page"])
+    if metadata.get("table") is not None:
+        locator["table"] = str(metadata["table"])
+    snippet = str(getattr(chunk, "snippet_text", "") or "")
+    if snippet:
+        offset = str(block_text or "").find(snippet)
+        if offset >= 0:
+            locator["snippet_offset"] = offset
+    return locator
+
+
 def render_history(history: Optional[History]) -> str:
     """把会话历史渲染成 prompt 段落；历史只帮助理解指代，不作为事实依据。"""
     if not history:

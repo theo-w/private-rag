@@ -32,6 +32,8 @@ configure_eval_env()
 
 import private_rag.agent.prompts as prompts  # noqa: E402
 import private_rag.agent.runtime as runtime_module  # noqa: E402
+import private_rag.agent.tools as agent_tools  # noqa: E402
+import private_rag.mcp.evidence as mcp_evidence  # noqa: E402
 
 # scripts/evaluate.py 就是评估 CLI，这里按轮调用它的 main，报告的指标口径与平时跑评估完全一致
 import evaluate  # noqa: E402
@@ -100,6 +102,16 @@ def _set_sql_window_bad_route(value: str) -> None:
     setattr(runtime_module, "AGENT_SQL_EVIDENCE_WINDOW", value not in {"off", "0", "no"})
 
 
+def _set_citation_locator(value: str) -> None:
+    """引用是否带块级定位（出自哪一块、命中片段在返回文本里的位置）。
+    agentic 链路不读这个字段，所以这一档量的是「加了它会不会扰动行为」，是护栏不是收益。
+    两处都要改：工具造块的地方与 MCP 载荷拼 locator 的地方。
+    """
+    on = value not in {"off", "0", "no"}
+    setattr(agent_tools, "CITATION_LOCATOR", on)
+    setattr(mcp_evidence, "CITATION_LOCATOR", on)
+
+
 # 可以交替的设置项。思考开关在 prompts 里是导入时抓的快照，必须改模块属性才生效
 # （只改 config 不会被读到，见 scripts/check_generation_determinism.py 的同一处理）。
 SETTINGS: dict[str, Callable[[str], None]] = {
@@ -118,6 +130,7 @@ SETTINGS: dict[str, Callable[[str], None]] = {
     "kbmiss_priority_bad_route": _set_kbmiss_priority_bad_route,
     "sql_evidence_window": _set_sql_evidence_window,
     "sql_window_bad_route": _set_sql_window_bad_route,
+    "citation_locator": _set_citation_locator,
 }
 
 # 对照时看的整轮指标：前四项是「不能变差」的门禁，其余是取证与引用的质量

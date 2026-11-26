@@ -36,4 +36,5 @@ ADR 0005 的顾虑没有被推翻，只是加了一道门来兜它：外部客�
 - `--list-tools` 不装配 `sql_query`：那颗工具的定义要从 `sources.yaml` 与业务库取表结构，自检模式不
   打开它们，所以那里只列知识库两个工具。
 - 与 PR #22（同样暴露 `sql_query`）的口径差异只剩引用载荷：那边每条引用附块级 `locator`，这边沿用
-  既有 `Citation` 字段。
+  既有 `Citation` 字段。这一条已在 v8.14 补齐——MCP 的证据块与引用都带块级定位，但按 `docs/adr/0009`
+  的做法挂在 `ToolBlock` 而不是 `Citation`，HTTP 与评估报告的引用形状没动。

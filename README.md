@@ -225,6 +225,7 @@ event: error      data: {"code":"generation_failed","message":"...","request_id"
 | `RAG_DISABLE_AGENT_GATE_SIDE_TRACKING` | 未设置 | 设为 `1/true/yes/on` 时 mixed 门控退回旧行为：拿证据块的标签文字找工具名来认「这一侧查过没有」（真实证据块的标签里没有工具名，等于永远判一侧没查过，每条 mixed 都被反复逼到步数用尽） |
 | `RAG_DISABLE_AGENT_KB_MISS_SQL_GATE` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：意图判 `knowledge` 而文档侧查不到那项事实就直接按证据不足拒答（默认在拒答之前，若问题指名的实体出现在「库内数据」的取值里，先按该实体查一次业务表） |
 | `RAG_DISABLE_AGENT_KBMISS_EVIDENCE_PRIORITY` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：兜底门控捞回的那条 SQL 记录按调用先后排在证据末尾（默认排到最前——文档侧那几段正是模型判定「不够」的材料，排在前面会把真正答题的那一行挤出引用编号与前 3 位的取证窗口） |
+| `RAG_DISABLE_CITATION_LOCATOR` | 未设置 | 设为 `1/true/yes/on` 时 MCP 的引用与证据块不带块级定位（`locator`），连 `tools/list` 里的工具定义都逐字退回没有这个字段的形状；只影响 MCP 对外载荷，agentic 循环、HTTP 接口与评估报告本来就不读它 |
 | `RAG_DISABLE_AGENT_SQL_EVIDENCE_WINDOW` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：证据完全按调用先后排列（默认把掉出前 3 位的数据库侧记录拉回第 3 位——双侧问题里模型常先查几段文档再去查库，那一行排到第 4 位就落在取证与来源两项的窗口之外，答题与引用都对却量不到） |
 | `RAG_AGENT_PLANNER_MODE` | `json` | 设为 `function` 时路由/步进决策改走原生 function calling（同一提示词与预算，见 `ask_tool_json`）；非法值归一为 `json`。两条通道的对比读数见 `eval/reports/fc_comparison_report.md` |
 
@@ -717,6 +718,22 @@ python3 scripts/serve_mcp.py --list-tools
 `citations` 里的 `page` / `table` 能回溯到页或行。参数越界或写了不认识的参数会以 `isError` 返回一句中文原因
 （不是协议错误），客户端能直接把原因读给用户。
 
+`kb_search` 与 `sql_query` 的每个证据块与每条引用还带一个 `locator`（块级定位）——说的是「这条引用出自
+哪一块、命中的那段话在返回文本里的哪个位置」，客户端可以拿它做「跳到原文那一处」或直接高亮：
+
+| `locator` 的键 | 含义 |
+|---|---|
+| `chunk_id` | 这一块的身份。入库时按「文档 + 内容哈希 + 块序号」算出，内容没改重入库仍是同一个 id，内容一改就换 id（旧 id 指向的已经不是那块内容），别当跨版本的固定坐标用 |
+| `doc_id` / `chunk_index` / `chunk_count` | 命中的那一块属于哪个文档、是第几块、该文档共几块 |
+| `parent_id` | 开启父块扩展时才有：返回的长文本属于那个父块，上面的 `doc_id` 仍指命中的子块 |
+| `page` / `table` | 与引用同一口径 |
+| `snippet_offset` | 命中片段在 `evidence.text` 里的起始字符位置，可直接用来高亮 |
+
+三条口径要提前知道：**取不到的键直接不出现**（不用 `null` 占位，与其余缺字段的处理一致）；
+**偏移相对实际返回的那段文本算**，块被字符上限截断到片段整体被切掉时这个键整个省略，不臆造数字；
+**`ask` 没有 `locator`**——它的引用来自生成阶段，手上没有块，补不出定位（工具定义里也不声明这个字段）。
+`RAG_DISABLE_CITATION_LOCATOR=1` 逐字退回今天的形状，连 `tools/list` 里那份工具定义都不多一个键。
+
 ### 与 HTTP API 的区别
 
 | | `scripts/serve.py`（HTTP） | `scripts/serve_mcp.py`（MCP） |
@@ -726,6 +743,7 @@ python3 scripts/serve_mcp.py --list-tools
 | 流式 | `/chat/stream` SSE | 无流式，也不发进度通知 |
 | 数据面 | `/chat` 固定链路、`/chat/agent` agentic | 固定链路的检索与问答；`--allow-sql` 才有业务库查询 |
 | SQL | `/chat/agent` 按 `sources.yaml` 授权开只读 SQL 工具 | 默认不暴露；`--allow-sql` 才暴露，入库/写库两边都不暴露 |
+| 引用定位 | 引用只有 `page` / `table`（与历史评估报告逐字一致，刻意不加字段） | 额外带块级定位 `locator`（见上面「可用工具与参数」），只在 MCP 载荷里 |
 
 `sql_query` 要过三重门，缺一门就不出现在 `tools/list`，理由见
 [docs/adr/0006](docs/adr/0006-mcp-sql-query-behind-three-gates.md)（它取代 0005 的「不暴露 SQL」一条）：

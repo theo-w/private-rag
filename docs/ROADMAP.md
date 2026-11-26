@@ -33,6 +33,7 @@
 | v8.11 | `claude/v8-eval-set-expansion-74416b` | 评估集边界题与可比口径：补 11 条现在没有的边界类型（历史里有一句错值、一侧查无此物、SQL 查出来是空集、要的是字段原文不是描述里的说法、字面词撞得上但语料与库里没答案），并加两个离线工具——`scripts/check_eval_dataset.py`（一次跑完就报每条证据能否逐字找到、类别配比、双侧声明条数、可回答/应拒答配比、跨文件重复与证据句互为子串）与 `scripts/eval_subset_metrics.py`（从同一份报告按 id 子集重算指标，并把比率差换算成「几条样本」） | ✅ 已合入 main（PR #35 → `8d410bd`） | 664 测试通过（既有 655 + 新增 10，全部不打模型、不联网、不开真实 Qdrant）；旧 69 条的 id/问题/参考答案/证据一字未改（单测钉住「合并后前 29 个 id 与 v7 逐字相同」与「新 8 条可回答样本的证据与新旧全部证据两两不互为子串」），合并 80 条 = 68 可回答 + 12 应拒答，分布 `knowledge 17 / database 15 / mixed 14 / multi_step 11 / coreference 11 / refusal 12`，声明双侧仍 14 条；语料与评估库都没动，所以 v8.7/v8.8 的基线不需要因为这一轮重测；基线读数（测于 `e0f2065`、`git_dirty=False`、346 个向量、精排 80/80 生效）：全集 80 条 `evidence_hit@3` 0.676 / `source_hit` 0.956 / `both_sides_hit` 0.857 / `answer_rate` 0.926 / `refusal_accuracy` 1.000，可比子集 69 条 0.683 / 0.983 / 0.857 / 0.950 / 1.000，边界 11 条 0.625 / 0.750 / — / 0.750 / 1.000；同子集与 v8.7 合并报告比 `source_hit` +10.4 条、`answer_rate` +9.2 条、`evidence_hit@3` +5.8 条，但涨幅主因是已合入的 v8.8 路由修复（7 条 `database` 样本从误拒变作答）而不是本轮加题，跨轮只当方向；新样本单条 104.1s vs 可比子集 38.8s（边界题更容易撞 `max_steps` / `context_budget`），耗时不作依据；两条必须动语料或评估库才能成立的边界（SQL 侧 NULL、文档与 SQL 说法冲突）没做，口径与逐条见 `eval/README.md` 的 v8.11 |
 | v8.12 | `v8-data-side-evidence` | 兜底门控捞回的那行 SQL 记录排到证据最前：证据按调用先后排列，文档侧先查到的材料占住第 1–3 位，门控后来捞的记录落到第 4 位，而 `evidence_hit@3` 与 `source_hit` 只看前 3 位 → v8.10 兜住的样本「答对且引用了」两项仍记 0。现在门控强制的那次查询的证据提到最前，其余顺序不动；只认门控强制的那一次 | ✅ 已合入 main（PR #37 → `d80e180`） | 与 v8.10 各自可单独退回（`RAG_DISABLE_AGENT_KBMISS_EVIDENCE_PRIORITY=1`）；714 测试通过（新增 4 条，不打模型）；模拟「路由判错」时 `xd01–xd08` 8 条同进程 `off → on → off`：`evidence_hit@3` 与 `source_hit` 0.625 → 0.875（+2 条），翻动的正是原本排第 4 的那两条 `xd05`/`xd08`（引用条数、门控次数、停止原因都没变）；护栏 21 条九项指标三轮逐字相同、逐条行为零翻动；暖轮耗时 31.1s vs 31.2s，只改顺序不多跑查询；出厂设置那一组测不出这一处改动（三轮里只有第 1 轮触发门控，另两轮路由判成 `database`），判不可判定；`xd04` 三轮都没触发门控、两项仍记 0（`mixed` 里 SQL 排第 4 的情形没动）；报告 `eval/reports/v8_12_kbmiss_misroute_ab_*`、`v8_12_kbmiss_guard_ab_*`、`v8_12_kbmiss_data_ab_*`，经过见下面的 v8.12 详细验收 |
 | v8.13 | `v8-sql-evidence-window` | 数据库侧的记录不许掉出前 3 位证据窗口：模型**自己**先查几段文档再去查库时，那一行按调用先后排到第 4 位甚至更后，而 `evidence_hit@3` 与 `source_hit` 只看前 3 位 → 答对且引用了仍记 0（v8.12 记为「没修的部分」）。现在掉出窗口时拉回第 3 位，文档侧原来的前两位不动，本来就在窗口内什么都不做 | ✅ 已合入 main（PR #39 → `871731f`） | 719 测试通过（既有 714 + 新增 5，不打模型）；开关 `RAG_DISABLE_AGENT_SQL_EVIDENCE_WINDOW=1` 逐字退回纯按调用先后排列，与 v8.10 门控、v8.12 置顶各自可单独退回；模拟「路由判错」的 8 条同进程 `off → on → off`：`evidence_hit@3` 与 `source_hit` 0.875 → 1.000（+1 条 = +12.5pt）、`mrr@3` 0.875 → 0.917、`context_precision@3` 0.458 → 0.583，翻动的正是原本排第 7 的 `xd05`（意图、停止原因、工具次数、引用 7 条都没变，门控 0 次 → 上一条规则管不到）；出厂设置的双侧题 12 条同口径：`source_hit` 0.917 → 1.000、`evidence_hit@3` 0.583 → 0.667，翻动的是原本排第 4 的 `xm07`，`both_sides_hit` 0.833 三轮持平（这项不看窗口）、逐条行为零翻动；护栏 14 条九项指标三轮逐字相同；两组各自的两个「不改」轮九项指标都逐字相同（漂移 0 条），两处 +1 条都可归因；耗时判没变化（暖轮 +1.3% / -0.8%，这一处不多跑任何查询；误判路由那组的 60.2s vs 39.9s 不可归因——同设置两轮自己差 47%）；真正被管到的只有 2 条（34 条里 32 条本来就在窗口内），所以只支撑方向不支撑百分比；报告 `eval/reports/v8_13_sql_window_*`，经过见下面的 v8.13 详细验收 |
+| v8.14 | `v8-citation-locator` | 引用带块级定位：MCP 的 `kb_search` / `sql_query` 每个证据块与每条引用多一个 `locator`，说的是「这条引用出自哪一块、命中的那段话在返回文本里的哪个位置」，客户端可以据此跳到原文那一处或直接高亮；比已关闭的 PR #22 多做一件——带上入库时算出的块身份 `chunk_id`（内容没改重入库仍是同一个 id，内容一改就换）。按用户口径只进 MCP 对外通道：agentic 循环、HTTP `/chat` 与 `/chat/agent` 的引用载荷、评估报告三处字节形状一字不变，`ask` 没有定位（引用来自生成阶段，手上没有块） | 本分支完成 | 735 测试通过（既有 719 + 新增 16，全部不打模型、不开真实 Qdrant）；开关 `RAG_DISABLE_CITATION_LOCATOR=1` 逐字退回今天的形状——`serve_mcp.py --list-tools` 的输出与 `origin/main` 逐字节相同（实跑 diff 比对），`tools/call` 的载荷也不多一个键；护栏 14 条（`knowledge` 9 + 应拒答 5）同进程 `off → on → off`：**两个暖轮九项指标逐字相同、逐条行为零翻动**（`answer_rate` / `source_hit` / `refusal_accuracy` / 引用两项都 1.000，`evidence_hit@3` 0.556、`mrr@3` 0.426、`context_precision@3` 0.185、`n_errors` 0 三轮都是），与冷启动参照轮相比翻动的 2 处（`xk07` 的 `source_hit` 0→1、`xr04` 的停止原因）在改与不改两轮里同样出现，判冷启动与漂移不是开关；耗时暖轮 37.1s vs 33.9s 判不可归因（这一处不增加任何模型调用与检索）；真机冒烟（评估库 442 向量）确认 `tools/list` 里只有 `kb_search` / `sql_query` 声明 `locator`、`ask` 两处都没有，返回的证据块与引用带同一份定位；定位器挂 `ToolBlock.locator` 而不是 `Citation`，理由与被否方案见 `docs/adr/0009`；术语见 `CONTEXT.md` 的「块级定位」，口径与边界见 README「可用工具与参数」一节，读数与逐条经过见下面的 v8.14 详细验收与 `eval/README.md` 的 v8.14 |
 
 ## v2 详细验收（已完成）
 
@@ -346,8 +347,11 @@ v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上
       （`doc_id` / `chunk_index` / `snippet_offset`，为此改了 `agent/tools.py`），本分支沿用既有 `Citation` 字段、
       只把 `agent/runtime.py` 的装配抽出成 `build_tool_registry`（行为等价，没碰 `agent/tools.py`）。
       分支与提交 `6d24ac2` 保留在远端，`locator` 从那里取
-- [ ] 块级 `locator`（从已关闭的 PR #22 的 `6d24ac2` 取）：`ToolBlock.locator` + `chunk_locator()` / `sql_locator`，
-      让引用能回溯到 `doc_id` 与块内偏移。与本分支的三重门互不影响，尚未做
+- [x] 块级 `locator`（v8.14 在 `main` 上重做，2026-11-26）：`ToolBlock.locator` + `chunk_locator()` / `sql_locator()`。
+      没有直接取 #22 的 `6d24ac2`——那边把定位器挂在当时的 `result_payload` 上，而 main 已把 MCP 载荷拆成
+      `evidence_payload` / `citation_payload` / `evidence_citations`，编号口径也变了。比 #22 多做一件：
+      现在多了 `chunk_id`（入库时算出的块身份 `point_id`），引用指的是「哪一块」而不只是「这个文档的第 3 块」。
+      按用户口径只进 MCP 对外通道，HTTP 引用与评估报告的字节形状一字不变；读数与边界见下面的 v8.14 详细验收
 - [ ] 流式工具结果与进度通知：手写实现只支持一次性结果，长调用（`ask` 十几秒）在客户端侧只能表现为「这次调用慢」
 - [ ] 鉴权与多用户：当前与本机 HTTP 服务同为「能启动进程的人即可读」，开了 `--allow-sql` 之后还包括白名单内的
       业务表，要给别人用需要先加鉴权或换 Qdrant server 模式
@@ -1245,6 +1249,64 @@ v8.12 把兜底门控捞回的那一行提到证据最前，但它只认门控�
       评估库按该提交的语料重建为 416 个向量；命令与逐轮口径见 `eval/README.md`。评估语料是 `README.md` +
       `docs/*.md`，本节与 `eval/README.md` 的 v8.13 节都写在测量之后，复现这几轮要 `git checkout 745540b`
       再 `python3 scripts/prepare_eval_kb.py --recreate`（两节正文都不含样本的原问题与证据原句）
+
+## v8.14 详细验收（引用带块级定位）
+
+v8 的 MCP 工具面已经合入 main（PR #24），但引用只能说到「出自这个文件、第几页」，客户端想做「跳到原文
+那一处」或高亮命中的那句话，缺一组坐标。这一项补上：每个证据块与每条引用带一个 `locator`（块级定位），
+说的是「出自哪一块、命中片段在返回文本里的哪个位置」。
+
+- [x] **为什么不挂 `Citation`**：`Citation` 是 HTTP `/chat` 与评估报告共用的那一份，加字段会让对外引用载荷
+      与历史报告多出键，历史读数不能逐字比（用户已拍板只放 MCP）。挂 `ToolBlock.locator` 以后 agentic 链路
+      看不见它——`render_evidence` 只读 `label/text/citation`，轨迹与评估序列化都按白名单取字段，
+      单测钉住「带定位的证据块渲染出来与不带时逐字相同」。理由与被否方案见 `docs/adr/0009`
+- [x] **`chunk_id` 是新的那一块信息**：入库时按「`doc_id` + 内容哈希 + 块序号」算出的稳定 id
+      （`RetrievedChunk.point_id`）。内容没改重入库仍是同一个 id，内容一改就换 id——这是正确行为
+      （旧 id 指向的已经不是那块内容），但它不是跨版本的固定坐标，文档里明写。已关闭的 PR #22 没有这项，
+      当时只能说到「这个文档的第 3 块」
+- [x] **两条边界**：偏移相对**实际返回的那段文本**算（父块扩展以后返回的是整段上下文，命中的是里面的子块，
+      `parent_id` 单独给），调用方传的就是字符上限截断以后的文本；片段被截断到整块切掉时 `find` 找不到，
+      `snippet_offset` 整个不出现，不臆造数字。`metadata` 缺字段或非数字同样只省略键
+- [x] **SQL 侧的「块」就是那次查询**：locator 给 `source_uri` / `table` / `sql`（护栏改写后真正执行的那条）
+      / `row_count` / `truncated`——「哪条查询取了哪些行」是数据库侧唯一说得清的定位
+- [x] **`ask` 不做**：它的引用来自生成阶段，手上没有块，补不出定位；它的 outputSchema 也不声明这个字段，
+      否则工具定义在承诺一个给不出的东西
+- [x] **退路是逐字退回**：`RAG_DISABLE_CITATION_LOCATOR=1` 时工具定义与载荷都不多一个键。实跑比对：
+      `serve_mcp.py --list-tools` 在开关打开与关闭两种状态下各跑一次，关闭那份与 `origin/main` 同一命令的
+      输出 `diff` 为空；开关打开时只多出 `locator` 一段 schema
+- [x] **单测**：719 → **735 passed**（新增 16 条，全部不打模型、不开真实 Qdrant）。覆盖面：`chunk_locator`
+      的正常形状 / 缺 metadata / 片段被截掉 / 父块扩展 / metadata 里数字写坏不抛异常；`kb_search` 的引用与
+      证据块带同一份 locator；截断块省略 `snippet_offset`；`ask` 的载荷与 schema 都没有 locator；开关关闭时
+      引用与证据逐字等于今天的形状且 `tools/list` 里没有 `locator`；`render_evidence` 带不带 locator 输出相同；
+      agentic 轨迹与上下文里不出现 `chunk_id` / `snippet_offset`。断言 locator 存在的用例都自己把开关钉到
+      要的那一档，所以带着 `RAG_DISABLE_CITATION_LOCATOR=1` 跑全量同样是 735 passed
+- [x] **护栏读数（`knowledge` 9 条 + 应拒答 5 条 = 14 条，同进程 `off → on → off`）**：这一处 agentic 链路
+      根本不读 locator，量的是「加了它会不会扰动行为」，是护栏不是收益。**两个暖轮（第 2 轮带、第 3 轮不带）
+      九项指标逐字相同、逐条行为零翻动**：`answer_rate` / `source_hit` / `refusal_accuracy` /
+      `citation_rate` / `citation_validity` 都 1.000，`evidence_hit@3` 0.556（未中 9 条三轮一致）、
+      `mrr@3` 0.426、`context_precision@3` 0.185、`n_errors` 0；逐条比的是拒答与否、意图、停止原因、
+      工具次数与引用条数，十四条全对得上。精排三轮都生效（14/14）
+- [x] **与冷启动参照轮相比翻动的 2 处不是开关造成的**：`xk07` 的 `source_hit` 0 → 1、`xr04` 的停止原因
+      `insufficient_evidence`（1 次工具）→ `context_budget`（3 次工具、仍然正确拒答）。这两处在第 2 轮（带）
+      与第 3 轮（不带）里**同样出现**，而第 1 轮是冷启动（要把生成与精排模型加载进来，按口径作废），
+      所以它们归给冷启动与路由漂移。也就是说同设置的两轮之间本来就有 1 条指标翻动，本轮能归因的结论
+      只有「带与不带两个暖轮逐字相同」
+- [x] **耗时判不可归因**：暖轮带定位 37.1s vs 暖轮不带 33.9s。这一处不增加任何模型调用与检索，每条只多
+      几次字符串查找；本轮只有一对暖轮可比（第 1 轮作废后同设置只剩一个暖轮），按既有口径不作收益也不作
+      回退依据
+- [x] **MCP 真机冒烟**（指向评估库 442 向量，`--allow-sql` + 评估授权配置）：`tools/list` 里 `kb_search`
+      与 `sql_query` 的 `evidence` / `citations` 项都声明 `locator`，`ask` 两处都没有。`tools/call kb_search`
+      两条引用的 locator 是 `chunk_id` / `doc_id` / `chunk_index` / `chunk_count` / `parent_id` /
+      `snippet_offset`，且与对应证据块的 locator 逐字相同；换一个问题跑 4 段证据，偏移分别是
+      306 / 165 / 0 / 0（父块扩展下偏移相对返回的那段长文本，不是相对命中的子块）。`tools/call sql_query`
+      的 locator 给 `demo.products#sql_query` / 表名 / 护栏改写后执行的 SQL / `row_count=2` /
+      `truncated=false`。只当冒烟，不当收益读数
+- [x] **出处与复现**：三轮报告的 `git_commit` 记 `c9599ef`、`git_dirty=True`——脏的是跑批期间写的文档正文
+      与落盘报告本身，被测代码与单测就是 `c9599ef`。评估库按该提交加本轮文档正文重建为 442 个向量；
+      命令与逐轮口径见 `eval/README.md` 的 v8.14。评估语料是 `README.md` + `docs/*.md`，本节与
+      `eval/README.md` 的 v8.14 节都写在测量之后，复现这几轮要 `git checkout c9599ef` 再带上第二个提交里
+      的文档改动跑 `python3 scripts/prepare_eval_kb.py --recreate`（两节正文都不含样本的原问题与证据原句，
+      所以补上它们不改变这些样本的检索行为）
 
 ## 分支与提交约定
 

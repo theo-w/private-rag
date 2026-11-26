@@ -20,15 +20,16 @@ from typing import Any, Optional, Sequence
 from private_rag.agent.tools import ToolBlock, citation_label
 from private_rag.config import (
     AGENT_TOOL_CHARS,
+    CITATION_LOCATOR,
     MAX_QUESTION_CHARS,
     TOP_K_RERANK,
 )
-from private_rag.generation import build_citations
+from private_rag.generation import build_citations, chunk_locator
 from private_rag.mcp.evidence import (
-    ASK_OUTPUT_SCHEMA,
-    SEARCH_OUTPUT_SCHEMA,
-    SQL_OUTPUT_SCHEMA,
     answer_text,
+    ask_output_schema,
+    search_output_schema,
+    sql_output_schema,
     citation_payload,
     evidence_citations,
     evidence_payload,
@@ -254,7 +255,7 @@ class KbSearchTool(McpTool):
             },
             "required": ["query"],
         }
-        self.output_schema = SEARCH_OUTPUT_SCHEMA
+        self.output_schema = search_output_schema()
 
     def run(self, args: dict[str, Any]) -> ToolOutcome:
         invalid = _reject_unknown(args, ("query", "limit", "tags", "tag", "source_type"))
@@ -313,14 +314,18 @@ class KbSearchTool(McpTool):
         citations = build_citations(chunks)
         # 单段预算随段数缩小，保证所有证据加起来不超过一次调用的字符预算
         per_block = self.max_chars // max(1, len(chunks)) + 200
-        blocks = [
-            ToolBlock(
-                label=citation_label(citation),
-                text=_clip(chunk.text, per_block),
-                citation=citation,
+        blocks = []
+        for chunk, citation in zip(chunks, citations):
+            clipped = _clip(chunk.text, per_block)
+            blocks.append(
+                ToolBlock(
+                    label=citation_label(citation),
+                    text=clipped,
+                    citation=citation,
+                    # kb_search 自己造证据块（不经 agentic 那颗工具），定位在这里补
+                    locator=chunk_locator(chunk, clipped) if CITATION_LOCATOR else None,
+                )
             )
-            for chunk, citation in zip(chunks, citations)
-        ]
         return ToolOutcome(
             True,
             text=evidence_text(blocks),
@@ -385,7 +390,7 @@ class AskTool(McpTool):
             },
             "required": ["question"],
         }
-        self.output_schema = ASK_OUTPUT_SCHEMA
+        self.output_schema = ask_output_schema()
 
     def run(self, args: dict[str, Any]) -> ToolOutcome:
         invalid = _reject_unknown(args, ("question", "limit", "tags", "tag", "source_type"))
@@ -471,7 +476,7 @@ class SqlQueryTool(McpTool):
             },
             "required": ["sql"],
         }
-        self.output_schema = SQL_OUTPUT_SCHEMA
+        self.output_schema = sql_output_schema()
 
     def run(self, args: dict[str, Any]) -> ToolOutcome:
         invalid = _reject_unknown(args, ("sql",))

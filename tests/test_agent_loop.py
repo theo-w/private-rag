@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from typing import Any, Optional, Sequence
@@ -410,6 +411,25 @@ class TestFailureHandling:
         assert result.citations[0].table == "demo"
         assert result.answer == "脚本答案"
         assert "banana" in result.trace.citations[0]["snippet"]
+
+    def test_block_locator_never_reaches_the_model_or_the_trace(self, tmp_path):
+        """块级定位只给对外通道（MCP）用：证据正文与落盘轨迹里都不该出现它，
+        否则模型看到的内容与历史评估读数就不是逐字相同了。"""
+        kb = RecordingTool(
+            blocks=[
+                ToolBlock(
+                    "kb_search 来源",
+                    "材料正文",
+                    Citation(1, "kb_search 来源", "file", "u", "s"),
+                    locator={"chunk_id": "p1", "snippet_offset": 0},
+                )
+            ]
+        )
+        result = make_runtime(tmp_path, [kb], ScriptedPlanner()).run("增量入库怎么做")
+
+        assert result.contexts == ["材料正文"]
+        assert "chunk_id" not in json.dumps(result.trace.to_dict(), ensure_ascii=False)
+        assert "snippet_offset" not in json.dumps(result.trace.to_dict(), ensure_ascii=False)
 
 
 class TestToolAvailability:
