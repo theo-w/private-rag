@@ -135,7 +135,8 @@ class TestKnowledgeSearchTool:
         assert result.blocks[0].text.endswith("…")
         assert len(result.blocks[0].text) < 600
 
-    def test_blocks_carry_block_locator(self):
+    def test_blocks_carry_block_locator(self, monkeypatch):
+        monkeypatch.setattr(tools_module, "CITATION_LOCATOR", True)
         engine = FakeEngine(chunks=[make_chunk(1)])
         result = KnowledgeSearchTool(engine).run({"query": "x"})
         locator = result.blocks[0].locator
@@ -167,7 +168,8 @@ class TestSqlQueryTool:
         assert result.data["columns"] == ["name", "price"]
         assert "LIMIT" in result.data["sql"]
 
-    def test_block_carries_query_locator(self, tmp_path):
+    def test_block_carries_query_locator(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(tools_module, "CITATION_LOCATOR", True)
         result = self.tool(make_sqlite(tmp_path)).run({"sql": "SELECT name FROM products"})
         locator = result.blocks[0].locator
         # SQL 侧没有「块」，定位就是哪条查询取了哪些行；sql 是护栏改写后的执行体

@@ -217,7 +217,8 @@ def test_tools_call_ask_returns_answer_and_citations():
     assert response["result"]["content"][0]["text"].startswith("橙子富含维生素 C。")
 
 
-def test_kb_search_citations_and_evidence_carry_the_same_locator():
+def test_kb_search_citations_and_evidence_carry_the_same_locator(monkeypatch):
+    set_locator_enabled(monkeypatch, True)
     server = make_server([make_chunk(1, page=3, doc_id="doc-a", chunk_index=2, chunk_count=5)])
     structured = call(server, "tools/call", {"name": "kb_search", "arguments": {"query": "橙子"}})["result"][
         "structuredContent"
@@ -234,7 +235,8 @@ def test_kb_search_citations_and_evidence_carry_the_same_locator():
     assert structured["evidence"][0]["locator"] == locator
 
 
-def test_clipped_block_omits_snippet_offset_rather_than_inventing_one():
+def test_clipped_block_omits_snippet_offset_rather_than_inventing_one(monkeypatch):
+    set_locator_enabled(monkeypatch, True)
     server = MCPServer(build_mcp_tools(FakeEngine([make_chunk(1, text="字" * 5000)]), max_chars=200))
     structured = call(server, "tools/call", {"name": "kb_search", "arguments": {"query": "橙子"}})["result"][
         "structuredContent"
@@ -538,7 +540,8 @@ def test_tools_list_includes_sql_query_when_assembled(tmp_path):
     assert [t["name"] for t in listed["result"]["tools"]] == ["kb_search", "ask", "sql_query"]
 
 
-def test_sql_call_returns_structured_rows(tmp_path):
+def test_sql_call_returns_structured_rows(monkeypatch, tmp_path):
+    set_locator_enabled(monkeypatch, True)
     response = make_sql_server(tmp_path).handle(
         {
             "jsonrpc": "2.0",
