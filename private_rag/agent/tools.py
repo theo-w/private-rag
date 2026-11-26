@@ -13,8 +13,8 @@ from typing import Any, Optional, Sequence
 from sqlalchemy import create_engine, text
 
 from private_rag.agent.sql_guard import SqlGuardError, sanitize_sql
-from private_rag.config import AGENT_SQL_ROWS, AGENT_TOOL_CHARS, TOP_K_RERANK
-from private_rag.generation import build_citations
+from private_rag.config import AGENT_SQL_ROWS, AGENT_TOOL_CHARS, CITATION_LOCATOR, TOP_K_RERANK
+from private_rag.generation import build_citations, chunk_locator
 from private_rag.models import Citation
 from private_rag.qa import RetrievalOptions
 
@@ -40,11 +40,38 @@ def citation_label(citation: Citation) -> str:
 
 @dataclass
 class ToolBlock:
-    """一段可作为证据的材料；citation 为 None 表示该段材料无法溯源。"""
+    """一段可作为证据的材料；citation 为 None 表示该段材料无法溯源。
+
+    `locator` 是块级定位（这条材料出自哪一块、命中片段在返回文本里的位置），只给对外通道
+    （MCP 工具返回）用：agentic 循环只看 label/text/citation，轨迹也不写它，
+    所以模型看到的内容与历史读数逐字不变。
+    """
 
     label: str
     text: str
     citation: Optional[Citation] = None
+    locator: Optional[dict[str, Any]] = None
+
+
+def sql_locator(
+    *,
+    source_uri: str,
+    table: str,
+    sql: str,
+    row_count: int,
+    truncated: bool,
+) -> dict[str, Any]:
+    """SQL 侧的块级定位：查询结果没有「块」，定位就是「哪条查询、取了哪些行」。
+
+    `sql` 是护栏改写后真正执行的语句（带行数上限），不是调用方传入的原文。
+    """
+    return {
+        "source_uri": source_uri,
+        "table": table,
+        "sql": sql,
+        "row_count": row_count,
+        "truncated": truncated,
+    }
 
 
 @dataclass
@@ -128,14 +155,17 @@ class KnowledgeSearchTool(Tool):
             )
 
         citations = build_citations(chunks)
-        blocks = [
-            ToolBlock(
-                label=citation_label(citation),
-                text=_clip(chunk.text, self.max_chars // max(1, len(chunks)) + 200),
-                citation=citation,
+        blocks = []
+        for chunk, citation in zip(chunks, citations):
+            clipped = _clip(chunk.text, self.max_chars // max(1, len(chunks)) + 200)
+            blocks.append(
+                ToolBlock(
+                    label=citation_label(citation),
+                    text=clipped,
+                    citation=citation,
+                    locator=chunk_locator(chunk, clipped) if CITATION_LOCATOR else None,
+                )
             )
-            for chunk, citation in zip(chunks, citations)
-        ]
         return ToolResult(
             True,
             summary=f"检索到 {len(blocks)} 段资料",
@@ -269,10 +299,26 @@ class SqlQueryTool(Tool):
         if truncated:
             summary += f"（已达上限 {self.max_rows} 行，可能还有更多）"
 
+        blocks = [
+            ToolBlock(
+                label=f"SQL 查询（表 {self.label}）",
+                text=_clip(body, self.max_chars),
+                citation=citation,
+                locator=sql_locator(
+                    source_uri=citation.source_uri,
+                    table=self.label,
+                    sql=guarded,
+                    row_count=len(rows),
+                    truncated=truncated,
+                )
+                if CITATION_LOCATOR
+                else None,
+            )
+        ]
         return ToolResult(
             True,
             summary=summary,
-            blocks=[ToolBlock(label=f"SQL 查询（表 {self.label}）", text=_clip(body, self.max_chars), citation=citation)],
+            blocks=blocks,
             rows=len(rows),
             warnings=warnings,
             data={"sql": guarded, "columns": columns, "truncated": truncated},

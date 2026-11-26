@@ -27,12 +27,17 @@ from private_rag.qa import QaResult, Readiness, RetrievalTrace
 from private_rag.retrieval.hybrid import RetrievedChunk
 
 
-def make_chunk(index: int, *, text: str = "", page=None) -> RetrievedChunk:
+def make_chunk(index: int, *, text: str = "", page=None, doc_id=None, chunk_index=None, chunk_count=None) -> RetrievedChunk:
     metadata = {
         "source_type": "file",
         "title": f"文档{index}",
         "source_uri": f"data/docs/{index}.md",
+        "doc_id": doc_id or f"doc-{index}",
     }
+    if chunk_index is not None:
+        metadata["chunk_index"] = chunk_index
+    if chunk_count is not None:
+        metadata["chunk_count"] = chunk_count
     if page is not None:
         metadata["page"] = page
     return RetrievedChunk(
@@ -210,6 +215,79 @@ def test_tools_call_ask_returns_answer_and_citations():
     assert response["result"]["isError"] is False
     assert response["result"]["structuredContent"]["answer"] == "橙子富含维生素 C。[1]"
     assert response["result"]["content"][0]["text"].startswith("橙子富含维生素 C。")
+
+
+def test_kb_search_citations_and_evidence_carry_the_same_locator():
+    server = make_server([make_chunk(1, page=3, doc_id="doc-a", chunk_index=2, chunk_count=5)])
+    structured = call(server, "tools/call", {"name": "kb_search", "arguments": {"query": "橙子"}})["result"][
+        "structuredContent"
+    ]
+
+    locator = structured["citations"][0]["locator"]
+    assert locator["chunk_id"] == "p1"
+    assert locator["doc_id"] == "doc-a"
+    assert locator["chunk_index"] == 2
+    assert locator["chunk_count"] == 5
+    assert locator["page"] == 3
+    # 偏移相对实际返回的那段证据文本，客户端可以直接拿去高亮
+    assert locator["snippet_offset"] == structured["evidence"][0]["text"].find("第 1 段")
+    assert structured["evidence"][0]["locator"] == locator
+
+
+def test_clipped_block_omits_snippet_offset_rather_than_inventing_one():
+    server = MCPServer(build_mcp_tools(FakeEngine([make_chunk(1, text="字" * 5000)]), max_chars=200))
+    structured = call(server, "tools/call", {"name": "kb_search", "arguments": {"query": "橙子"}})["result"][
+        "structuredContent"
+    ]
+    assert structured["evidence"][0]["text"].endswith("…")
+    assert "snippet_offset" not in structured["citations"][0]["locator"]
+    assert structured["citations"][0]["locator"]["chunk_id"] == "p1"
+
+
+def test_ask_citations_have_no_locator_in_payload_or_schema():
+    """ask 的引用来自生成阶段、没有证据块，所以补不出定位，定义里也不承诺这个键。"""
+    response = call(make_server([make_chunk(1)]), "tools/call", {"name": "ask", "arguments": {"question": "橙子"}})
+    assert "locator" not in response["result"]["structuredContent"]["citations"][0]
+
+    listed = call(make_server([make_chunk(1)]), "tools/list")["result"]["tools"]
+    ask = next(tool for tool in listed if tool["name"] == "ask")
+    assert "locator" not in ask["outputSchema"]["properties"]["citations"]["items"]["properties"]
+
+
+def set_locator_enabled(monkeypatch, on: bool) -> None:
+    """开关要在装配之前改：工具定义在构造工具时就拼好了。"""
+    monkeypatch.setattr("private_rag.mcp.tools.CITATION_LOCATOR", on)
+    monkeypatch.setattr("private_rag.mcp.evidence.CITATION_LOCATOR", on)
+    monkeypatch.setattr("private_rag.agent.tools.CITATION_LOCATOR", on)
+
+
+def test_switch_off_restores_today_payload_and_tool_definitions(monkeypatch, tmp_path):
+    set_locator_enabled(monkeypatch, False)
+    structured = make_server([make_chunk(1, page=3)]).handle(
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "kb_search", "arguments": {"query": "橙子"}}}
+    )["result"]["structuredContent"]
+    assert structured["citations"][0] == {
+        "index": 1,
+        "title": "文档1",
+        "source_type": "file",
+        "source_uri": "data/docs/1.md",
+        "snippet": "第 1 段",
+        "page": 3,
+    }
+    assert structured["evidence"][0] == {"index": 1, "label": "file | 文档1 | data/docs/1.md | 第 3 页", "text": "这是第 1 段资料。"}
+
+    sql_server = make_sql_server(tmp_path)
+    sql_structured = sql_server.handle(
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "sql_query", "arguments": {"sql": "SELECT name FROM products"}}}
+    )["result"]["structuredContent"]
+    assert "locator" not in sql_structured["citations"][0]
+    assert "locator" not in sql_structured["evidence"][0]
+
+    for tool in call(sql_server, "tools/list")["result"]["tools"]:
+        properties = tool["outputSchema"]["properties"]
+        assert "locator" not in properties["citations"]["items"]["properties"]
+        if "evidence" in properties:
+            assert "locator" not in properties["evidence"]["items"]["properties"]
 
 
 def test_tools_call_with_no_arguments_defaults_to_empty():
@@ -476,6 +554,12 @@ def test_sql_call_returns_structured_rows(tmp_path):
     assert structured["row_count"] == 1
     assert structured["columns"] == ["name"]
     assert structured["citations"][0]["source_type"] == "sql"
+    locator = structured["citations"][0]["locator"]
+    assert locator["table"] == "demo.products"
+    assert locator["sql"] == structured["sql"]
+    assert locator["row_count"] == 1
+    assert locator["truncated"] is False
+    assert structured["evidence"][0]["locator"] == locator
 
 
 @pytest.mark.parametrize(

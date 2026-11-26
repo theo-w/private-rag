@@ -17,6 +17,8 @@ from private_rag.agent.tools import (
     citation_label,
     render_evidence,
 )
+import private_rag.agent.tools as tools_module
+from private_rag.generation import chunk_locator
 from private_rag.models import Citation
 from private_rag.qa import RetrievalOptions
 from private_rag.retrieval.hybrid import RetrievedChunk
@@ -133,6 +135,19 @@ class TestKnowledgeSearchTool:
         assert result.blocks[0].text.endswith("…")
         assert len(result.blocks[0].text) < 600
 
+    def test_blocks_carry_block_locator(self):
+        engine = FakeEngine(chunks=[make_chunk(1)])
+        result = KnowledgeSearchTool(engine).run({"query": "x"})
+        locator = result.blocks[0].locator
+        assert locator["chunk_id"] == "p1"
+        # 偏移相对实际返回的那段文本算，客户端可以直接拿去高亮
+        assert locator["snippet_offset"] == result.blocks[0].text.find("第 1 段")
+
+    def test_locator_absent_when_switch_off(self, monkeypatch):
+        monkeypatch.setattr(tools_module, "CITATION_LOCATOR", False)
+        result = KnowledgeSearchTool(FakeEngine(chunks=[make_chunk(1)])).run({"query": "x"})
+        assert result.blocks[0].locator is None
+
 
 class TestSqlQueryTool:
     def tool(self, dsn, **kwargs):
@@ -151,6 +166,22 @@ class TestSqlQueryTool:
         assert "name | price" in result.blocks[0].text
         assert result.data["columns"] == ["name", "price"]
         assert "LIMIT" in result.data["sql"]
+
+    def test_block_carries_query_locator(self, tmp_path):
+        result = self.tool(make_sqlite(tmp_path)).run({"sql": "SELECT name FROM products"})
+        locator = result.blocks[0].locator
+        # SQL 侧没有「块」，定位就是哪条查询取了哪些行；sql 是护栏改写后的执行体
+        assert locator["table"] == "demo"
+        assert locator["sql"] == result.data["sql"]
+        assert "LIMIT" in locator["sql"]
+        assert locator["row_count"] == 2
+        assert locator["truncated"] is False
+        assert locator["source_uri"] == "demo#sql_query"
+
+    def test_query_locator_absent_when_switch_off(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(tools_module, "CITATION_LOCATOR", False)
+        result = self.tool(make_sqlite(tmp_path)).run({"sql": "SELECT name FROM products"})
+        assert result.blocks[0].locator is None
 
     def test_write_statement_rejected_by_guard(self, tmp_path):
         result = self.tool(make_sqlite(tmp_path)).run({"sql": "DELETE FROM products"})
@@ -287,6 +318,75 @@ class TestRenderEvidence:
         table = Citation(2, "库", "sql", "b#sql", "s", table="demo.products")
         assert "第 12 页" in citation_label(page)
         assert "表 demo.products" in citation_label(table)
+
+    def test_locator_does_not_change_what_the_model_sees(self):
+        """块级定位只给对外通道：带它的证据块渲染出来与不带时逐字相同，
+        引用列表也不多出任何字段——否则历史读数就不可比了。"""
+        plain = [ToolBlock(label="a", text="第一段", citation=self.citation(1))]
+        located = [
+            ToolBlock(
+                label="a",
+                text="第一段",
+                citation=self.citation(1),
+                locator={"chunk_id": "p1", "snippet_offset": 0},
+            )
+        ]
+        assert render_evidence(located) == render_evidence(plain)
+
+
+class TestChunkLocator:
+    def chunk(self, **kwargs):
+        metadata = kwargs.pop("metadata", {})
+        return RetrievedChunk(
+            point_id=kwargs.pop("point_id", "p1"),
+            text=kwargs.pop("text", "第一段正文，里面写了结论"),
+            metadata=metadata,
+            **kwargs,
+        )
+
+    def test_full_locator_for_a_normal_chunk(self):
+        chunk = self.chunk(
+            metadata={"doc_id": "d1", "chunk_index": 2, "chunk_count": 5, "page": 7},
+            snippet_text="写了结论",
+        )
+        text = "第一段正文，里面写了结论"
+        locator = chunk_locator(chunk, text)
+        assert locator == {
+            "chunk_id": "p1",
+            "doc_id": "d1",
+            "chunk_index": 2,
+            "chunk_count": 5,
+            "page": 7,
+            "snippet_offset": text.find("写了结论"),
+        }
+
+    def test_missing_metadata_and_snippet_are_omitted_not_invented(self):
+        locator = chunk_locator(self.chunk(text="正文", metadata={}))
+        assert locator == {"chunk_id": "p1"}
+
+    def test_offset_dropped_when_snippet_clipped_away(self):
+        chunk = self.chunk(text="字" * 5000, snippet_text="字" * 5000)
+        assert "snippet_offset" not in chunk_locator(chunk, "字" * 200 + "…")
+
+    def test_parent_expansion_reports_parent_and_offsets_in_returned_text(self):
+        text = "父块整段正文，含命中的那一句"
+        chunk = self.chunk(
+            text=text,
+            metadata={"doc_id": "d1"},
+            snippet_text="命中的那一句",
+            parent_id="parent-9",
+        )
+        locator = chunk_locator(chunk, text)
+        assert locator["parent_id"] == "parent-9"
+        # 偏移相对返回的这段长文本算，不是相对命中的子块
+        assert locator["snippet_offset"] == text.find("命中的那一句")
+        # doc_id 指命中的子块，父块另给 parent_id
+        assert locator["doc_id"] == "d1"
+
+    def test_bad_numeric_metadata_does_not_raise(self):
+        locator = chunk_locator(self.chunk(metadata={"chunk_index": "n/a", "page": None}))
+        assert "chunk_index" not in locator
+        assert "page" not in locator
 
 
 class TestCatalogInDescription:

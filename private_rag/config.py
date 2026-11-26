@@ -184,6 +184,10 @@ AGENT_KBMISS_EVIDENCE_PRIORITY = not _env_flag("RAG_DISABLE_AGENT_KBMISS_EVIDENC
 # 那一行就排到第 4 位，答案与引用都对、取证与来源两项却量不到（v8.12 记为「没修的部分」）。
 # 掉出窗口时把它拉回第 3 位，文档侧原来的前两位照旧。置 1 退回纯按调用顺序排列。
 AGENT_SQL_EVIDENCE_WINDOW = not _env_flag("RAG_DISABLE_AGENT_SQL_EVIDENCE_WINDOW")
+# 引用带块级定位：这条引用出自哪一块、命中片段在返回文本里的哪个位置。只进对外通道
+# （MCP 的工具返回与工具定义），agentic 循环、HTTP 引用载荷与评估报告都不读它。
+# 置 1 逐字退回今天的形状——包括 tools/list 里那份工具定义。
+CITATION_LOCATOR = not _env_flag("RAG_DISABLE_CITATION_LOCATOR")
 # 决策 JSON 的输出预算。推理型模型会先输出一段不可见的思考内容，
 # 预算给小了正文就是空的，路由会整段回退到关键词判断。
 AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)
