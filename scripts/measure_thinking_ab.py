@@ -83,6 +83,23 @@ def _set_kbmiss_priority_bad_route(value: str) -> None:
     _set_kbmiss_evidence_priority(value)
 
 
+def _set_sql_evidence_window(value: str) -> None:
+    """数据库侧的证据是否留在前 3 位窗口内。两轮都把兜底门控与上一条「捞回的排到最前」
+    钉在「开」，这样开关只改这一处排列：不改「查不查」，也不与上一条规则抢顺序。
+    """
+    _set_kbmiss_evidence_priority("on")
+    setattr(runtime_module, "AGENT_SQL_EVIDENCE_WINDOW", value not in {"off", "0", "no"})
+
+
+def _set_sql_window_bad_route(value: str) -> None:
+    """同上，但把路由提示词的第 10 条关掉，模拟「路由判成查文档」的场景：双侧那条样本
+    在这种场景里先查几段文档再去查库，数据库那一行排到第 4 位，正是这一处要管的情形
+    （兜底门控只作用在判成纯知识的问题上，管不到它）。
+    """
+    _set_kbmiss_priority_bad_route("on")
+    setattr(runtime_module, "AGENT_SQL_EVIDENCE_WINDOW", value not in {"off", "0", "no"})
+
+
 # 可以交替的设置项。思考开关在 prompts 里是导入时抓的快照，必须改模块属性才生效
 # （只改 config 不会被读到，见 scripts/check_generation_determinism.py 的同一处理）。
 SETTINGS: dict[str, Callable[[str], None]] = {
@@ -99,6 +116,8 @@ SETTINGS: dict[str, Callable[[str], None]] = {
     "gate_side_tracking": _set_gate_side_tracking,
     "kbmiss_evidence_priority": _set_kbmiss_evidence_priority,
     "kbmiss_priority_bad_route": _set_kbmiss_priority_bad_route,
+    "sql_evidence_window": _set_sql_evidence_window,
+    "sql_window_bad_route": _set_sql_window_bad_route,
 }
 
 # 对照时看的整轮指标：前四项是「不能变差」的门禁，其余是取证与引用的质量
