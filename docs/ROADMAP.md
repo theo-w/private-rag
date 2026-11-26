@@ -34,6 +34,7 @@
 | v8.12 | `v8-data-side-evidence` | 兜底门控捞回的那行 SQL 记录排到证据最前：证据按调用先后排列，文档侧先查到的材料占住第 1–3 位，门控后来捞的记录落到第 4 位，而 `evidence_hit@3` 与 `source_hit` 只看前 3 位 → v8.10 兜住的样本「答对且引用了」两项仍记 0。现在门控强制的那次查询的证据提到最前，其余顺序不动；只认门控强制的那一次 | ✅ 已合入 main（PR #37 → `d80e180`） | 与 v8.10 各自可单独退回（`RAG_DISABLE_AGENT_KBMISS_EVIDENCE_PRIORITY=1`）；714 测试通过（新增 4 条，不打模型）；模拟「路由判错」时 `xd01–xd08` 8 条同进程 `off → on → off`：`evidence_hit@3` 与 `source_hit` 0.625 → 0.875（+2 条），翻动的正是原本排第 4 的那两条 `xd05`/`xd08`（引用条数、门控次数、停止原因都没变）；护栏 21 条九项指标三轮逐字相同、逐条行为零翻动；暖轮耗时 31.1s vs 31.2s，只改顺序不多跑查询；出厂设置那一组测不出这一处改动（三轮里只有第 1 轮触发门控，另两轮路由判成 `database`），判不可判定；`xd04` 三轮都没触发门控、两项仍记 0（`mixed` 里 SQL 排第 4 的情形没动）；报告 `eval/reports/v8_12_kbmiss_misroute_ab_*`、`v8_12_kbmiss_guard_ab_*`、`v8_12_kbmiss_data_ab_*`，经过见下面的 v8.12 详细验收 |
 | v8.13 | `v8-sql-evidence-window` | 数据库侧的记录不许掉出前 3 位证据窗口：模型**自己**先查几段文档再去查库时，那一行按调用先后排到第 4 位甚至更后，而 `evidence_hit@3` 与 `source_hit` 只看前 3 位 → 答对且引用了仍记 0（v8.12 记为「没修的部分」）。现在掉出窗口时拉回第 3 位，文档侧原来的前两位不动，本来就在窗口内什么都不做 | ✅ 已合入 main（PR #39 → `871731f`） | 719 测试通过（既有 714 + 新增 5，不打模型）；开关 `RAG_DISABLE_AGENT_SQL_EVIDENCE_WINDOW=1` 逐字退回纯按调用先后排列，与 v8.10 门控、v8.12 置顶各自可单独退回；模拟「路由判错」的 8 条同进程 `off → on → off`：`evidence_hit@3` 与 `source_hit` 0.875 → 1.000（+1 条 = +12.5pt）、`mrr@3` 0.875 → 0.917、`context_precision@3` 0.458 → 0.583，翻动的正是原本排第 7 的 `xd05`（意图、停止原因、工具次数、引用 7 条都没变，门控 0 次 → 上一条规则管不到）；出厂设置的双侧题 12 条同口径：`source_hit` 0.917 → 1.000、`evidence_hit@3` 0.583 → 0.667，翻动的是原本排第 4 的 `xm07`，`both_sides_hit` 0.833 三轮持平（这项不看窗口）、逐条行为零翻动；护栏 14 条九项指标三轮逐字相同；两组各自的两个「不改」轮九项指标都逐字相同（漂移 0 条），两处 +1 条都可归因；耗时判没变化（暖轮 +1.3% / -0.8%，这一处不多跑任何查询；误判路由那组的 60.2s vs 39.9s 不可归因——同设置两轮自己差 47%）；真正被管到的只有 2 条（34 条里 32 条本来就在窗口内），所以只支撑方向不支撑百分比；报告 `eval/reports/v8_13_sql_window_*`，经过见下面的 v8.13 详细验收 |
 | v8.14 | `v8-citation-locator` | 引用带块级定位：MCP 的 `kb_search` / `sql_query` 每个证据块与每条引用多一个 `locator`，说的是「这条引用出自哪一块、命中的那段话在返回文本里的哪个位置」，客户端可以据此跳到原文那一处或直接高亮；比已关闭的 PR #22 多做一件——带上入库时算出的块身份 `chunk_id`（内容没改重入库仍是同一个 id，内容一改就换）。按用户口径只进 MCP 对外通道：agentic 循环、HTTP `/chat` 与 `/chat/agent` 的引用载荷、评估报告三处字节形状一字不变，`ask` 没有定位（引用来自生成阶段，手上没有块） | ✅ 已合入 main（PR #41 → `e1f7ce9`） | 735 测试通过（既有 719 + 新增 16，全部不打模型、不开真实 Qdrant）；开关 `RAG_DISABLE_CITATION_LOCATOR=1` 逐字退回今天的形状——`serve_mcp.py --list-tools` 的输出与 `origin/main` 逐字节相同（实跑 diff 比对），`tools/call` 的载荷也不多一个键；护栏 14 条（`knowledge` 9 + 应拒答 5）同进程 `off → on → off`：**两个暖轮九项指标逐字相同、逐条行为零翻动**（`answer_rate` / `source_hit` / `refusal_accuracy` / 引用两项都 1.000，`evidence_hit@3` 0.556、`mrr@3` 0.426、`context_precision@3` 0.185、`n_errors` 0 三轮都是），与冷启动参照轮相比翻动的 2 处（`xk07` 的 `source_hit` 0→1、`xr04` 的停止原因）在改与不改两轮里同样出现，判冷启动与漂移不是开关；耗时暖轮 37.1s vs 33.9s 判不可归因（这一处不增加任何模型调用与检索）；真机冒烟（评估库 442 向量）确认 `tools/list` 里只有 `kb_search` / `sql_query` 声明 `locator`、`ask` 两处都没有，返回的证据块与引用带同一份定位；定位器挂 `ToolBlock.locator` 而不是 `Citation`，理由与被否方案见 `docs/adr/0009`；术语见 `CONTEXT.md` 的「块级定位」，口径与边界见 README「可用工具与参数」一节，读数与逐条经过见下面的 v8.14 详细验收与 `eval/README.md` 的 v8.14 |
+| v8.15 | `v8-mcp-progress` | MCP 长调用带进度通知：客户端在请求的 `params._meta.progressToken` 里带一个标记时，最终响应之前先写几条 `notifications/progress`（开始 → 已检索到 N 段证据 / 已取回 N 行 → 已完成），客户端能显示「现在在做什么」而不是干等一个未知时长。按用户口径答案仍走 `engine.answer()`，与 HTTP `/chat` 同一条生成路、同一份采样参数，没有为了通知改成 `stream()`；协议里没有分段的工具结果，结果仍是一次性返回 | 🟡 PR 已开，待合并 | 769 测试通过（既有 735 + 新增 34，全部不打模型、不开真实 Qdrant）；开关 `RAG_DISABLE_MCP_PROGRESS=1` 逐字退回今天的一问一答（一条通知都不发），`serve_mcp.py --list-tools` 的输出与 `origin/main` 逐字节相同（实跑 diff 为空，11573 字节），`initialize` 与 `tools/list` 都没多一个键——协议里没有「进度」这个能力字段，开关就是请求里的 token 本身；真机冒烟（评估库 `rag_eval_kb`、精排生效、`--allow-sql`）带 token 的三条调用都在响应之前发出通知、token 原样回传、`progress` 递增到 `total`、`ask` 最后一条是「已完成」，`_meta` 写成字符串与 `progressToken` 写成列表两条都照常返回且零通知、后面的 `ping` 仍有响应（进程没退出）；同一条输入在开关关掉时与 `origin/main` 的输出逐条相同（去掉生成正文与 `elapsed_ms` 以后逐字相同），唯一的差别是生成正文有 2 个字不同——用假引擎钉住送进 `generate_answer` 的入参与工具返回文本的 sha256，三种配置（默认 / 开关关 / 改动前）全等，所以那 2 个字来自模型侧而不是代码，按既有口径措辞不算证据；`RagEngine.answer` 只多一个可选参数 `on_retrieved`，HTTP `/chat` 与 CLI 不传时调用形状不变，评估链路不调 `answer`，因此没跑评估 A/B（评估不经过 MCP 工具）；选型与被否方案见 `docs/adr/0010`，口径见 README「进度通知」，读数与逐条经过见下面的 v8.15 详细验收 |
 
 ## v2 详细验收（已完成）
 
@@ -352,7 +353,12 @@ v7.1 报告量出的两条短板都在「模型看不见它需要的东西」上
       `evidence_payload` / `citation_payload` / `evidence_citations`，编号口径也变了。比 #22 多做一件：
       现在多了 `chunk_id`（入库时算出的块身份 `point_id`），引用指的是「哪一块」而不只是「这个文档的第 3 块」。
       按用户口径只进 MCP 对外通道，HTTP 引用与评估报告的字节形状一字不变；读数与边界见下面的 v8.14 详细验收
-- [ ] 流式工具结果与进度通知：手写实现只支持一次性结果，长调用（`ask` 十几秒）在客户端侧只能表现为「这次调用慢」
+- [x] 进度通知（v8.15，2026-11-26）：客户端在请求的 `params._meta.progressToken` 里带一个标记时，长调用
+      在最终响应之前先写几条 `notifications/progress`（开始 → 已检索到 N 段证据 / 已取回 N 行 → 已完成），
+      客户端不再是「只知道这次调用慢」。按用户口径答案仍走 `engine.answer()`，与 HTTP `/chat` 同一条生成路，
+      没有为了通知改成流式；口径见 README「进度通知」，选型与被否方案见 `docs/adr/0010`
+- [ ] 分段的工具结果：MCP 协议里没有这种东西——工具结果只能一次性返回，能表达进度的只有上面那条进度通知。
+      真要边生成边返回得换通道（本机 HTTP 已有 `/chat/stream` SSE），不在 MCP 这一侧
 - [ ] 鉴权与多用户：当前与本机 HTTP 服务同为「能启动进程的人即可读」，开了 `--allow-sql` 之后还包括白名单内的
       业务表，要给别人用需要先加鉴权或换 Qdrant server 模式
 
@@ -1307,6 +1313,67 @@ v8 的 MCP 工具面已经合入 main（PR #24），但引用只能说到「出�
       `eval/README.md` 的 v8.14 节都写在测量之后，复现这几轮要 `git checkout c9599ef` 再带上第二个提交里
       的文档改动跑 `python3 scripts/prepare_eval_kb.py --recreate`（两节正文都不含样本的原问题与证据原句，
       所以补上它们不改变这些样本的检索行为）
+- [ ] 引用定位器 v2：入库时记文档级字符偏移（现在的 `snippet_offset` 只说「命中片段在返回文本里的位置」，
+      不是「在原文档里的位置」，跳到原文那一处要客户端自己再找一次）。本轮不做，理由见 `docs/adr/0009`
+
+## v8.15 详细验收（MCP 长调用带进度通知）
+
+`ask` 一次十几秒，改动前 stdout 在这期间完全没动静：客户端能看到的只有「这次调用慢」，不知道是在检索
+还是在生成、也不知道有没有卡死。MCP 协议能表达进度的只有**进度通知**——客户端在请求的
+`params._meta.progressToken` 里放一个不透明标记，服务端在这次调用完成之前发几条
+`notifications/progress`，最后照常发一条响应。本轮按这个机制手写实现，不引入 SDK、不引入线程。
+按用户拍板的两条口径：阶段通知（`ask` 仍走 `engine.answer()`，与 HTTP `/chat` 完全同一条生成路）、
+留退回开关。
+
+- [x] **通道**：`serve_stdio` 把绑定到 stdout 的写函数作为 `notify` 传进 `handle`，通知与响应共用同一条
+      写路径（单线程顺序写，通知天然排在响应之前；每行一个 JSON、`ensure_ascii=False`、逐条 flush）。
+      不引入线程与定时器——用线程发「已等 X 秒」心跳会让 stdout 交错，客户端会读到半截消息
+- [x] **步数由工具自己声明**：`McpTool.progress_steps`（`kb_search` / `sql_query` 为 2，`ask` 为 3），
+      服务端拿它当通知里的 `total`，并在发响应之前补最后一条（成功「已完成」、工具层失败「已结束」）。
+      单测钉住「实际报的最后一步与声明的步数对得上」，将来加工具忘了改就会红；只在类属性里声明，
+      不进 `definition()`，所以 `tools/list` 的形状不受影响
+- [x] **不发假消息**：参数校验没过、工具没注册、检索还没开始都不发「正在检索」；通知只在三个条件同时
+      成立时才挂（客户端带合法 token、有人接通知、`MCP_PROGRESS` 为真），否则一个关键字参数都不加——
+      旧签名的工具类（测试里那颗 `Boom`）因此照旧可用，错误文案不变
+- [x] **一条坏 `_meta` 不能打死服务**：这是本轮唯一新增的崩溃面（`serve_stdio` 只把 `json.loads` 包在
+      try 里，`handle` 冒出去的任何异常都会让整个 stdio 进程退出）。取 token 全程只做 `isinstance`
+      判型、不 `try/except` 兜异常，只认字符串和整数（Python 里 `bool` 是 `int` 的子类，客户端传 `true`
+      不能当成 `1`），其余形状一律按「没带」处理；有一条经过 `serve_stdio` 的单测钉住坏 `_meta` 之后
+      服务继续答下一条请求
+- [x] **`initialize` 一个字段都不加**：本服务协商的 2025-06-18 版协议里 `ClientCapabilities` 与
+      `ServerCapabilities` 都没有 `progress` 字段，开关就是请求里的 token 本身，所以「客户端没声明
+      任何能力也允许发通知」是合规的。唯一的硬约束是没带 token 就不能发通知（单测钉住）
+- [x] **单测**：769 通过（既有 735 + 新增 34，全部不打模型、不开真实 Qdrant）。新增的 34 条分布在三个
+      文件：`tests/test_mcp_server.py` 25 条（通知顺序与 token 原样回传、不带 token 零通知且响应逐字相同、
+      坏 `_meta` 与坏 token 的形状各一组参数化、经过 `serve_stdio` 的端到端顺序与坏 `_meta` 之后服务
+      继续答下一条、开关关掉逐字退回、工具体内失败补「已结束」、旧签名工具带 token 报 `TypeError` 且
+      零通知、`progress_steps` 不泄漏进工具定义）；`tests/test_mcp_tools.py` 8 条（三颗工具的阶段文案
+      与步数、不传 `progress` 时 `ToolOutcome` 逐字不变、`AskTool` 只在有 `progress` 时才给
+      `engine.answer` 挂 `on_retrieved`、参数校验失败零通知、声明的步数与实际报的最后一步对得上）；
+      `tests/test_qa.py` 1 条（`on_retrieved` 在检索完成、开始生成之前调一次并给出块数）
+- [x] **`tools/list` 逐字节不变**：`python3 scripts/serve_mcp.py --list-tools` 与 `origin/main` 的输出
+      diff 为空（两边都 11573 字节）。`initialize` 响应同样没多字段，现成的逐字比对用例保持绿
+- [x] **真机冒烟**（评估库 `storage/eval/qdrant_storage` + `rag_eval_kb`、`--allow-sql` +
+      `config/sources.eval.agent.v8.yaml`、精排 3 条调用都 `used_rerank=true`、温度钉成 0）：8 行输入 →
+      14 行输出，其中 7 行是通知。`ask`（token `11`）在响应之前发 3 条：`1/3 正在检索知识库` →
+      `2/3 已检索到 3 段证据，正在生成答案` → `3/3 已完成`；`kb_search`（token `"tok-a"`）发
+      `1/2` 与 `2/2 已检索到 2 段证据`；`sql_query`（token `12`）发 `1/2 正在查询业务库` →
+      `2/2 已取回 3 行`。三条的 token 都原样回传、`progress` 递增到 `total`、通知都没有 `id`。
+      `_meta` 写成字符串与 `progressToken` 写成列表这两条都零通知、响应照常（`isError=false`），
+      末尾的 `ping` 仍有响应——进程没退出。这次冒烟没设 `RAG_LEXICAL_INDEX_PATH`，所以
+      `used_lexical=false`（只验通知通道，不验检索质量）；只当冒烟，不当收益读数
+- [x] **逐字退回的证据**：同一条 8 行输入，开关关掉（`RAG_DISABLE_MCP_PROGRESS=1`）与改动前
+      （`origin/main`，同一份评估库与 SQLite 副本）各跑一遍：7 条响应的结构与所有字段逐字相同，
+      只有生成正文差 2 个字、`elapsed_ms` 不同。为了判清那 2 个字的来源，用假引擎钉住送进
+      `generate_answer` 的入参（问题、块文本、模型、历史）与工具返回文本的 sha256——默认、开关关、
+      改动前三种配置全等（`8138fd02…` / `c1c52306…`），说明送进模型的东西一字未改，差别来自模型服务本身。
+      按既有噪声底口径，措辞差别不算证据，也不作回退依据
+- [x] **没跑评估 A/B**：评估链路不经过 MCP 工具（`scripts/measure_thinking_ab.py` 只 import
+      `mcp/evidence` 用来切 v8.14 那个开关），HTTP 与 agentic 两条链路都不读这些新参数，评估读数不可能受影响。
+      要证的只是「不传新参数时逐字不变」，已由单测、`--list-tools` diff 与冒烟 diff 钉住
+- [ ] 不做的事：分段的工具结果（协议里没有这种东西，见上面「分段的工具结果」一条）、用线程发
+      「已等 X 秒」心跳（stdout 会交错）、把 `ask` 改成 `engine.stream()`（会给对外通道多出第二条
+      生成路，答案与 `/chat` 可能逐字不同，已由用户口径排除）——理由见 `docs/adr/0010`
 
 ## 分支与提交约定
 
