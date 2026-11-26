@@ -225,6 +225,7 @@ event: error      data: {"code":"generation_failed","message":"...","request_id"
 | `RAG_DISABLE_AGENT_GATE_SIDE_TRACKING` | 未设置 | 设为 `1/true/yes/on` 时 mixed 门控退回旧行为：拿证据块的标签文字找工具名来认「这一侧查过没有」（真实证据块的标签里没有工具名，等于永远判一侧没查过，每条 mixed 都被反复逼到步数用尽） |
 | `RAG_DISABLE_AGENT_KB_MISS_SQL_GATE` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：意图判 `knowledge` 而文档侧查不到那项事实就直接按证据不足拒答（默认在拒答之前，若问题指名的实体出现在「库内数据」的取值里，先按该实体查一次业务表） |
 | `RAG_DISABLE_AGENT_KBMISS_EVIDENCE_PRIORITY` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：兜底门控捞回的那条 SQL 记录按调用先后排在证据末尾（默认排到最前——文档侧那几段正是模型判定「不够」的材料，排在前面会把真正答题的那一行挤出引用编号与前 3 位的取证窗口） |
+| `RAG_DISABLE_AGENT_SQL_EVIDENCE_WINDOW` | 未设置 | 设为 `1/true/yes/on` 时退回旧行为：证据完全按调用先后排列（默认把掉出前 3 位的数据库侧记录拉回第 3 位——双侧问题里模型常先查几段文档再去查库，那一行排到第 4 位就落在取证与来源两项的窗口之外，答题与引用都对却量不到） |
 | `RAG_AGENT_PLANNER_MODE` | `json` | 设为 `function` 时路由/步进决策改走原生 function calling（同一提示词与预算，见 `ask_tool_json`）；非法值归一为 `json`。两条通道的对比读数见 `eval/reports/fc_comparison_report.md` |
 
 ## v4 自动评估（Ragas）
@@ -468,6 +469,10 @@ RAG_AGENT_SOURCES_CONFIG=config/sources.demo.yaml python3 scripts/serve.py --por
 兜底捞回的那条记录默认排到证据最前面：模型判定「不够」的文档侧材料按调用先后排在前面，会把真正答题的
 那一行挤到第 4 位，答题与引用都对、取证与来源两项却量不到（读数见 `eval/README.md` 的 v8.12）。
 `RAG_DISABLE_AGENT_KBMISS_EVIDENCE_PRIORITY=1` 退回按调用先后排列。
+同一条规则的另一半：双侧（`mixed`）问题里模型通常先查几段文档再去查库，那条记录按调用先后排到第 4 位，
+同样落在窗口之外，所以默认把掉出前 3 位的数据库侧记录拉回第 3 位，文档侧原来的前两位照旧；
+数据库侧本来就在前 3 位时什么都不做，兜底门控强制的那次查询仍按上一条排第 1。
+`RAG_DISABLE_AGENT_SQL_EVIDENCE_WINDOW=1` 退回纯按调用先后排列（读数见 `eval/README.md` 的 v8.13）。
 
 决策走 JSON 模式，路由与步进两次调用共用 `RAG_AGENT_PLANNER_TOKENS`（默认 2000）输出预算。本机默认模型是推理型，会先输出一段不可见的思考内容：预算给小了（实跑时用的 400）模型只吐思考、正文为空，路由就会整段回退到关键词判断。轨迹里会写明回退原因，看到「模型输出中没有 JSON 对象」就先怀疑这个预算。
 同一份提示词也量过原生 function calling（2026-11-22，`scripts/compare_fc_decisions.py`，读数 `eval/reports/fc_comparison_report.md`）：默认模型 qwen3.8:27b-mlx 路由 12/12、步进 3/3 都返回了可用的 `tool_calls`，路由单条均耗时 18.8 秒（快于 JSON 模式的 27.0 秒），两通道意图一致率 0.75；对照组 qwen2.5:7b-instruct 只有 4/12 成功——提示词仍写着「只输出 JSON」，该模型多数情况直接吐 JSON 文本而不调工具，失败数含这个混淆，不能读成模型不支持工具调用。JSON 模式仍是默认：任何模型可用，切默认前需先跑 29 条评估确认无回归；`RAG_AGENT_PLANNER_MODE=function` 仅作实验开关。

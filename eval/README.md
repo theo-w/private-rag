@@ -1754,3 +1754,110 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
   还没提交（只有那两档设置，代码与单测都在 `d264582` 里）。出处要逐字复现得连未提交的测量脚本一起还原。
 - **语料会变长**：评估库就是 README.md + `docs/*.md`，本节与 `docs/ROADMAP.md` 的 v8.12 章节都在测量之后写的，
   旧题的命中可能跟着变。复现这轮数字必须 `git checkout d264582` 再 `prepare_eval_kb.py --recreate`。
+
+## v8.13 数据库侧的记录留在前 3 位证据窗口（`sql_evidence_window`）
+
+v8.12 把「兜底门控捞回的那一行」提到了最前，但它只管门控强制的那一次查询。还有一条路没管：
+双侧（`mixed`）问题里模型自己先查几段文档、再去查库，那一行按调用先后排到第 4 位甚至更后面。
+评估的取证与来源两项只看最前面 3 段材料（`evidence_hit@3` / `source_hit` 的 `@3`），引用编号也按这个
+顺序排，于是「答案正确、引用里也有那一行、两项却记 0」。这一节的改动就是：数据库侧的证据掉出
+前 3 位时拉回第 3 位，文档侧原来的前两位不动，本来就在前 3 位时什么都不做。
+
+### 复现
+
+```bash
+# 先按当时的语料重建评估库（语料是 README.md + docs/*.md，这一轮建出 416 个向量）
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/prepare_eval_kb.py --recreate
+
+# 组 1：模拟「路由判成查文档」（数据侧 8 条）。兜底门控与 v8.12 的置顶规则两轮都钉在「开」，
+# 所以开关只改这一处排列，不改「查不查」，也不与上一条规则抢顺序
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting sql_window_bad_route --values off,on,off \
+  --dataset eval/v8_agentic_expanded.jsonl \
+  --ids xd01,xd02,xd03,xd04,xd05,xd06,xd07,xd08 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_v813_misroute
+
+# 组 2：出厂设置下的双侧题 12 条（新集 xm01–xm07 + v7 的 m01–m05，合并两份评估集）
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting sql_evidence_window --values off,on,off \
+  --dataset eval/v7_agent_qa.jsonl,eval/v8_agentic_expanded.jsonl \
+  --ids xm01,xm02,xm03,xm04,xm05,xm06,xm07,m01,m02,m03,m04,m05 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_v813_mixed
+
+# 组 3：护栏 14 条（knowledge 9 + 应拒答 5），出厂设置
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python3 scripts/measure_thinking_ab.py \
+  --setting sql_evidence_window --values off,on,off \
+  --dataset eval/v8_agentic_expanded.jsonl \
+  --ids xk01,xk02,xk03,xk04,xk05,xk06,xk07,xk08,xk09,xr01,xr02,xr03,xr04,xr05 \
+  --agent-sources config/sources.eval.agent.v8.yaml --prefix /tmp/ab_v813_guard
+```
+
+报告在 `eval/reports/v8_13_sql_window_misroute_ab_*`、`v8_13_sql_window_mixed_ab_*`、
+`v8_13_sql_window_guard_ab_*`。三轮精排都生效（8/8、12/12、14/14），`n_errors` 九轮都是 0。
+
+### 读数 1：数据侧 8 条（模拟路由判错）
+
+| 指标 | `off`（第 1 / 第 3 轮） | `on`（第 2 轮） | 差 |
+| --- | --- | --- | --- |
+| `evidence_hit@3` | 0.875 / 0.875 | 1.000 | +1 条 = +12.5pt |
+| `source_hit` | 0.875 / 0.875 | 1.000 | +1 条 = +12.5pt |
+| `mrr@3` | 0.875 / 0.875 | 0.917 | +0.042 |
+| `context_precision@3` | 0.458 / 0.458 | 0.583 | +0.125 |
+| `answer_rate` | 1.000 / 1.000 | 1.000 | 持平 |
+| `citation_rate` / `citation_validity` | 1.000 / 1.000 | 1.000 / 1.000 | 持平 |
+| 单条均耗时 | 75.2s（冷） / 39.9s | 60.2s | 不可归因，见限制第 3 条 |
+
+### 读数 2：出厂设置下的双侧题 12 条
+
+| 指标 | `off`（第 1 / 第 3 轮） | `on`（第 2 轮） | 差 |
+| --- | --- | --- | --- |
+| `evidence_hit@3` | 0.583 / 0.583 | 0.667 | +1 条 = +8.3pt |
+| `source_hit` | 0.917 / 0.917 | 1.000 | +1 条 = +8.3pt |
+| `mrr@3` | 0.583 / 0.583 | 0.611 | +0.028 |
+| `context_precision@3` | 0.194 / 0.194 | 0.222 | +0.028 |
+| `both_sides_hit` | 0.833 / 0.833 | 0.833 | 持平（这项本来不看窗口） |
+| `answer_rate` | 1.000 / 1.000 | 1.000 | 持平 |
+| `citation_rate` / `citation_validity` | 1.000 / 1.000 | 1.000 / 1.000 | 持平 |
+| 单条均耗时 | 30.8s（冷） / 24.2s | 23.9s | +1.3%，不作收益 |
+
+翻动的样本逐条能对上（`g` = 兜底门控拦截次数，`t` = 工具调用次数，`c` = 引用条数）：
+
+| id | `off` 第 3 轮 | `on` 第 2 轮 | 变化 |
+| --- | --- | --- | --- |
+| `xd05` | `knowledge` g0 t3 c7 `final` 未命中 | 同形状 g0 t3 c7 `final` 命中 | 数据库那一行第 7 位 → 第 3 位 |
+| `xm07` | `mixed` g0 t2 c4 `final` 未命中 | 同形状 g0 t2 c4 `final` 命中 | 数据库那一行第 4 位 → 第 3 位 |
+
+两条的意图、停止原因、工具次数、引用条数完全一样，门控都是 0 次（不是被强制的那一步，
+上一条规则管不到），只有引用编号的顺序变了 → 这 2 条是排列造成的，不是模型行为变了。
+两个 `off` 轮在这两组里各自的九项指标都逐字相同，也就是这两轮的噪声底是 0 条，+1 条远在噪声之上。
+
+### 护栏读数：14 条（knowledge 9 + 应拒答 5），出厂设置
+
+九项指标三轮逐字相同：`answer_rate` 1.000、`source_hit` 1.000、`refusal_accuracy` 1.000、
+`citation_rate` 1.000、`citation_validity` 1.000、`evidence_hit@3` 0.556、`mrr@3` 0.426、
+`context_precision@3` 0.185、`n_errors` 0。逐条行为（拒答与否、意图、停止原因、工具次数）在第 1 轮
+与第 2 轮之间零翻动，第 1 轮与第 3 轮之间也零翻动——这一组里没有一条走数据库那一侧，规则是空操作。
+耗时暖轮 22.9s vs 22.7s（-0.8%），不作依据。
+
+### 限制（引用这轮数字时一并带上）
+
+- **真正被管到的只有 2 条**：三组共 34 条样本，其中数据库那一行本来就在前 3 位的有 32 条（规则空操作），
+  只有上面那 2 条掉出窗口。所以这轮读数支撑的是「机制成立、方向为正」，不支撑百分比。
+- **引用编号会变**：这一处改的就是顺序，答案里的 `[n]` 标号与模型看到的编号都跟着变，答案措辞与历史轮
+  不能逐字比对。本轮三组的作答/意图/停止原因/工具次数都没有翻动，护栏组九项指标三轮逐字相同，
+  说明它没改变模型行为，只改变材料排在第几。
+- **组 1 的耗时不可归因**：同设置的第 1 轮与第 3 轮自己差 47%（75.2s vs 39.9s，第一轮含模型冷启动作废以后
+  只剩一个暖「不改」轮），暖「改」轮 60.2s 没有可比的暖「不改」轮。组 2 与组 3 的暖轮差 +1.3% 与 -0.8%，
+  而这一处不多跑任何查询、只改列表顺序，耗时判「没变化」。
+- **组 1 的两个 `off` 轮指标相同但逐条行为有翻动**：`xd01` 的意图在 `database` 与 `mixed` 之间翻、
+  `xd03` 的工具次数 3 与 2 之间翻——路由在温度 0 下仍会翻动，只是这两条的指标都没动。
+- **边界集 11 条本轮没跑**（`xe01`–`xe11`），「不影响新加的边界题」这轮没有读数支撑。
+- **v7 的 `m04` 是同一情形，本轮没触发**：历史读数里它的数据库那一行一会儿排第 1、一会儿排第 4
+  （`v8_5_tree_ab_*`、`v8_latency_*`、`v8_noise_floor_repeat_*` 都看得到），本轮三组里它都排第 1。
+  也就是说这条缺口真实存在但不稳定，规则的价值是把「排第几」从模型的查库先后里解耦出来，
+  而不是让某一条样本的分数变好看。
+- **报告记 `git_commit=745540b`、`git_dirty=True`**：跑读数时脏的是 README 的开关说明措辞与落盘的报告本身，
+  被测代码与单测就是 `745540b` 的内容。
+- **语料会变长**：评估库就是 README.md + `docs/*.md`，本节与 `docs/ROADMAP.md` 的 v8.13 章节都写在测量之后，
+  旧题的命中可能跟着变。复现这轮数字必须 `git checkout 745540b` 再 `prepare_eval_kb.py --recreate`
+  （两节正文都不含任何样本的原问题与证据原句，新增语料不会改变这些样本的检索行为）。
