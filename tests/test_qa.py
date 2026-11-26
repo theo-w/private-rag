@@ -134,6 +134,31 @@ def test_answer_uses_retrieval_options_rerank_and_history(monkeypatch):
     assert result.used_rerank is True
 
 
+def test_answer_reports_retrieved_count_once_before_generation(monkeypatch):
+    """`on_retrieved` 在检索完成、开始生成之前调一次，参数是送进生成的块数；生成路径不受影响。"""
+    events: list[str] = []
+
+    class FakeRetriever:
+        def __init__(self, client, embedding, lexical, **kwargs):
+            pass
+
+        def retrieve(self, question):
+            return [_chunk(1), _chunk(2)]
+
+    def fake_generate(question, chunks, model, history):
+        events.append("generate")
+        return "回答", []
+
+    monkeypatch.setattr("private_rag.qa.HybridRetriever", FakeRetriever)
+    monkeypatch.setattr("private_rag.qa.generate_answer", fake_generate)
+
+    result = _engine().answer("问题", on_retrieved=lambda count: events.append(f"retrieved:{count}"))
+
+    assert events == ["retrieved:2", "generate"]
+    assert result.answer == "回答"
+    assert result.retrieved == 2
+
+
 def test_answer_degrades_to_dense_and_fusion_when_components_missing(monkeypatch):
     captured = {}
 

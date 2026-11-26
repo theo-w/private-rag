@@ -22,6 +22,7 @@ from private_rag.mcp.server import (
     PROTOCOL_VERSION,
     MCPServer,
 )
+import private_rag.mcp.server as server_module
 from private_rag.mcp.tools import McpTool, ToolOutcome, build_mcp_tools
 from private_rag.qa import QaResult, Readiness, RetrievalTrace
 from private_rag.retrieval.hybrid import RetrievedChunk
@@ -78,9 +79,11 @@ class FakeEngine:
             context_chars=1234,
         )
 
-    def answer(self, question: str, *, options=None, history=None) -> QaResult:
+    def answer(self, question: str, *, options=None, history=None, on_retrieved=None) -> QaResult:
         from private_rag.generation import REFUSAL, build_citations
 
+        if on_retrieved is not None:
+            on_retrieved(len(self.chunks))
         citations = build_citations(self.chunks)
         return QaResult(
             answer="橙子富含维生素 C。[1]" if citations else REFUSAL,
@@ -334,6 +337,203 @@ def test_uncaught_tool_exception_does_not_break_the_server():
     assert "RuntimeError" in response["result"]["content"][0]["text"]
 
 
+# 进度通知（v8.15）
+
+
+class NotifySpy:
+    """收集服务端想发的通知；顺序就是服务端写的顺序。"""
+
+    def __init__(self):
+        self.messages: list[dict] = []
+
+    def __call__(self, message: dict) -> None:
+        self.messages.append(message)
+
+    @property
+    def steps(self) -> list[tuple[int, str]]:
+        return [(m["params"]["progress"], m["params"]["message"]) for m in self.messages]
+
+
+def call_with_notify(server: MCPServer, params: dict, spy: NotifySpy, msg_id: int = 1) -> dict:
+    return server.handle({"jsonrpc": "2.0", "id": msg_id, "method": "tools/call", "params": params}, notify=spy)
+
+
+def with_token(params: dict, token) -> dict:
+    return {**params, "_meta": {"progressToken": token}}
+
+
+def test_progress_token_gets_notifications_that_match_the_tool_steps():
+    server = make_server([make_chunk(1), make_chunk(2)])
+    spy = NotifySpy()
+    response = call_with_notify(server, with_token({"name": "kb_search", "arguments": {"query": "橙子"}}, 7), spy)
+
+    assert response["result"]["isError"] is False
+    assert [m["method"] for m in spy.messages] == ["notifications/progress", "notifications/progress"]
+    assert [m["params"]["progressToken"] for m in spy.messages] == [7, 7]
+    assert [m["params"]["total"] for m in spy.messages] == [2, 2]
+    assert spy.steps == [(1, "正在检索知识库"), (2, "已检索到 2 段证据")]
+    # 通知是通知：没有 id，客户端不会为它等一个响应
+    assert all("id" not in m for m in spy.messages)
+    assert [m["params"]["progress"] for m in spy.messages] == sorted(set(m["params"]["progress"] for m in spy.messages))
+
+
+def test_ask_reports_three_steps_and_ends_with_completion():
+    server = make_server([make_chunk(1)])
+    spy = NotifySpy()
+    response = call_with_notify(server, with_token({"name": "ask", "arguments": {"question": "橙子"}}, "t-1"), spy)
+
+    assert response["result"]["isError"] is False
+    assert [m["params"]["progressToken"] for m in spy.messages] == ["t-1"] * 3
+    assert [m["params"]["total"] for m in spy.messages] == [3, 3, 3]
+    assert spy.steps[0] == (1, "正在检索知识库")
+    assert spy.steps[1] == (2, "已检索到 1 段证据，正在生成答案")
+    assert spy.steps[2] == (3, "已完成")
+
+
+def test_sql_query_reports_query_then_row_count(tmp_path):
+    spy = NotifySpy()
+    response = call_with_notify(
+        make_sql_server(tmp_path),
+        with_token({"name": "sql_query", "arguments": {"sql": "SELECT name FROM products"}}, 3),
+        spy,
+    )
+
+    assert response["result"]["isError"] is False
+    assert spy.steps == [(1, "正在查询业务库"), (2, "已取回 1 行")]
+
+
+def test_string_token_is_echoed_back_verbatim():
+    """spec 里 progressToken 是不透明值：服务端只判类型，不判内容（空串照发）。"""
+    spy = NotifySpy()
+    call_with_notify(
+        make_server([make_chunk(1)]), with_token({"name": "kb_search", "arguments": {"query": "橙子"}}, ""), spy
+    )
+
+    assert [m["params"]["progressToken"] for m in spy.messages] == ["", ""]
+
+
+def test_no_progress_token_sends_no_notifications_and_response_is_unchanged():
+    server = make_server([make_chunk(1)])
+    params = {"name": "ask", "arguments": {"question": "橙子"}}
+    spy = NotifySpy()
+    notified = call_with_notify(server, params, spy)
+
+    assert spy.messages == []
+    assert notified == call(server, "tools/call", params)
+
+
+def test_meta_without_progress_token_sends_no_notifications():
+    server = make_server([make_chunk(1)])
+    spy = NotifySpy()
+    params = {"name": "kb_search", "arguments": {"query": "橙子"}, "_meta": {"other": 1}}
+
+    assert call_with_notify(server, params, spy)["result"]["isError"] is False
+    assert spy.messages == []
+
+
+@pytest.mark.parametrize(
+    "meta",
+    ["不是对象", 1, 1.5, ["list"], True, None],
+)
+def test_meta_of_unexpected_shape_is_treated_as_no_token(meta):
+    server = make_server([make_chunk(1)])
+    spy = NotifySpy()
+    params = {"name": "kb_search", "arguments": {"query": "橙子"}, "_meta": meta}
+
+    response = call_with_notify(server, params, spy)
+    assert response["result"]["isError"] is False
+    assert spy.messages == []
+
+
+@pytest.mark.parametrize("token", [{"a": 1}, ["x"], True, False, 1.5, None])
+def test_progress_token_of_unexpected_shape_is_treated_as_no_token(token):
+    server = make_server([make_chunk(1)])
+    spy = NotifySpy()
+    params = {"name": "kb_search", "arguments": {"query": "橙子"}, "_meta": {"progressToken": token}}
+
+    response = call_with_notify(server, params, spy)
+    assert response["result"]["isError"] is False
+    assert spy.messages == []
+
+
+def test_bad_meta_does_not_kill_the_stdio_loop():
+    """客户端乱填 _meta 不能把服务打死：serve_stdio 只包 json.loads，
+    handle 里冒出去的异常会让整个进程退出。"""
+    server = make_server([make_chunk(1)])
+    lines = [
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": {"name": "kb_search", "arguments": {"query": "橙子"}, "_meta": "坏形状"}}),
+        json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {"name": "kb_search", "arguments": {"query": "橙子"},
+                               "_meta": {"progressToken": ["坏形状"]}}}),
+        json.dumps({"jsonrpc": "2.0", "id": 3, "method": "ping"}),
+    ]
+    responses = serve_lines(server, "\n".join(lines))
+
+    assert [r["id"] for r in responses] == [1, 2, 3]
+    assert all("id" in r for r in responses)  # 没有通知行混进来
+
+
+def test_progress_switch_off_sends_no_notifications(monkeypatch):
+    monkeypatch.setattr(server_module, "MCP_PROGRESS", False)
+    server = make_server([make_chunk(1)])
+    params = with_token({"name": "ask", "arguments": {"question": "橙子"}}, 9)
+    spy = NotifySpy()
+
+    assert call_with_notify(server, params, spy) == call(server, "tools/call", params)
+    assert spy.messages == []
+
+
+def test_handle_without_notify_matches_notify_none():
+    server = make_server([make_chunk(1)])
+    message = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+               "params": {"name": "kb_search", "arguments": {"query": "橙子"}}}
+
+    assert server.handle(message) == server.handle(message, notify=None)
+
+
+def test_failure_after_one_notification_still_closes_the_progress():
+    class Halfway(McpTool):
+        name = "halfway"
+        progress_steps = 2
+
+        def run(self, args, *, progress=None):
+            if progress:
+                progress("正在做一件事", 1)
+            return ToolOutcome(False, error="做不下去")
+
+    spy = NotifySpy()
+    response = call_with_notify(MCPServer([Halfway()]), with_token({"name": "halfway", "arguments": {}}, 5), spy)
+
+    assert response["result"]["isError"] is True
+    assert "做不下去" in response["result"]["content"][0]["text"]
+    assert spy.steps == [(1, "正在做一件事"), (2, "已结束")]
+
+
+def test_tool_with_the_old_signature_reports_type_error_and_sends_nothing():
+    """带 token 但工具没按新契约写：暴露成工具层错误，不额外兜住，也不发通知
+    （spec 要求通知只在进行中的操作上发）。"""
+
+    class OldStyle(McpTool):
+        name = "old_style"
+
+        def run(self, args):
+            raise RuntimeError("不该走到这里")
+
+    spy = NotifySpy()
+    response = call_with_notify(MCPServer([OldStyle()]), with_token({"name": "old_style", "arguments": {}}, 1), spy)
+
+    assert response["result"]["isError"] is True
+    assert "TypeError" in response["result"]["content"][0]["text"]
+    assert spy.messages == []
+
+
+def test_progress_steps_do_not_leak_into_tool_definitions():
+    tools = call(make_server(), "tools/list")["result"]["tools"]
+
+    assert all("progress_steps" not in tool and "progress" not in tool for tool in tools)
+
+
 # stdio 通道
 
 
@@ -362,6 +562,31 @@ def test_serve_stdio_answers_each_line_in_order():
     assert responses[0]["result"]["protocolVersion"] == "2024-10-22"
     assert [t["name"] for t in responses[1]["result"]["tools"]] == ["kb_search", "ask"]
     assert responses[2]["result"]["structuredContent"]["no_evidence"] is False
+
+
+def test_serve_stdio_writes_progress_lines_before_the_response():
+    """端到端：通知与响应共用同一条 stdout 写路径，顺序天然是「先通知后响应」。"""
+    server = make_server([make_chunk(1)])
+    out = io.StringIO()
+    request = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "ask",
+                "arguments": {"question": "橙子"},
+                "_meta": {"progressToken": "tok-4"},
+            },
+        }
+    )
+    assert server.serve_stdio(io.StringIO(request), out) == 0
+
+    lines = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+    assert [m.get("method") for m in lines[:3]] == ["notifications/progress"] * 3
+    assert all(m["params"]["progressToken"] == "tok-4" for m in lines[:3])
+    assert [m["params"]["progress"] for m in lines[:3]] == [1, 2, 3]
+    assert lines[3]["id"] == 4 and lines[3]["result"]["isError"] is False
 
 
 def test_serve_stdio_reports_bad_lines_without_stopping():

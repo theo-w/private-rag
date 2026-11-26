@@ -6,7 +6,7 @@ import logging
 import threading
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Iterator, Optional, Sequence
+from typing import Callable, Iterator, Optional, Sequence
 
 from langchain_core.embeddings import Embeddings
 from langchain_ollama import OllamaEmbeddings
@@ -287,9 +287,14 @@ class RagEngine:
         *,
         options: Optional[RetrievalOptions] = None,
         history: Optional[Sequence[tuple[str, str]]] = None,
+        on_retrieved: Optional[Callable[[int], None]] = None,
     ) -> QaResult:
+        """检索 + 生成。`on_retrieved` 在检索完成、开始生成之前调一次并给出块数，
+        供对外通道发进度通知用；生成路径与不传时完全一致。"""
         options = options or RetrievalOptions()
         trace = self.retrieve_with_trace(question, options)
+        if on_retrieved is not None:
+            on_retrieved(len(trace.chunks))
         answer, citations = generate_answer(
             question,
             trace.chunks,

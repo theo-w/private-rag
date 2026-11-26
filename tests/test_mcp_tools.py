@@ -502,3 +502,123 @@ def test_sql_query_reports_inner_failure_result(tmp_path):
     outcome = SqlQueryTool(FailingTool()).run({"sql": "SELECT name FROM products"})
     assert outcome.ok is False
     assert "no such table products" in outcome.error
+
+
+# 进度回调（v8.15）
+
+
+class StepRecorder:
+    """收集工具回调的（步数, 文案），顺序就是回调顺序。"""
+
+    def __init__(self):
+        self.steps: list[tuple[int, str]] = []
+
+    def __call__(self, message: str, step: int) -> None:
+        self.steps.append((step, message))
+
+
+class ProgressEngine(FakeEngine):
+    """记录 AskTool 传给 `answer` 的关键字参数，用来钉住「只有要发进度时才挂 on_retrieved」。"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.call_kwargs: list[dict] = []
+
+    def answer(self, question, **call_kwargs) -> QaResult:
+        self.call_kwargs.append(dict(call_kwargs))
+        hook = call_kwargs.pop("on_retrieved", None)
+        if hook is not None:
+            hook(len(self.chunks))
+        return super().answer(question, **call_kwargs)
+
+
+def test_kb_search_reports_retrieval_phase_and_leaves_outcome_alone():
+    engine = FakeEngine([make_chunk(1), make_chunk(2)])
+    recorder = StepRecorder()
+
+    outcome = KbSearchTool(engine).run({"query": "橙子"}, progress=recorder)
+    plain = KbSearchTool(engine).run({"query": "橙子"})
+
+    assert recorder.steps == [(1, "正在检索知识库"), (2, "已检索到 2 段证据")]
+    assert outcome.text == plain.text
+    assert outcome.payload == plain.payload
+
+
+def test_ask_reports_two_phases_and_only_hooks_when_progress_given():
+    engine = ProgressEngine([make_chunk(1)])
+    recorder = StepRecorder()
+
+    AskTool(engine).run({"question": "橙子有什么营养"}, progress=recorder)
+
+    assert recorder.steps == [(1, "正在检索知识库"), (2, "已检索到 1 段证据，正在生成答案")]
+    assert "on_retrieved" in engine.call_kwargs[0]
+
+    AskTool(engine).run({"question": "橙子有什么营养"})
+    assert "on_retrieved" not in engine.call_kwargs[1]
+
+
+def test_ask_reports_only_the_first_phase_when_generation_fails():
+    recorder = StepRecorder()
+    outcome = AskTool(FakeEngine(error=ConnectionError("Ollama 未启动"))).run({"question": "x"}, progress=recorder)
+
+    assert outcome.ok is False
+    assert recorder.steps == [(1, "正在检索知识库")]
+
+
+def test_sql_query_reports_query_phase_and_row_count(tmp_path):
+    recorder = StepRecorder()
+
+    outcome = SqlQueryTool(make_runtime_sql_tool(tmp_path)).run(
+        {"sql": "SELECT name FROM products"}, progress=recorder
+    )
+
+    assert outcome.ok is True
+    assert recorder.steps == [(1, "正在查询业务库"), (2, "已取回 3 行")]
+
+
+def test_sql_query_reports_nothing_when_the_inner_query_fails(tmp_path):
+    class FailingTool:
+        description = "只读查询业务数据库表（products）"
+
+        def run(self, args):
+            return ToolResult(False, error="SQL 执行失败：no such table products")
+
+    recorder = StepRecorder()
+    outcome = SqlQueryTool(FailingTool()).run({"sql": "SELECT name FROM products"}, progress=recorder)
+
+    assert outcome.ok is False
+    assert recorder.steps == [(1, "正在查询业务库")]
+
+
+def test_argument_validation_failure_reports_no_progress(tmp_path):
+    """参数没过校验就别发通知：连检索都没开始，通知里那句「正在检索」会是假的。"""
+    engine = FakeEngine([make_chunk(1)])
+    recorder = StepRecorder()
+
+    assert KbSearchTool(engine).run({"query": ""}, progress=recorder).ok is False
+    assert AskTool(engine).run({"question": ""}, progress=recorder).ok is False
+    assert SqlQueryTool(make_runtime_sql_tool(tmp_path)).run({"sql": ""}, progress=recorder).ok is False
+    assert recorder.steps == []
+
+
+def test_kb_search_and_sql_declared_steps_match_what_they_report(tmp_path):
+    """步数声明与实际报的最后一步必须对上：服务端拿它当通知里的 total。"""
+    search = KbSearchTool(FakeEngine([make_chunk(1), make_chunk(2)]))
+    recorder = StepRecorder()
+    search.run({"query": "橙子"}, progress=recorder)
+    assert search.progress_steps == 2 == recorder.steps[-1][0]
+
+    sql = SqlQueryTool(make_runtime_sql_tool(tmp_path))
+    sql_recorder = StepRecorder()
+    sql.run({"sql": "SELECT name FROM products"}, progress=sql_recorder)
+    assert sql.progress_steps == 2 == sql_recorder.steps[-1][0]
+
+
+def test_ask_declared_steps_leave_room_for_the_server_close_out():
+    """ask 的第 3 步「已完成」由服务端在发响应之前补，工具自己只报到 2。"""
+    tool = AskTool(ProgressEngine([make_chunk(1)]))
+    recorder = StepRecorder()
+    tool.run({"question": "橙子"}, progress=recorder)
+
+    assert tool.progress_steps == 3
+    assert recorder.steps[-1][0] == 2

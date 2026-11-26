@@ -188,6 +188,11 @@ AGENT_SQL_EVIDENCE_WINDOW = not _env_flag("RAG_DISABLE_AGENT_SQL_EVIDENCE_WINDOW
 # （MCP 的工具返回与工具定义），agentic 循环、HTTP 引用载荷与评估报告都不读它。
 # 置 1 逐字退回今天的形状——包括 tools/list 里那份工具定义。
 CITATION_LOCATOR = not _env_flag("RAG_DISABLE_CITATION_LOCATOR")
+# 长调用带进度通知：客户端在请求的 params._meta.progressToken 里给了 token 时，
+# 在最终响应之前先发几条 notifications/progress（开始 / 检索完成 / 完成），
+# 让客户端显示「现在在做什么」而不是干等一个未知时长。协议里没有分段的工具结果，
+# 答案仍是一次性返回。置 1 逐字退回今天的一问一答（一条通知都不发）。
+MCP_PROGRESS = not _env_flag("RAG_DISABLE_MCP_PROGRESS")
 # 决策 JSON 的输出预算。推理型模型会先输出一段不可见的思考内容，
 # 预算给小了正文就是空的，路由会整段回退到关键词判断。
 AGENT_PLANNER_TOKENS = _env_int("RAG_AGENT_PLANNER_TOKENS", 2000)
